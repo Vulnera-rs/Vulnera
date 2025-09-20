@@ -49,7 +49,7 @@ pub enum ParseError {
     Toml(#[from] toml::de::Error),
 
     #[error("Invalid YAML: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yml::Error),
 
     #[error("Invalid version format: {version}")]
     Version { version: String },

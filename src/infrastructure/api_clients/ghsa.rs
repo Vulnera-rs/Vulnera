@@ -39,20 +39,17 @@ struct GraphQLResponse<T> {
     errors: Option<Vec<GraphQLError>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, PartialEq)]
 struct GraphQLError {
     message: String,
     #[serde(default)]
-    #[allow(dead_code)]
-    locations: Vec<GraphQLLocation>, // GraphQL error location info
+    locations: Vec<GraphQLLocation>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 struct GraphQLLocation {
-    #[allow(dead_code)]
-    line: u32, // Line number in GraphQL query
-    #[allow(dead_code)]
-    column: u32, // Column number in GraphQL query
+    line: u32,
+    column: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,7 +78,7 @@ struct SecurityAdvisory {
     published_at: String,
     references: Vec<Reference>,
     #[allow(dead_code)]
-    vulnerabilities: SecurityAdvisoryVulnerabilities, // Future: detailed vulnerability info
+    vulnerabilities: SecurityAdvisoryVulnerabilities, // Future: Enhanced vulnerability analysis
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,33 +88,27 @@ struct Reference {
 
 #[derive(Debug, Deserialize)]
 struct SecurityAdvisoryVulnerabilities {
-    #[allow(dead_code)]
     nodes: Vec<Vulnerability>, // Future: vulnerability nodes processing
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct Vulnerability {
-    #[allow(dead_code)]
     package: VulnerabilityPackage, // Future: package-specific vulnerability details
     #[serde(rename = "vulnerableVersionRange")]
-    #[allow(dead_code)]
     vulnerable_version_range: Option<String>, // Future: version range analysis
     #[serde(rename = "firstPatchedVersion")]
-    #[allow(dead_code)]
     first_patched_version: Option<FirstPatchedVersion>, // Future: patch version tracking
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct VulnerabilityPackage {
-    #[allow(dead_code)]
     name: String, // Future: package name processing
-    #[allow(dead_code)]
+
     ecosystem: String, // Future: ecosystem-specific logic
 }
 
 #[derive(Debug, Deserialize, Clone)]
 struct FirstPatchedVersion {
-    #[allow(dead_code)]
     identifier: String, // Future: patch version identifier processing
 }
 
@@ -126,6 +117,69 @@ pub struct GhsaClient {
     client: Client,
     token: String,
     graphql_url: String,
+}
+
+/// Comprehensive error analysis structure for enhanced reporting
+#[derive(Debug, Clone)]
+pub struct GraphQLErrorAnalysis {
+    pub error_count: usize,
+    pub error_type: String,
+    pub locations: Vec<(u32, u32)>,
+    pub has_location_info: bool,
+    pub primary_message: Option<String>,
+    pub query_context: Option<String>,
+    pub detailed_errors: Vec<DetailedGraphQLError>,
+}
+
+/// Detailed error information for individual GraphQL errors
+#[derive(Debug, Clone)]
+pub struct DetailedGraphQLError {
+    pub message: String,
+    pub locations: Vec<(u32, u32)>,
+}
+
+impl GraphQLError {
+    /// Format error with location context for enhanced reporting
+    fn format_with_context(&self, query_context: Option<&str>) -> String {
+        let mut error_msg = format!("GraphQL Error: {}", self.message);
+
+        if !self.locations.is_empty() {
+            let locations: Vec<String> = self
+                .locations
+                .iter()
+                .map(|loc| loc.format_location())
+                .collect();
+            error_msg.push_str(&format!(" (at {})", locations.join(", ")));
+        }
+
+        if let Some(context) = query_context {
+            error_msg.push_str(&format!(" | Query context: {}", context));
+        }
+
+        error_msg
+    }
+
+    /// Get the primary location (first location if multiple exist)
+    fn primary_location(&self) -> Option<&GraphQLLocation> {
+        self.locations.first()
+    }
+
+    /// Check if this error has location information
+    fn has_location_info(&self) -> bool {
+        !self.locations.is_empty()
+    }
+}
+
+impl GraphQLLocation {
+    /// Format location as "line:column"
+    fn format_location(&self) -> String {
+        format!("line {}:column {}", self.line, self.column)
+    }
+
+    /// Get a tuple of (line, column) for programmatic use
+    fn as_tuple(&self) -> (u32, u32) {
+        (self.line, self.column)
+    }
 }
 
 impl GhsaClient {
@@ -220,10 +274,68 @@ impl GhsaClient {
         let graphql_response: GraphQLResponse<T> = response.json().await?;
 
         if let Some(errors) = graphql_response.errors {
-            let error_messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
+            // Enhanced error reporting with comprehensive analysis
+            let analysis = Self::analyze_graphql_errors(&errors, query);
+            let error_summary = Self::create_error_summary(&errors);
+            let error_count = errors.len();
+
+            // Log comprehensive error analysis
+            tracing::error!(
+                error_count = analysis.error_count,
+                error_type = %analysis.error_type,
+                error_summary = %error_summary,
+                has_locations = analysis.has_location_info,
+                location_count = analysis.locations.len(),
+                query_context = ?analysis.query_context,
+                primary_message = ?analysis.primary_message,
+                "GraphQL request failed with enhanced error analysis"
+            );
+
+            // Log individual errors with full context
+            for (index, error) in errors.iter().enumerate() {
+                if error.has_location_info() {
+                    let primary_loc = error.primary_location().unwrap();
+                    tracing::warn!(
+                        error_index = index,
+                        message = %error.message,
+                        line = primary_loc.line,
+                        column = primary_loc.column,
+                        location_count = error.locations.len(),
+                        query_context = ?analysis.query_context,
+                        "GraphQL error with location information"
+                    );
+                } else {
+                    tracing::warn!(
+                        error_index = index,
+                        message = %error.message,
+                        query_context = ?analysis.query_context,
+                        "GraphQL error without location information"
+                    );
+                }
+            }
+
+            // Create enhanced error messages for user-facing errors
+            let detailed_messages: Vec<String> = errors
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let base_msg = e.format_with_context(analysis.query_context.as_deref());
+                    if error_count > 1 {
+                        format!("[{}] {}", i + 1, base_msg)
+                    } else {
+                        base_msg
+                    }
+                })
+                .collect();
+
             return Err(VulnerabilityError::Api(ApiError::Http {
                 status: 400,
-                message: format!("GraphQL errors: {}", error_messages.join(", ")),
+                message: format!(
+                    "GraphQL request failed [{}]: {} - Details: {}",
+                    analysis.error_type,
+                    error_summary,
+                    detailed_messages.join(" | ")
+                ),
             }));
         }
 
@@ -233,6 +345,125 @@ impl GhsaClient {
                 message: "No data in GraphQL response".to_string(),
             })
         })
+    }
+
+    /// Extract a brief context from the GraphQL query for error reporting
+    fn extract_query_context(query: &str) -> Option<String> {
+        // Extract the first line of the query (usually contains the operation name)
+        let first_line = query.lines().next()?.trim();
+
+        // If it's empty or just whitespace, try the next non-empty line
+        if first_line.is_empty() {
+            for line in query.lines() {
+                let trimmed = line.trim();
+                if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                    return Some(format!("Operation: {}", trimmed));
+                }
+            }
+        } else {
+            return Some(format!("Operation: {}", first_line));
+        }
+
+        None
+    }
+
+    /// Create a detailed error summary for multiple GraphQL errors
+    fn create_error_summary(errors: &[GraphQLError]) -> String {
+        if errors.is_empty() {
+            return "No errors".to_string();
+        }
+
+        if errors.len() == 1 {
+            let error = &errors[0];
+            return format!(
+                "GraphQL error: {} {}",
+                error.message,
+                if error.has_location_info() {
+                    format!("at {}", error.primary_location().unwrap().format_location())
+                } else {
+                    "(no location info)".to_string()
+                }
+            );
+        }
+
+        // Multiple errors - provide summary
+        let with_locations = errors.iter().filter(|e| e.has_location_info()).count();
+        format!(
+            "{} GraphQL errors (locations available for {}/{})",
+            errors.len(),
+            with_locations,
+            errors.len()
+        )
+    }
+
+    /// Get the most relevant error from a collection (prioritizes errors with location info)
+    fn get_primary_error(errors: &[GraphQLError]) -> Option<&GraphQLError> {
+        if errors.is_empty() {
+            return None;
+        }
+
+        // Prefer errors with location information
+        errors
+            .iter()
+            .find(|e| e.has_location_info())
+            .or_else(|| errors.first())
+    }
+
+    /// Extract all unique error locations from a set of errors
+    fn extract_error_locations(errors: &[GraphQLError]) -> Vec<(u32, u32)> {
+        let mut locations = Vec::new();
+        for error in errors {
+            for location in &error.locations {
+                let tuple = location.as_tuple();
+                if !locations.contains(&tuple) {
+                    locations.push(tuple);
+                }
+            }
+        }
+        locations.sort();
+        locations
+    }
+
+    /// Check if errors indicate a query syntax issue vs data/permission issue
+    fn classify_error_type(errors: &[GraphQLError]) -> &'static str {
+        for error in errors {
+            let msg = error.message.to_lowercase();
+            if msg.contains("syntax") || msg.contains("parse") || error.has_location_info() {
+                return "syntax";
+            } else if msg.contains("permission")
+                || msg.contains("unauthorized")
+                || msg.contains("forbidden")
+            {
+                return "authorization";
+            } else if msg.contains("not found") || msg.contains("does not exist") {
+                return "not_found";
+            }
+        }
+        "unknown"
+    }
+
+    /// Provide comprehensive error analysis for debugging and monitoring
+    fn analyze_graphql_errors(errors: &[GraphQLError], query: &str) -> GraphQLErrorAnalysis {
+        let error_type = Self::classify_error_type(errors);
+        let locations = Self::extract_error_locations(errors);
+        let primary_error = Self::get_primary_error(errors);
+        let query_context = Self::extract_query_context(query);
+
+        GraphQLErrorAnalysis {
+            error_count: errors.len(),
+            error_type: error_type.to_string(),
+            locations,
+            has_location_info: errors.iter().any(|e| e.has_location_info()),
+            primary_message: primary_error.map(|e| e.message.clone()),
+            query_context,
+            detailed_errors: errors
+                .iter()
+                .map(|e| DetailedGraphQLError {
+                    message: e.message.clone(),
+                    locations: e.locations.iter().map(|l| (l.line, l.column)).collect(),
+                })
+                .collect(),
+        }
     }
 
     /// Query security advisories for a specific package
@@ -283,15 +514,22 @@ impl GhsaClient {
         // Fetch as raw JSON and adapt to our existing advisory-shaped model; we will group later.
         let raw: serde_json::Value = self.execute_query(query, variables).await?;
 
-        let page_info: PageInfo = serde_json::from_value(
-            raw["securityAdvisories"]["pageInfo"].clone(),
-        )
-        .map_err(|_| {
-            VulnerabilityError::Api(ApiError::Http {
-                status: 500,
-                message: "Invalid GHSA pageInfo shape".to_string(),
-            })
-        })?;
+        let page_info: PageInfo =
+            serde_json::from_value(raw["securityAdvisories"]["pageInfo"].clone()).map_err(|e| {
+                tracing::error!(
+                    error = %e,
+                    package_name = %package_name,
+                    ecosystem = %ecosystem,
+                    "Failed to parse GHSA pageInfo structure"
+                );
+                VulnerabilityError::Api(ApiError::Http {
+                    status: 500,
+                    message: format!(
+                        "Invalid GHSA pageInfo shape for {}/{}: {}",
+                        ecosystem, package_name, e
+                    ),
+                })
+            })?;
 
         let mut nodes: Vec<SecurityAdvisory> = Vec::new();
         if let Some(items) = raw["securityAdvisories"]["nodes"].as_array() {
@@ -986,8 +1224,9 @@ mod tests {
 
         match result.unwrap_err() {
             VulnerabilityError::Api(ApiError::Http { message, .. }) => {
-                assert!(message.contains("GraphQL errors"));
+                assert!(message.contains("GraphQL request failed"));
                 assert!(message.contains("Field 'invalidField' doesn't exist"));
+                assert!(message.contains("line 2:column 3"));
             }
             _ => panic!("Expected GraphQL error"),
         }
@@ -1048,5 +1287,196 @@ mod tests {
         assert_eq!(raw_vuln.severity, Some("HIGH".to_string()));
         assert_eq!(raw_vuln.references.len(), 1);
         assert!(raw_vuln.published_at.is_some());
+    }
+
+    // Enhanced Error Reporting Tests
+    #[test]
+    fn test_graphql_location_formatting() {
+        let location = GraphQLLocation {
+            line: 10,
+            column: 25,
+        };
+        assert_eq!(location.format_location(), "line 10:column 25");
+        assert_eq!(location.as_tuple(), (10, 25));
+    }
+
+    #[test]
+    fn test_graphql_error_without_location() {
+        let error = GraphQLError {
+            message: "Field 'invalid' not found".to_string(),
+            locations: vec![],
+        };
+
+        assert!(!error.has_location_info());
+        assert_eq!(error.primary_location(), None);
+
+        let formatted = error.format_with_context(Some("query getPackage"));
+        assert!(formatted.contains("Field 'invalid' not found"));
+        assert!(formatted.contains("Query context: query getPackage"));
+    }
+
+    #[test]
+    fn test_graphql_error_with_location() {
+        let error = GraphQLError {
+            message: "Syntax error".to_string(),
+            locations: vec![
+                GraphQLLocation {
+                    line: 5,
+                    column: 12,
+                },
+                GraphQLLocation { line: 8, column: 3 },
+            ],
+        };
+
+        assert!(error.has_location_info());
+        assert_eq!(error.primary_location().unwrap().line, 5);
+
+        let formatted = error.format_with_context(None);
+        assert!(formatted.contains("Syntax error"));
+        assert!(formatted.contains("line 5:column 12"));
+        assert!(formatted.contains("line 8:column 3"));
+    }
+
+    #[test]
+    fn test_query_context_extraction() {
+        let query1 =
+            "query getSecurityAdvisories($packageName: String!) {\n  securityAdvisories\n}";
+        let context1 = GhsaClient::extract_query_context(query1);
+        assert_eq!(
+            context1,
+            Some("Operation: query getSecurityAdvisories($packageName: String!) {".to_string())
+        );
+
+        let query2 = "\n\n  # Comment\n  mutation updatePackage {\n    update\n  }";
+        let context2 = GhsaClient::extract_query_context(query2);
+        assert_eq!(
+            context2,
+            Some("Operation: mutation updatePackage {".to_string())
+        );
+
+        let empty_query = "";
+        let context3 = GhsaClient::extract_query_context(empty_query);
+        assert_eq!(context3, None);
+    }
+
+    #[test]
+    fn test_error_type_classification() {
+        let syntax_errors = vec![GraphQLError {
+            message: "Syntax error in query".to_string(),
+            locations: vec![GraphQLLocation { line: 1, column: 1 }],
+        }];
+        assert_eq!(GhsaClient::classify_error_type(&syntax_errors), "syntax");
+
+        let auth_errors = vec![GraphQLError {
+            message: "Unauthorized access".to_string(),
+            locations: vec![],
+        }];
+        assert_eq!(
+            GhsaClient::classify_error_type(&auth_errors),
+            "authorization"
+        );
+
+        let not_found_errors = vec![GraphQLError {
+            message: "Package not found".to_string(),
+            locations: vec![],
+        }];
+        assert_eq!(
+            GhsaClient::classify_error_type(&not_found_errors),
+            "not_found"
+        );
+
+        let unknown_errors = vec![GraphQLError {
+            message: "Something went wrong".to_string(),
+            locations: vec![],
+        }];
+        assert_eq!(GhsaClient::classify_error_type(&unknown_errors), "unknown");
+    }
+
+    #[test]
+    fn test_error_locations_extraction() {
+        let errors = vec![
+            GraphQLError {
+                message: "Error 1".to_string(),
+                locations: vec![
+                    GraphQLLocation {
+                        line: 5,
+                        column: 10,
+                    },
+                    GraphQLLocation { line: 3, column: 2 },
+                ],
+            },
+            GraphQLError {
+                message: "Error 2".to_string(),
+                locations: vec![
+                    GraphQLLocation {
+                        line: 5,
+                        column: 10,
+                    }, // Duplicate
+                    GraphQLLocation {
+                        line: 7,
+                        column: 15,
+                    },
+                ],
+            },
+        ];
+
+        let locations = GhsaClient::extract_error_locations(&errors);
+        assert_eq!(locations, vec![(3, 2), (5, 10), (7, 15)]); // Sorted and deduplicated
+    }
+
+    #[test]
+    fn test_comprehensive_error_analysis() {
+        let errors = vec![
+            GraphQLError {
+                message: "Parse error at position".to_string(),
+                locations: vec![GraphQLLocation { line: 3, column: 5 }],
+            },
+            GraphQLError {
+                message: "Type mismatch".to_string(),
+                locations: vec![],
+            },
+        ];
+
+        let query = "query test { field }";
+        let analysis = GhsaClient::analyze_graphql_errors(&errors, query);
+
+        assert_eq!(analysis.error_count, 2);
+        assert_eq!(analysis.error_type, "syntax");
+        assert!(analysis.has_location_info);
+        assert_eq!(analysis.locations, vec![(3, 5)]);
+        assert_eq!(
+            analysis.primary_message,
+            Some("Parse error at position".to_string())
+        );
+        assert!(analysis.query_context.is_some());
+        assert_eq!(analysis.detailed_errors.len(), 2);
+    }
+
+    #[test]
+    fn test_error_summary_creation() {
+        let no_errors: Vec<GraphQLError> = vec![];
+        assert_eq!(GhsaClient::create_error_summary(&no_errors), "No errors");
+
+        let single_error = vec![GraphQLError {
+            message: "Single error".to_string(),
+            locations: vec![GraphQLLocation { line: 1, column: 1 }],
+        }];
+        let summary = GhsaClient::create_error_summary(&single_error);
+        assert!(summary.contains("Single error"));
+        assert!(summary.contains("line 1:column 1"));
+
+        let multiple_errors = vec![
+            GraphQLError {
+                message: "Error 1".to_string(),
+                locations: vec![GraphQLLocation { line: 1, column: 1 }],
+            },
+            GraphQLError {
+                message: "Error 2".to_string(),
+                locations: vec![],
+            },
+        ];
+        let summary = GhsaClient::create_error_summary(&multiple_errors);
+        assert!(summary.contains("2 GraphQL errors"));
+        assert!(summary.contains("locations available for 1/2"));
     }
 }

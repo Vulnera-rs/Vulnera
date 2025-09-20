@@ -122,9 +122,10 @@ pub struct AppState {
     pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
     pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>, // optional until fully wired
     pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
+    pub startup_time: std::time::Instant,
 }
 
-/// Analyze an entire repository (stub implementation)
+/// Analyze an entire repository for dependency vulnerabilities
 #[utoipa::path(
     post,
     path = "/api/v1/analyze/repository",
@@ -937,7 +938,7 @@ pub async fn get_popular_packages(
     tracing::info!("Fetching popular packages with vulnerabilities");
 
     // Validate parameters
-    let limit = query.limit.unwrap_or(50).min(500).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 500);
     let offset = query.offset.unwrap_or(0);
 
     // Validate ecosystem if provided

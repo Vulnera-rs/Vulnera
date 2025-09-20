@@ -230,7 +230,6 @@ impl NvdClient {
 
     /// Try to parse a base score (CVSS) from the `impact` JSON object.
     /// Prefers v3 over v2 when both are present.
-    #[allow(dead_code)]
     fn extract_base_score_from_impact(impact: &Value) -> Option<f64> {
         // NVD 1.1 frequently uses "baseMetricV3" and "baseMetricV2"
         impact
@@ -247,8 +246,8 @@ impl NvdClient {
             })
     }
 
-    #[allow(dead_code)]
     // Load CVSS base score for a CVE from the sidecar index file
+    #[allow(dead_code)]
     fn load_cvss_score(&self, id: &str) -> Option<f64> {
         let data = fs::read_to_string(&self.cvss_index_path).ok()?;
         let map: HashMap<String, f64> = serde_json::from_str(&data).ok()?;
@@ -384,8 +383,9 @@ impl NvdClient {
             })),
         }
     }
-    #[allow(dead_code)]
+
     // Force a sync now (optionally with force_update), to be used in future admin endpoints
+    #[allow(dead_code)]
     async fn sync_now(&self, force_update: bool) -> Result<(), VulnerabilityError> {
         // Build a config snapshot for this sync
         let mut cfg = self.build_cache_config();

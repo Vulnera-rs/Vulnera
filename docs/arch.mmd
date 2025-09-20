@@ -1,0 +1,78 @@
+flowchart TD
+ subgraph subGraph0["1. Orchestration & Entrypoint"]
+        B("Orchestration Service")
+        A["User/API Request"]
+        C{"Module Choice/Trigger"}
+  end
+ subgraph subGraph1["2. Analysis Microservices & Kafka Topics"]
+        G("Kafka Topic: sast_jobs")
+        H["SAST Microservice"]
+        F("Kafka Topic: raw_analysis_findings")
+        I("Kafka Topic: secret_detection_jobs")
+        J["Secret Detection Microservice"]
+        D("Kafka Topic: dependency_analysis_jobs")
+        E["Dependency Analyzer Microservice"]
+        MAL_Topic("Kafka Topic: malicious_pkg_jobs")
+        MAL_Service["Malicious Pkg Detection Microservice"]
+        LIC_Topic("Kafka Topic: license_compliance_jobs")
+        LIC_Service["License Compliance Microservice"]
+        SBOM_Topic("Kafka Topic: sbom_jobs")
+        SBOM_Service["SBOM Generation Microservice"]
+        DAST_Topic("Kafka Topic: dast_jobs")
+        DAST_Service["DAST Microservice"]
+        API_Topic("Kafka Topic: api_security_jobs")
+        API_Service["API Security Microservice"]
+        FUZZ_Topic("Kafka Topic: fuzz_testing_jobs")
+        FUZZ_Service["Fuzz Testing Microservice"]
+        K("Kafka Topic: iac_jobs")
+        L["IaC/Container Security Microservice"]
+        CSPM_Topic("Kafka Topic: cspm_jobs")
+        CSPM_Service["CSPM Microservice"]
+  end
+ subgraph subGraph2["3. Reporting &amp; Final Output"]
+        M["Reporting & Recommendation Engine Microservice"]
+        N("Kafka Topic: final_reports")
+        O["User/API Response"]
+  end
+    A --> B
+    B -- Project Analyzed by AI Model --> C
+    C -- SAST --> G
+    G --> H
+    H -- Raw Findings --> F
+    C -- Secret Detection --> I
+    I --> J
+    J -- Raw Findings --> F
+    C -- Dependency Analysis --> D
+    D --> E
+    E -- Raw Findings --> F
+    C -- Malicious Package Detection --> MAL_Topic
+    MAL_Topic --> MAL_Service
+    MAL_Service -- Raw Findings --> F
+    C -- License Compliance --> LIC_Topic
+    LIC_Topic --> LIC_Service
+    LIC_Service -- Raw Findings --> F
+    C -- SBOM Generation --> SBOM_Topic
+    SBOM_Topic --> SBOM_Service
+    SBOM_Service -- SBOM & Findings --> F
+    C -- DAST --> DAST_Topic
+    DAST_Topic --> DAST_Service
+    DAST_Service -- Raw Findings --> F
+    C -- API Security --> API_Topic
+    API_Topic --> API_Service
+    API_Service -- Raw Findings --> F
+    C -- Fuzz Testing --> FUZZ_Topic
+    FUZZ_Topic --> FUZZ_Service
+    FUZZ_Service -- Raw Findings --> F
+    C -- IaC/Container Security --> K
+    K --> L
+    L -- Raw Findings --> F
+    C -- Cloud Security (CSPM) --> CSPM_Topic
+    CSPM_Topic --> CSPM_Service
+    CSPM_Service -- Raw Findings --> F
+    F -- All Raw Findings for Project --> M
+    M -- Final Consolidated Report --> N
+    N --> B
+    B -- Present Final Report --> O
+
+
+
