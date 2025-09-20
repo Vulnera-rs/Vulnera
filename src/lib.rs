@@ -114,6 +114,7 @@ pub async fn create_app(config: Config) -> Result<axum::Router, Box<dyn std::err
         popular_package_service,
         repository_analysis_service,
         version_resolution_service,
+        startup_time: std::time::Instant::now(),
     };
 
     // Create router

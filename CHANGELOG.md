@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
-## [Unreleased]
+## [0.1.0]
 
 ### Added
 
@@ -63,13 +63,6 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ### Documentation
 
-- `docs/api-examples.md`:
-  - Expanded with examples including `version_recommendations` and the new fields.
-  - Configuration section added for:
-    - `VULNERA__CACHE__DIRECTORY`, `VULNERA__CACHE__TTL_HOURS`
-    - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES`
-  - Added repository analysis example with recommendations.
-  - Ecosystem notes on NuGet 4-segment versions and PyPI prerelease behavior.
 - `scripts/.env.example`:
   - Added:
     - `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3`
