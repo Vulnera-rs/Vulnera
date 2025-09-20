@@ -34,6 +34,7 @@ pub struct CacheStats {
 /// File-based cache repository with TTL support and concurrent access safety
 pub struct FileCacheRepository {
     cache_dir: PathBuf,
+
     #[allow(dead_code)]
     default_ttl: Duration, // Future: configurable TTL support
     /// Mutex for file operations to prevent concurrent write conflicts
@@ -98,6 +99,11 @@ impl FileCacheRepository {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
+    }
+
+    /// Get the cache directory path
+    pub fn cache_dir(&self) -> &PathBuf {
+        &self.cache_dir
     }
 
     /// Check if a cache entry is expired based on its metadata

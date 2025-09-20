@@ -129,6 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         popular_package_service,
         repository_analysis_service,
         version_resolution_service,
+        startup_time: std::time::Instant::now(),
     };
 
     // Create router

@@ -358,16 +358,6 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    // Helper function to create a mock network error
-    #[allow(dead_code)]
-    fn create_network_error() -> VulnerabilityError {
-        // Since we can't easily create a reqwest::Error in tests, use a different error type
-        VulnerabilityError::Api(ApiError::Http {
-            status: 503,
-            message: "Service Unavailable".to_string(),
-        })
-    }
-
     #[tokio::test]
     async fn test_circuit_breaker_closed_state() {
         let config = CircuitBreakerConfig {

@@ -113,9 +113,25 @@ impl MavenParser {
             return Ok("0.0.0".to_string());
         }
 
-        // Handle Maven property placeholders (simplified)
+        // Handle Maven property placeholders with common defaults
         if version_str.starts_with("${") && version_str.ends_with('}') {
-            return Ok("0.0.0".to_string()); // Default for unresolved properties
+            let property = &version_str[2..version_str.len() - 1];
+            return Ok(match property {
+                "project.version" | "version" => "1.0.0".to_string(),
+                "java.version" => "11".to_string(),
+                "maven.compiler.source" | "maven.compiler.target" => "11".to_string(),
+                "spring.version" => "5.3.0".to_string(),
+                "junit.version" => "5.8.0".to_string(),
+                "slf4j.version" => "1.7.36".to_string(),
+                "jackson.version" => "2.13.0".to_string(),
+                _ => {
+                    tracing::debug!(
+                        "Unresolved Maven property: {}, using default 1.0.0",
+                        property
+                    );
+                    "1.0.0".to_string()
+                }
+            });
         }
 
         // Handle version ranges (take the first version)

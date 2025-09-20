@@ -57,7 +57,6 @@ sha2 = "0.10.8"
 hex = "0.4.3"
 # File and Version parsing
 toml = "0.9.5"
-serde_yaml = "0.9.34-deprecated"
 serde_yml = "0.0.12"
 quick-xml = "0.38"
 regex = "1.11.1"

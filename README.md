@@ -95,7 +95,7 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 - Profiles: `development`, `production` (set via `ENV`)
 
 - Example environment overrides:
-
+  
   ```bash
   VULNERA__SERVER__PORT=8080
   VULNERA__CACHE__TTL_HOURS=24
@@ -171,7 +171,7 @@ VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
 ## 🧑‍💻 Development & Contribution
 
 - **Dev Setup:**
-
+  
   ```bash
   make -C scripts/build_workflow install-deps
   pre-commit install
@@ -205,7 +205,7 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 ## 🚢 Deployment
 
 - **Docker:**
-
+  
   ```bash
   docker build -t vulnera-rust .
   docker run -p 3000:3000 vulnera-rust
@@ -237,7 +237,7 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 - **Cache issues:** Clear `.vulnera_cache` or adjust TTL
 
 - **Debugging:**
-
+  
   ```bash
   VULNERA__LOGGING__LEVEL=debug cargo run
   ```
