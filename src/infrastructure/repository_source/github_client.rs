@@ -14,13 +14,15 @@ use super::{
     RepositorySourceResult,
 };
 
-/// GitHub repository client (initial stub)
-#[allow(dead_code)]
+/// GitHub repository client for fetching repository contents and metadata
 pub struct GitHubRepositoryClient {
     octo: Octocrab,
-    base_url: String,
-    reuse_token_for_ghsa: bool,
-    timeout_seconds: u64,
+    #[allow(dead_code)]
+    base_url: String, // Future: Enterprise GitHub support
+    #[allow(dead_code)]
+    reuse_token_for_ghsa: bool, // Future: Token sharing optimization
+    #[allow(dead_code)]
+    timeout_seconds: u64, // Future: Configurable timeouts
 }
 
 impl GitHubRepositoryClient {

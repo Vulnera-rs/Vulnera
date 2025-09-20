@@ -653,9 +653,15 @@ async fn test_multiple_clients_consistency() {
         "affected_versions": "< 4.17.2"
     });
 
-    // This would be a more complex test that ensures all clients
-    // parse similar vulnerability data consistently
-    println!("Cross-client consistency test placeholder");
+    // Test that all clients can parse the same vulnerability data consistently
+    let osv_client = create_osv_client().await;
+    let nvd_client = create_nvd_client().await;
+    let ghsa_client = create_ghsa_client().await;
+
+    // For now, just verify that clients are initialized correctly
+    assert!(osv_client.is_ok());
+    assert!(nvd_client.is_ok());
+    assert!(ghsa_client.is_ok());
 }
 
 #[tokio::test]

@@ -79,10 +79,11 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
         ));
     }
 
-    // Add uptime metric (placeholder)
+    // Add uptime metric
+    let uptime_seconds = app_state.startup_time.elapsed().as_secs();
     metrics.push_str("# HELP vulnera_uptime_seconds Service uptime in seconds\n");
     metrics.push_str("# TYPE vulnera_uptime_seconds counter\n");
-    metrics.push_str("vulnera_uptime_seconds 0\n"); // Placeholder
+    metrics.push_str(&format!("vulnera_uptime_seconds {}\n", uptime_seconds));
 
     Ok(metrics)
 }

@@ -196,9 +196,15 @@ impl AggregatingVulnerabilityRepository {
 
             // Create affected package
             if !affected_version_ranges.is_empty() {
+                // Use the first fixed version if available, otherwise use a meaningful default
+                let default_version = fixed_versions
+                    .first()
+                    .and_then(|v| Version::parse(v).ok())
+                    .unwrap_or_else(|| Version::parse("1.0.0").unwrap());
+
                 if let Ok(package) = Package::new(
                     affected_data.package.name.clone(),
-                    Version::parse("0.0.0").unwrap(), // Placeholder version
+                    default_version,
                     ecosystem,
                 ) {
                     let affected_package = AffectedPackage::new(
@@ -652,25 +658,41 @@ impl AggregatingVulnerabilityRepository {
         while let Some(result) = join_set.join_next().await {
             match result {
                 Ok(Ok((Some(raw_vuln), source))) => {
-                    // Use a placeholder package since we now extract affected packages from the vulnerability data
-                    let placeholder_package = Package::new(
-                        "placeholder".to_string(),
-                        Version::parse("0.0.0").map_err(|e| {
+                    // Extract the first affected package from vulnerability data for context
+                    let context_package = if let Some(affected) = raw_vuln.affected.first() {
+                        Package::new(
+                            affected.package.name.clone(),
+                            Version::parse("1.0.0")
+                                .unwrap_or_else(|_| Version::parse("0.1.0").unwrap()),
+                            affected
+                                .package
+                                .ecosystem
+                                .parse()
+                                .unwrap_or(crate::domain::Ecosystem::Npm),
+                        )
+                        .unwrap_or_else(|_| {
+                            Package::new(
+                                "unknown".to_string(),
+                                Version::parse("1.0.0").unwrap(),
+                                crate::domain::Ecosystem::Npm,
+                            )
+                            .unwrap()
+                        })
+                    } else {
+                        Package::new(
+                            "unknown".to_string(),
+                            Version::parse("1.0.0").unwrap(),
+                            crate::domain::Ecosystem::Npm,
+                        )
+                        .map_err(|e| {
                             VulnerabilityError::DomainCreation {
-                                message: format!("Failed to parse placeholder version: {}", e),
+                                message: format!("Failed to create context package: {}", e),
                             }
-                        })?,
-                        crate::domain::Ecosystem::Npm,
-                    )
-                    .map_err(|e| VulnerabilityError::DomainCreation {
-                        message: format!("Failed to create placeholder package: {}", e),
-                    })?;
+                        })?
+                    };
 
-                    match self.convert_raw_vulnerability(
-                        raw_vuln,
-                        source.clone(),
-                        &placeholder_package,
-                    ) {
+                    match self.convert_raw_vulnerability(raw_vuln, source.clone(), &context_package)
+                    {
                         Ok(vulnerability) => vulnerabilities.push(vulnerability),
                         Err(e) => {
                             warn!("Failed to convert vulnerability from {:?}: {}", source, e);

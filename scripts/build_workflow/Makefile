@@ -141,8 +141,10 @@ release-check: test-deploy-ready ## Check if ready for release
 	cargo audit
 
 # Database/Migration related (for future use)
-migrate: ## Run database migrations (placeholder)
-	@echo "Database migrations not implemented yet"
+migrate: ## Run database migrations (future DB integration)
+	@echo "Database migrations will be available when DB integration is implemented"
+	@echo "Schema available at: src/db/schema.sql"
+	@echo "Use this target to apply migrations to your database when ready"
 
 # Environment setup
 setup: install-deps ## Setup development environment

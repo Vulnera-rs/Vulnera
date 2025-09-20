@@ -1181,9 +1181,37 @@ impl CacheServiceImpl {
             ecosystem
         );
 
-        // This would require iterating through all cache files and checking their keys
-        // For now, we'll return a placeholder count
-        let invalidated_count = 0u64;
+        let mut invalidated_count = 0u64;
+
+        // Read cache directory and find files matching ecosystem prefix
+        let cache_dir = self.cache_repository.cache_dir();
+        if let Ok(mut entries) = tokio::fs::read_dir(cache_dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Ok(file_type) = entry.file_type().await {
+                    if file_type.is_file() {
+                        let file_name = entry.file_name();
+                        let file_name_str = file_name.to_string_lossy();
+
+                        // Check if filename contains ecosystem-specific cache keys
+                        let ecosystem_str = ecosystem.to_string().to_lowercase();
+                        if file_name_str
+                            .contains(&format!("package_vulnerabilities:{}:", ecosystem_str))
+                            || file_name_str
+                                .contains(&format!("version_recommendations:{}:", ecosystem_str))
+                            || file_name_str
+                                .contains(&format!("registry_versions:{}:", ecosystem_str))
+                        {
+                            if let Err(e) = tokio::fs::remove_file(entry.path()).await {
+                                warn!("Failed to remove cache file {}: {}", file_name_str, e);
+                            } else {
+                                invalidated_count += 1;
+                                debug!("Removed cache file: {}", file_name_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         info!(
             "Invalidated {} cache entries for ecosystem: {}",
