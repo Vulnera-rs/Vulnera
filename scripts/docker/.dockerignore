@@ -5,8 +5,6 @@
 # Documentation
 README.md
 docs/research/
-!docs/api-examples.md
-!docs/api-versioning.md
 
 # CI/CD
 .github/
