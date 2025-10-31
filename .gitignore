@@ -161,3 +161,6 @@ criterion/
 
 # Cache directories
 .vulnera_cache/
+
+# Claude Code agents and configuration
+.claude/agents/
