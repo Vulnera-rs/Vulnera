@@ -30,6 +30,44 @@ pub trait VulnerabilityRepository: Send + Sync {
 }
 
 /// Aggregating repository that combines multiple vulnerability sources
+///
+/// This repository implements the **Aggregator Pattern** to combine vulnerability data
+/// from multiple external sources (OSV, NVD, GHSA) into a unified view. It provides:
+///
+/// **Key Features:**
+/// - **Parallel querying**: All three sources are queried concurrently for optimal performance
+/// - **Data normalization**: Converts different vulnerability formats to a unified domain model
+/// - **Deduplication**: Removes duplicate vulnerabilities that may exist across sources
+/// - **Graceful degradation**: Continues operating even if some sources are unavailable
+/// - **Intelligent merging**: Combines complementary data from different sources
+///
+/// **Architecture:**
+/// ```
+///                 ┌─────────────┐
+///                 │   Package   │
+///                 └──────┬──────┘
+///                        │
+///              ┌─────────▼─────────┐
+///              │ Aggregating Repo  │
+///              └─────────┬─────────┘
+///        ┌──────────────┼──────────────┐
+///        │              │              │
+///   ┌────▼────┐   ┌─────▼─────┐   ┌───▼────┐
+///   │ OSV API │   │ NVD API   │   │ GHSA   │
+///   └─────────┘   └───────────┘   └────────┘
+/// ```
+///
+/// **Concurrency Model:**
+/// - Uses `JoinSet` for parallel async operations
+/// - Configurable concurrency limit (default: 3 concurrent requests)
+/// - Each source gets its own timeout and retry configuration
+///
+/// **Data Flow:**
+/// 1. Receive package query request
+/// 2. Launch parallel queries to all three sources
+/// 3. Convert raw responses to domain entities
+/// 4. Merge and deduplicate results
+/// 5. Return unified vulnerability list
 pub struct AggregatingVulnerabilityRepository {
     osv_client: Arc<dyn VulnerabilityApiClient>,
     nvd_client: Arc<dyn VulnerabilityApiClient>,
@@ -53,6 +91,27 @@ impl AggregatingVulnerabilityRepository {
     }
 
     /// Convert RawVulnerability to domain Vulnerability
+///
+/// This method implements the **Adapter Pattern** to convert between external API formats
+/// and our internal domain model. The conversion process includes:
+///
+/// **Validation Steps:**
+/// 1. Parse and validate vulnerability ID format
+/// 2. Normalize severity levels across different rating systems
+/// 3. Parse and validate version ranges using ecosystem-specific rules
+/// 4. Convert ecosystem identifiers to domain enums
+/// 5. Extract and normalize URLs and references
+///
+/// **Data Normalization Rules:**
+/// - **Severity**: Maps various severity scales (CVSS, GitHub severity, etc.) to unified enum
+/// - **Ecosystem**: Normalizes ecosystem strings (npm, NPM, Node.js) to standard enum values
+/// - **Versions**: Parses semantic version strings with ecosystem-specific validation
+/// - **Ranges**: Converts different range formats to our internal VersionRange representation
+///
+/// **Error Handling:**
+/// - Invalid data is logged but doesn't fail the entire conversion
+/// - Unknown ecosystems are skipped with debug logging
+/// - Malformed versions are logged and excluded from affected ranges
     fn convert_raw_vulnerability(
         &self,
         raw: RawVulnerability,

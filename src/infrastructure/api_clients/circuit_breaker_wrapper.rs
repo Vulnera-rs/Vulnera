@@ -8,6 +8,41 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 /// Wrapper that adds circuit breaker protection and retry logic to an API client
+///
+/// This wrapper implements the **Decorator Pattern** to enhance existing API clients
+/// with resilience patterns without modifying their core implementation. It combines
+/// two complementary patterns:
+///
+/// **1. Circuit Breaker Pattern:**
+/// - Prevents cascading failures when external services are down
+/// - Provides fast failure when circuits are open
+/// - Enables automatic recovery testing
+///
+/// **2. Retry Pattern with Exponential Backoff:**
+/// - Handles transient failures (network blips, rate limits)
+/// - Increases delay between retries to avoid overwhelming services
+/// - Configurable maximum attempts and backoff parameters
+///
+/// **Combined Resilience Strategy:**
+/// ```
+/// Request → Circuit Breaker (First Line of Defense)
+///    ├─ Circuit Open → Immediate Failure
+///    └─ Circuit Closed → Retry Logic (Second Line of Defense)
+///        ├─ Success → Return Result
+///        ├─ All Retries Failed → Record Failure, Update Circuit State
+///        └─ Timeout → Record Failure, Update Circuit State
+/// ```
+///
+/// **Configuration:**
+/// - Circuit breaker has its own failure threshold and recovery timeout
+/// - Retry logic uses exponential backoff with jitter
+/// - Both patterns work independently but complement each other
+///
+/// **Use Cases:**
+/// - External API calls (OSV, NVD, GHSA)
+/// - Database connections
+/// - Network service calls
+/// - Any operation that might fail transiently
 pub struct CircuitBreakerApiClient {
     inner: Arc<dyn VulnerabilityApiClient>,
     circuit_breaker: Arc<CircuitBreaker>,
