@@ -17,6 +17,18 @@ hsts_include_subdomains = true
 [cache]
 ttl_hours = 24
 
+[auth]
+# Production: MUST override jwt_secret via VULNERA__AUTH__JWT_SECRET environment variable
+jwt_secret = "${JWT_SECRET}"
+token_ttl_hours = 24
+refresh_token_ttl_hours = 720  # 30 days
+api_key_length = 32
+api_key_ttl_days = 365
+
+[database]
+# Production: MUST override via DATABASE_URL or VULNERA__DATABASE__URL environment variable
+url = "${DATABASE_URL}"
+max_connections = 20
 
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"

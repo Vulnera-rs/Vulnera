@@ -94,6 +94,8 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub recommendations: RecommendationsConfig,
     pub analysis: AnalysisConfig,
+    pub auth: AuthConfig,
+    pub database: DatabaseConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
 }
 
@@ -392,6 +394,53 @@ impl Default for AnalysisConfig {
     }
 }
 
+/// Authentication configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuthConfig {
+    /// JWT secret key for signing tokens (must be at least 32 characters in production)
+    pub jwt_secret: String,
+    /// Access token TTL in hours
+    pub token_ttl_hours: u64,
+    /// Refresh token TTL in hours
+    pub refresh_token_ttl_hours: u64,
+    /// API key length (in bytes, will be hex-encoded)
+    pub api_key_length: usize,
+    /// API key TTL in days (None means no expiration)
+    pub api_key_ttl_days: Option<u64>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: "change-me-in-production-use-strong-random-secret-key".to_string(),
+            token_ttl_hours: 24,
+            refresh_token_ttl_hours: 720, // 30 days
+            api_key_length: 32,
+            api_key_ttl_days: Some(365), // 1 year
+        }
+    }
+}
+
+/// Database configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DatabaseConfig {
+    /// Database connection URL (can also be set via DATABASE_URL env var)
+    pub url: String,
+    /// Maximum number of connections in the pool
+    pub max_connections: u32,
+}
+
+impl Default for DatabaseConfig {
+    fn default() -> Self {
+        Self {
+            url: "postgres://postgres:postgres@localhost/vulnera".to_string(),
+            max_connections: 10,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -452,6 +501,8 @@ impl Default for Config {
             analysis: AnalysisConfig {
                 max_concurrent_packages: 3,
             },
+            auth: AuthConfig::default(),
+            database: DatabaseConfig::default(),
             popular_packages: None,
         }
     }
@@ -463,6 +514,8 @@ impl Validate for Config {
         self.cache.validate()?;
         self.apis.validate()?;
         self.analysis.validate()?;
+        validation::Validate::validate(&self.auth)?;
+        validation::Validate::validate(&self.database)?;
         Ok(())
     }
 }
@@ -484,7 +537,12 @@ impl Config {
             .add_source(config::File::with_name("config/local").required(false))
             .add_source(config::Environment::with_prefix("VULNERA").separator("__"));
 
-        let config: Config = builder.build()?.try_deserialize()?;
+        let mut config: Config = builder.build()?.try_deserialize()?;
+
+        // Override database URL from DATABASE_URL env var if present (common convention)
+        if let Ok(database_url) = std::env::var("DATABASE_URL") {
+            config.database.url = database_url;
+        }
 
         // Validate the loaded configuration
         config.validate()?;

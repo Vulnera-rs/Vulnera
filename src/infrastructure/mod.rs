@@ -3,6 +3,7 @@
 //! This module handles external systems like APIs, file systems, and databases.
 
 pub mod api_clients;
+pub mod auth;
 pub mod cache;
 pub mod parsers;
 pub mod registries;
