@@ -346,12 +346,18 @@ dependencies {
         let parser = MavenParser::new();
 
         assert_eq!(parser.clean_maven_version("5.3.21").unwrap(), "5.3.21");
+        // Updated expectation: ${spring.version} now returns "5.3.0" as a reasonable default
         assert_eq!(
             parser.clean_maven_version("${spring.version}").unwrap(),
-            "0.0.0"
+            "5.3.0"
         );
         assert_eq!(parser.clean_maven_version("[1.0,2.0)").unwrap(), "1.0");
         assert_eq!(parser.clean_maven_version("(1.0,2.0]").unwrap(), "1.0");
+        // Test that unknown properties default to "1.0.0" instead of "0.0.0"
+        assert_eq!(
+            parser.clean_maven_version("${unknown.property}").unwrap(),
+            "1.0.0"
+        );
     }
 
     #[test]

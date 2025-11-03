@@ -26,6 +26,8 @@ pub trait PackageFileParser: Send + Sync {
 /// Factory for creating appropriate parsers based on filename
 pub struct ParserFactory {
     parsers: Vec<Box<dyn PackageFileParser>>,
+    // Index for fast O(1) lookup of common filenames
+    parser_index: std::collections::HashMap<String, usize>,
 }
 
 impl ParserFactory {
@@ -42,8 +44,6 @@ impl ParserFactory {
             Box::new(crate::infrastructure::parsers::java::MavenParser::new()),
             // Pest-based Gradle parser
             Box::new(crate::infrastructure::parsers::gradle_pest::GradlePestParser::new()),
-            // Legacy Gradle parser as fallback "deprecated once pest tested enough"
-            Box::new(crate::infrastructure::parsers::java::GradleParser::new()),
             Box::new(crate::infrastructure::parsers::rust::CargoParser::new()),
             Box::new(crate::infrastructure::parsers::rust::CargoLockParser::new()),
             Box::new(crate::infrastructure::parsers::go::GoModParser::new()),
@@ -56,12 +56,62 @@ impl ParserFactory {
             Box::new(crate::infrastructure::parsers::ruby::GemfileParser::new()),
         ];
 
-        Self { parsers }
+        // Build index for fast lookups of common exact filename matches
+        let mut parser_index = std::collections::HashMap::new();
+        let common_filenames = vec![
+            "package.json",
+            "package-lock.json",
+            "yarn.lock",
+            "requirements.txt",
+            "Pipfile",
+            "pyproject.toml",
+            "pom.xml",
+            "build.gradle",
+            "build.gradle.kts",
+            "Cargo.toml",
+            "Cargo.lock",
+            "go.mod",
+            "go.sum",
+            "composer.json",
+            "composer.lock",
+            "packages.config",
+            "Gemfile",
+            "Gemfile.lock",
+        ];
+
+        for filename in common_filenames {
+            // Find the highest priority parser for this filename
+            let mut best_parser_idx = None;
+            let mut best_priority = 0u8;
+            for (idx, parser) in parsers.iter().enumerate() {
+                if parser.supports_file(filename) {
+                    let priority = parser.priority();
+                    if best_parser_idx.is_none() || priority > best_priority {
+                        best_parser_idx = Some(idx);
+                        best_priority = priority;
+                    }
+                }
+            }
+            if let Some(idx) = best_parser_idx {
+                parser_index.insert(filename.to_string(), idx);
+            }
+        }
+
+        Self {
+            parsers,
+            parser_index,
+        }
     }
 
     /// Create a parser for the given filename
+    /// Optimized with HashMap lookup for common filenames (O(1)), falls back to iteration for edge cases
     pub fn create_parser(&self, filename: &str) -> Option<&dyn PackageFileParser> {
-        // Find all parsers that support this file
+        // Fast path: exact match in index
+        if let Some(&idx) = self.parser_index.get(filename) {
+            return Some(self.parsers[idx].as_ref());
+        }
+
+        // Fallback: iterate through all parsers (for less common filenames or path-based matching)
         let mut supporting_parsers: Vec<&dyn PackageFileParser> = self
             .parsers
             .iter()

@@ -91,7 +91,9 @@ impl Validate for CacheConfig {
         // Check if directory exists or can be created
         let parent = self.directory.parent();
         if let Some(parent) = parent {
-            if !parent.exists() {
+            // Skip validation if parent is empty (root path) or if it's the current directory "."
+            // For relative paths, we'll try to create the directory during runtime
+            if !parent.as_os_str().is_empty() && parent != Path::new(".") && !parent.exists() {
                 return Err(ValidationError::cache(format!(
                     "Cache directory parent does not exist: {}",
                     parent.display()

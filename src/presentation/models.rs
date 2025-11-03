@@ -35,7 +35,7 @@ pub struct AnalysisResponse {
 
     /// Comprehensive analysis metadata and statistics
     pub metadata: AnalysisMetadataDto,
-    /// Optional per-package version recommendations (scaffold)
+    /// Optional per-package version recommendations
     pub version_recommendations: Option<Vec<VersionRecommendationDto>>,
 
     /// Pagination information for large result sets

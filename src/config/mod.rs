@@ -311,6 +311,7 @@ impl Default for GhsaConfig {
 pub struct GitHubConfig {
     pub base_url: String,
     pub token: Option<String>,
+    #[serde(default = "default_reuse_ghsa_token")]
     pub reuse_ghsa_token: bool,
     pub timeout_seconds: u64,
     pub max_concurrent_file_fetches: usize,
@@ -320,6 +321,10 @@ pub struct GitHubConfig {
     pub backoff_initial_ms: u64,
     pub backoff_max_retries: u32,
     pub backoff_jitter: bool,
+}
+
+fn default_reuse_ghsa_token() -> bool {
+    true
 }
 
 impl Default for GitHubConfig {
