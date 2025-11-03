@@ -99,7 +99,10 @@ impl YarnPestParser {
                 pest::error::LineColLocation::Pos((l, c)) => (l, c),
                 pest::error::LineColLocation::Span((l, c), _) => (l, c),
             };
-            let error_msg = format!("yarn.lock parse error at line {}, column {}: {}", line, col, e);
+            let error_msg = format!(
+                "yarn.lock parse error at line {}, column {}: {}",
+                line, col, e
+            );
             ParseError::MissingField { field: error_msg }
         })
     }
@@ -172,7 +175,10 @@ impl YarnPestParser {
                     }
                     version = found;
                 }
-                Rule::peer_dependencies_block | Rule::bundled_dependencies_block | Rule::dependencies_block | Rule::optional_dependencies_block => {
+                Rule::peer_dependencies_block
+                | Rule::bundled_dependencies_block
+                | Rule::dependencies_block
+                | Rule::optional_dependencies_block => {
                     // Process dependency blocks (peerDependencies, bundledDependencies, etc.)
                     // Extract dependency names for potential future use or validation
                     // For now, we just recognize these blocks - they don't affect package extraction

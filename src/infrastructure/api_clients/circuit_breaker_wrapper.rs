@@ -3,7 +3,7 @@
 use crate::application::errors::VulnerabilityError;
 use crate::domain::Package;
 use crate::infrastructure::api_clients::traits::{RawVulnerability, VulnerabilityApiClient};
-use crate::infrastructure::resilience::{retry_with_backoff, CircuitBreaker, RetryConfig};
+use crate::infrastructure::resilience::{CircuitBreaker, RetryConfig, retry_with_backoff};
 use async_trait::async_trait;
 use std::sync::Arc;
 

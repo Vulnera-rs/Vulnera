@@ -189,9 +189,7 @@ impl GhsaClient {
             .timeout(Duration::from_secs(30))
             .user_agent("vulnera-rust/0.1.0")
             .build()
-            .map_err(|e| VulnerabilityError::Network(
-                reqwest::Error::from(e).into()
-            ))?;
+            .map_err(VulnerabilityError::Network)?;
 
         Ok(Self {
             client,
@@ -931,7 +929,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
 
         let result = client.security_advisories("express", "NPM", 50, None).await;
 
@@ -999,7 +998,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
         let package = create_test_package();
 
         let result = client.query_vulnerabilities(&package).await;
@@ -1054,7 +1054,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
 
         let result = client
             .get_vulnerability_details("GHSA-xxxx-xxxx-xxxx")
@@ -1094,7 +1095,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
 
         let result = client
             .get_vulnerability_details("GHSA-nonexistent-xxxx")
@@ -1112,7 +1114,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             "https://api.github.com/graphql".to_string(),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
 
         let result = client.get_vulnerability_details("CVE-2022-24999").await;
 
@@ -1218,7 +1221,8 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        ).expect("Failed to create test client");
+        )
+        .expect("Failed to create test client");
 
         let result = client.security_advisories("express", "NPM", 50, None).await;
 

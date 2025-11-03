@@ -373,7 +373,7 @@ impl RateLimiterState {
                     elapsed < expire_time
                 });
 
-                if buckets.len() > 0 {
+                if !buckets.is_empty() {
                     tracing::debug!(
                         buckets_count = buckets.len(),
                         "Rate limiter cleanup: retained buckets"
@@ -483,10 +483,7 @@ pub async fn rate_limit_middleware(
                 .map(|b| b.remaining())
                 .unwrap_or(state.config.requests_per_minute);
 
-            headers.insert(
-                "x-ratelimit-remaining",
-                HeaderValue::from(remaining.max(0) as u32),
-            );
+            headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
 
             // Reset time is current time + 1 minute
             let reset_time = SystemTime::now()

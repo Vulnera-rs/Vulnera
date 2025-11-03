@@ -906,10 +906,13 @@ mod tests {
             "https://services.nvd.nist.gov".to_string(),
             None,
         ));
-        let ghsa_client = Arc::new(GhsaClient::new(
-            "test_token".to_string(),
-            "https://api.github.com/graphql".to_string(),
-        ).expect("Failed to create test GHSA client"));
+        let ghsa_client = Arc::new(
+            GhsaClient::new(
+                "test_token".to_string(),
+                "https://api.github.com/graphql".to_string(),
+            )
+            .expect("Failed to create test GHSA client"),
+        );
 
         AggregatingVulnerabilityRepository::new(osv_client, nvd_client, ghsa_client)
     }
