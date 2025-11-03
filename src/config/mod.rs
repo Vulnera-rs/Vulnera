@@ -6,6 +6,46 @@ pub use validation::{Validate, ValidationError};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
+
+/// Circuit breaker configuration (serializable version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CircuitBreakerConfigSerializable {
+    /// Number of consecutive failures before opening the circuit
+    pub failure_threshold: u32,
+    /// Duration to wait before transitioning from Open to HalfOpen (in seconds)
+    pub recovery_timeout_seconds: u64,
+    /// Maximum number of requests allowed in HalfOpen state
+    pub half_open_max_requests: u32,
+    /// Timeout for individual requests (in seconds)
+    pub request_timeout_seconds: u64,
+}
+
+impl Default for CircuitBreakerConfigSerializable {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 5,
+            recovery_timeout_seconds: 60,
+            half_open_max_requests: 3,
+            request_timeout_seconds: 30,
+        }
+    }
+}
+
+impl CircuitBreakerConfigSerializable {
+    /// Convert to the runtime CircuitBreakerConfig
+    pub fn to_circuit_breaker_config(
+        &self,
+    ) -> crate::infrastructure::resilience::CircuitBreakerConfig {
+        crate::infrastructure::resilience::CircuitBreakerConfig {
+            failure_threshold: self.failure_threshold,
+            recovery_timeout: Duration::from_secs(self.recovery_timeout_seconds),
+            half_open_max_requests: self.half_open_max_requests,
+            request_timeout: Duration::from_secs(self.request_timeout_seconds),
+        }
+    }
+}
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +176,8 @@ pub struct NvdConfig {
     pub api_key: Option<String>,
     pub timeout_seconds: u64,
     pub rate_limit_per_30s: u32,
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfigSerializable,
 }
 
 impl Default for NvdConfig {
@@ -145,6 +187,7 @@ impl Default for NvdConfig {
             api_key: None,
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
+            circuit_breaker: CircuitBreakerConfigSerializable::default(),
         }
     }
 }
@@ -156,6 +199,8 @@ pub struct GhsaConfig {
     pub graphql_url: String,
     pub token: Option<String>,
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfigSerializable,
 }
 
 impl Default for GhsaConfig {
@@ -164,6 +209,7 @@ impl Default for GhsaConfig {
             graphql_url: "https://api.github.com/graphql".to_string(),
             token: None,
             timeout_seconds: 30,
+            circuit_breaker: CircuitBreakerConfigSerializable::default(),
         }
     }
 }
@@ -278,11 +324,13 @@ impl Default for Config {
                     api_key: None,
                     timeout_seconds: 30,
                     rate_limit_per_30s: 5, // Without API key
+                    circuit_breaker: CircuitBreakerConfigSerializable::default(),
                 },
                 ghsa: GhsaConfig {
                     graphql_url: "https://api.github.com/graphql".to_string(),
                     token: None,
                     timeout_seconds: 30,
+                    circuit_breaker: CircuitBreakerConfigSerializable::default(),
                 },
                 github: GitHubConfig {
                     base_url: "https://api.github.com".to_string(),

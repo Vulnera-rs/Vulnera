@@ -3,6 +3,7 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{net::TcpListener, signal};
 
+use vulnera_rust::infrastructure::resilience::CircuitBreakerConfig;
 use vulnera_rust::{
     Config,
     application::{
@@ -10,12 +11,16 @@ use vulnera_rust::{
         VersionResolutionServiceImpl,
     },
     infrastructure::{
-        api_clients::{ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
+        api_clients::{
+            circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
+            osv::OsvClient,
+        },
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
         registries::MultiplexRegistryClient,
         repositories::AggregatingVulnerabilityRepository,
         repository_source::GitHubRepositoryClient,
+        resilience::CircuitBreaker,
     },
     init_tracing,
     presentation::{AppState, create_router},
@@ -48,9 +53,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
     let parser_factory = Arc::new(ParserFactory::new());
 
+    // Create circuit breakers for each API service
+    let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
+        failure_threshold: 5,
+        recovery_timeout: std::time::Duration::from_secs(60),
+        half_open_max_requests: 3,
+        request_timeout: std::time::Duration::from_secs(30),
+    }));
+    let nvd_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.nvd.circuit_breaker.to_circuit_breaker_config(),
+    ));
+    let ghsa_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.ghsa.circuit_breaker.to_circuit_breaker_config(),
+    ));
+
     // Create API clients
-    let osv_client = Arc::new(OsvClient);
-    let nvd_client = Arc::new(NvdClient::new(
+    let osv_client_inner = Arc::new(OsvClient);
+    let nvd_client_inner = Arc::new(NvdClient::new(
         config.apis.nvd.base_url.clone(),
         config.apis.nvd.api_key.clone(),
     ));
@@ -60,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GHSA token not provided; GitHub advisories lookups will be skipped unless provided via environment."
         );
     }
-    let ghsa_client = Arc::new(
+    let ghsa_client_inner = Arc::new(
         GhsaClient::new(
             ghsa_token_opt.unwrap_or_default(),
             config.apis.ghsa.graphql_url.clone(),
@@ -70,6 +89,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             e
         })?,
     );
+
+    // Wrap clients with circuit breakers
+    let osv_client = Arc::new(CircuitBreakerApiClient::new(
+        osv_client_inner,
+        osv_circuit_breaker,
+    ));
+    let nvd_client = Arc::new(CircuitBreakerApiClient::new(
+        nvd_client_inner,
+        nvd_circuit_breaker,
+    ));
+    let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
+        ghsa_client_inner,
+        ghsa_circuit_breaker,
+    ));
 
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
         osv_client,

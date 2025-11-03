@@ -330,6 +330,7 @@ mod tests {
             api_key: None,
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
+            circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
         };
         assert!(valid.validate().is_ok());
 
@@ -362,6 +363,7 @@ mod tests {
             graphql_url: "https://api.github.com/graphql".to_string(),
             token: None,
             timeout_seconds: 30,
+            circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
         };
         assert!(valid.validate().is_ok());
 
