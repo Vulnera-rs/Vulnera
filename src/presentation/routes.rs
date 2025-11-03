@@ -8,7 +8,7 @@ use axum::{
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{
-    cors::{Any, CorsLayer},
+    cors::CorsLayer,
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
@@ -16,6 +16,13 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use crate::presentation::{
+    auth::{
+        controller::{
+            AuthAppState, create_api_key, list_api_keys, login, refresh_token, register,
+            revoke_api_key,
+        },
+        extractors::AuthState,
+    },
     controllers::{
         analysis::{
             AppState, analyze_dependencies, get_analysis_report, get_popular_packages,
@@ -28,6 +35,11 @@ use crate::presentation::{
         rate_limit_middleware, security_headers_middleware,
     },
     models::*,
+};
+use axum::{
+    extract::{Request, State},
+    middleware::Next,
+    response::Response,
 };
 use std::sync::Arc;
 
@@ -43,8 +55,13 @@ use std::sync::Arc;
         crate::presentation::controllers::analysis::get_analysis_report,
         crate::presentation::controllers::analysis::get_popular_packages,
         crate::presentation::controllers::health::health_check,
-
-        crate::presentation::controllers::health::metrics
+        crate::presentation::controllers::health::metrics,
+        crate::presentation::auth::controller::login,
+        crate::presentation::auth::controller::register,
+        crate::presentation::auth::controller::refresh_token,
+        crate::presentation::auth::controller::create_api_key,
+        crate::presentation::auth::controller::list_api_keys,
+        crate::presentation::auth::controller::revoke_api_key
     ),
     components(
         schemas(
@@ -65,13 +82,23 @@ use std::sync::Arc;
             RepositoryPackageDto,
             RepositoryAnalysisMetadataDto,
             RepositoryConfigCapsDto,
-            RepositoryDescriptorDto
+            RepositoryDescriptorDto,
+            crate::presentation::auth::models::LoginRequest,
+            crate::presentation::auth::models::RegisterRequest,
+            crate::presentation::auth::models::TokenResponse,
+            crate::presentation::auth::models::RefreshRequest,
+            crate::presentation::auth::models::CreateApiKeyRequest,
+            crate::presentation::auth::models::ApiKeyResponse,
+            crate::presentation::auth::models::ApiKeyListResponse,
+            crate::presentation::auth::models::ApiKeyListItem,
+            crate::domain::auth::value_objects::UserRole
         )
     ),
     tags(
     (name = "analysis", description = "Vulnerability analysis endpoints for dependency files and repositories"),
         (name = "vulnerabilities", description = "Vulnerability information and lookup endpoints"),
-        (name = "health", description = "System health monitoring and metrics endpoints")
+        (name = "health", description = "System health monitoring and metrics endpoints"),
+        (name = "auth", description = "Authentication and authorization endpoints")
     ),
     info(
         title = "Vulnera API",
@@ -94,8 +121,53 @@ use std::sync::Arc;
 )]
 pub struct ApiDoc;
 
+/// Middleware to inject AuthState into request extensions
+async fn inject_auth_state_middleware(
+    State(app_state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    // Create AuthState from AppState and inject into extensions
+    let auth_state = AuthState {
+        validate_token: app_state.validate_token_use_case.clone(),
+        validate_api_key: app_state.validate_api_key_use_case.clone(),
+        user_repository: app_state.user_repository.clone(),
+        api_key_repository: app_state.api_key_repository.clone(),
+        api_key_generator: app_state.api_key_generator.clone(),
+    };
+    request.extensions_mut().insert(auth_state);
+    next.run(request).await
+}
+
 /// Create the application router with comprehensive middleware stack
 pub fn create_router(app_state: AppState, config: &Config) -> Router {
+    // Create auth state for auth endpoints
+    let auth_app_state = AuthAppState {
+        login_use_case: app_state.login_use_case.clone(),
+        register_use_case: app_state.register_use_case.clone(),
+        refresh_token_use_case: app_state.refresh_token_use_case.clone(),
+        auth_state: AuthState {
+            validate_token: app_state.validate_token_use_case.clone(),
+            validate_api_key: app_state.validate_api_key_use_case.clone(),
+            user_repository: app_state.user_repository.clone(),
+            api_key_repository: app_state.api_key_repository.clone(),
+            api_key_generator: app_state.api_key_generator.clone(),
+        },
+        token_ttl_hours: config.auth.token_ttl_hours,
+    };
+
+    // Auth routes
+    let auth_routes = Router::new()
+        .route("/auth/login", post(login))
+        .route("/auth/register", post(register))
+        .route("/auth/refresh", post(refresh_token))
+        .route("/auth/api-keys", post(create_api_key).get(list_api_keys))
+        .route(
+            "/auth/api-keys/{key_id}",
+            axum::routing::delete(revoke_api_key),
+        )
+        .with_state(auth_app_state);
+
     let api_routes = Router::new()
         .route("/analyze", post(analyze_dependencies))
         .route(
@@ -109,7 +181,8 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         )
         .route("/vulnerabilities/{id}", get(get_vulnerability))
         .route("/reports/{id}", get(get_analysis_report))
-        .route("/popular", get(get_popular_packages));
+        .route("/popular", get(get_popular_packages))
+        .merge(auth_routes);
 
     let health_routes = Router::new()
         .route("/health", get(health_check))
@@ -119,7 +192,7 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     let cors_layer =
         if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
@@ -137,6 +210,7 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
                     axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
                     axum::http::HeaderName::from_static("x-ghsa-token"),
                     axum::http::HeaderName::from_static("x-github-token"),
+                    axum::http::HeaderName::from_static("x-api-key"),
                 ])
                 .allow_credentials(false)
                 .max_age(Duration::from_secs(3600))
@@ -170,6 +244,7 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
                     axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
                     axum::http::HeaderName::from_static("x-ghsa-token"),
                     axum::http::HeaderName::from_static("x-github-token"),
+                    axum::http::HeaderName::from_static("x-api-key"),
                 ])
                 .allow_credentials(false)
                 .max_age(Duration::from_secs(3600))
@@ -195,6 +270,11 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         )))
         // Per-request GHSA token middleware (must run before handlers)
         .layer(middleware::from_fn(ghsa_token_middleware))
+        // Inject auth state into request extensions
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            inject_auth_state_middleware,
+        ))
         // Custom logging middleware
         .layer(middleware::from_fn(logging_middleware));
 

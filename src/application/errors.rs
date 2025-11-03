@@ -1,6 +1,7 @@
 //! Application layer error types
 
 use crate::domain::DomainError;
+use crate::domain::auth::AuthError;
 use thiserror::Error;
 
 /// Application-level errors
@@ -8,6 +9,9 @@ use thiserror::Error;
 pub enum ApplicationError {
     #[error("Domain error: {0}")]
     Domain(#[from] DomainError),
+
+    #[error("Authentication error: {0}")]
+    Authentication(#[from] AuthError),
 
     #[error("Parsing error: {0}")]
     Parse(#[from] ParseError),

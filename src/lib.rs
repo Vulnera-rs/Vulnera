@@ -18,12 +18,17 @@ pub use logging::init_tracing;
 use application::{
     AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
     VersionResolutionServiceImpl,
+    auth::use_cases::{
+        LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
+        ValidateTokenUseCase,
+    },
 };
 use infrastructure::{
     api_clients::{
         circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
         osv::OsvClient,
     },
+    auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::file_cache::FileCacheRepository,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
@@ -32,11 +37,81 @@ use infrastructure::{
     resilience::{CircuitBreaker, CircuitBreakerConfig},
 };
 use presentation::{AppState, create_router};
+use sqlx::postgres::PgPoolOptions;
 
 /// Create the application with the given configuration
 pub async fn create_app(
     config: Config,
 ) -> Result<axum::Router, Box<dyn std::error::Error + Send + Sync>> {
+    // Initialize database connection pool
+    let db_pool = PgPoolOptions::new()
+        .max_connections(config.database.max_connections)
+        .connect(&config.database.url)
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("Failed to connect to database: {}", e),
+            ))
+        })?;
+
+    tracing::info!("Database connection pool initialized");
+
+    // Run migrations
+    sqlx::migrate!("./migrations").run(&db_pool).await.map_err(
+        |e| -> Box<dyn std::error::Error + Send + Sync> {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to run migrations: {}", e),
+            ))
+        },
+    )?;
+
+    tracing::info!("Database migrations completed");
+
+    let db_pool = Arc::new(db_pool);
+
+    // Initialize auth services
+    let jwt_service = Arc::new(JwtService::new(
+        config.auth.jwt_secret.clone(),
+        config.auth.token_ttl_hours,
+        config.auth.refresh_token_ttl_hours,
+    ));
+
+    let password_hasher = Arc::new(PasswordHasher::new());
+    let api_key_generator = Arc::new(ApiKeyGenerator::with_length(config.auth.api_key_length));
+
+    // Initialize auth repositories
+    let user_repository: Arc<dyn domain::auth::repositories::IUserRepository> =
+        Arc::new(SqlxUserRepository::new(db_pool.clone()));
+    let api_key_repository: Arc<dyn domain::auth::repositories::IApiKeyRepository> =
+        Arc::new(SqlxApiKeyRepository::new(db_pool.clone()));
+
+    // Initialize auth use cases
+    let login_use_case = Arc::new(LoginUseCase::new(
+        user_repository.clone(),
+        password_hasher.clone(),
+        jwt_service.clone(),
+    ));
+
+    let register_use_case = Arc::new(RegisterUserUseCase::new(
+        user_repository.clone(),
+        password_hasher.clone(),
+        jwt_service.clone(),
+    ));
+
+    let validate_token_use_case = Arc::new(ValidateTokenUseCase::new(jwt_service.clone()));
+
+    let refresh_token_use_case = Arc::new(RefreshTokenUseCase::new(
+        jwt_service.clone(),
+        user_repository.clone(),
+    ));
+
+    let validate_api_key_use_case = Arc::new(ValidateApiKeyUseCase::new(
+        api_key_repository.clone(),
+        api_key_generator.clone(),
+    ));
+
     // Initialize infrastructure services
     let cache_repository = Arc::new(FileCacheRepository::new(
         config.cache.directory.clone(),
@@ -208,6 +283,18 @@ pub async fn create_app(
         version_resolution_service,
         config: config_arc.clone(),
         startup_time: std::time::Instant::now(),
+        // Auth-related state
+        db_pool: db_pool.clone(),
+        user_repository: user_repository.clone(),
+        api_key_repository: api_key_repository.clone(),
+        jwt_service: jwt_service.clone(),
+        password_hasher: password_hasher.clone(),
+        api_key_generator: api_key_generator.clone(),
+        login_use_case: login_use_case.clone(),
+        register_use_case: register_use_case.clone(),
+        validate_token_use_case: validate_token_use_case.clone(),
+        refresh_token_use_case: refresh_token_use_case.clone(),
+        validate_api_key_use_case: validate_api_key_use_case.clone(),
     };
 
     // Create router

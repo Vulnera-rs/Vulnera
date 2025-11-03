@@ -9,11 +9,18 @@ use vulnera_rust::{
     application::{
         AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
         VersionResolutionServiceImpl,
+        auth::use_cases::{
+            LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
+            ValidateTokenUseCase,
+        },
     },
     infrastructure::{
         api_clients::{
             circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
             osv::OsvClient,
+        },
+        auth::{
+            ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository,
         },
         cache::file_cache::FileCacheRepository,
         parsers::ParserFactory,
@@ -199,6 +206,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cache_service.clone(),
     ));
 
+    // Initialize database pool for authentication
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        eprintln!("\n❌ ERROR: DATABASE_URL environment variable is required");
+        eprintln!("   The application requires a PostgreSQL database for authentication.");
+        eprintln!();
+        eprintln!("📖 Quick Setup:");
+        eprintln!("   1. Set DATABASE_URL environment variable:");
+        eprintln!("      export DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'");
+        eprintln!();
+        eprintln!("   2. Run migrations:");
+        eprintln!("      sqlx migrate run --source migrations");
+        eprintln!();
+        eprintln!("   Or use the automated setup script:");
+        eprintln!("      ./scripts/prepare-sqlx-docker.sh");
+        eprintln!();
+        eprintln!("📚 See docs/SQLX_SETUP.md for detailed setup instructions");
+        eprintln!();
+        std::process::exit(1);
+    });
+
+    tracing::info!("Connecting to database for authentication services");
+
+    let db_pool = Arc::new(
+        sqlx::postgres::PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&database_url)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("\n❌ ERROR: Failed to connect to database");
+                eprintln!("   {}", e);
+                eprintln!();
+                eprintln!("   Please check:");
+                eprintln!("   - DATABASE_URL is correct");
+                eprintln!("   - PostgreSQL server is running");
+                eprintln!("   - Database exists and is accessible");
+                eprintln!("   - Network connectivity to database");
+                eprintln!();
+                std::process::exit(1);
+            }),
+    );
+
+    // Initialize auth infrastructure
+    let user_repository = Arc::new(SqlxUserRepository::new(db_pool.clone()))
+        as Arc<dyn vulnera_rust::domain::auth::repositories::IUserRepository>;
+    let api_key_repository = Arc::new(SqlxApiKeyRepository::new(db_pool.clone()))
+        as Arc<dyn vulnera_rust::domain::auth::repositories::IApiKeyRepository>;
+
+    let jwt_service = Arc::new(JwtService::new(
+        config.auth.jwt_secret.clone(),
+        config.auth.token_ttl_hours,
+        config.auth.refresh_token_ttl_hours,
+    ));
+
+    let password_hasher = Arc::new(PasswordHasher::new());
+    let api_key_generator = Arc::new(ApiKeyGenerator::new());
+
+    // Initialize auth use cases
+    let login_use_case = Arc::new(LoginUseCase::new(
+        user_repository.clone(),
+        password_hasher.clone(),
+        jwt_service.clone(),
+    ));
+
+    let register_use_case = Arc::new(RegisterUserUseCase::new(
+        user_repository.clone(),
+        password_hasher.clone(),
+        jwt_service.clone(),
+    ));
+
+    let validate_token_use_case = Arc::new(ValidateTokenUseCase::new(jwt_service.clone()));
+
+    let refresh_token_use_case = Arc::new(RefreshTokenUseCase::new(
+        jwt_service.clone(),
+        user_repository.clone(),
+    ));
+
+    let validate_api_key_use_case = Arc::new(ValidateApiKeyUseCase::new(
+        api_key_repository.clone(),
+        api_key_generator.clone(),
+    ));
+
     // Create application state
     let config_arc = Arc::new(config.clone());
     let app_state = AppState {
@@ -211,6 +299,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         version_resolution_service,
         config: config_arc.clone(),
         startup_time: std::time::Instant::now(),
+        db_pool,
+        user_repository,
+        api_key_repository,
+        jwt_service,
+        password_hasher,
+        api_key_generator,
+        login_use_case,
+        register_use_case,
+        validate_token_use_case,
+        refresh_token_use_case,
+        validate_api_key_use_case,
     };
 
     // Create router

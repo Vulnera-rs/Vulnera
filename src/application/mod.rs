@@ -3,6 +3,7 @@
 //! This module orchestrates the business logic and coordinates between
 //! the domain and infrastructure layers.
 
+pub mod auth;
 pub mod errors;
 pub mod services;
 pub mod use_cases;

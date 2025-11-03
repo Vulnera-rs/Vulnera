@@ -2,6 +2,7 @@
 //!
 //! This module contains the Axum web server setup, controllers, and API models.
 
+pub mod auth;
 pub mod controllers;
 pub mod middleware;
 pub mod models;
