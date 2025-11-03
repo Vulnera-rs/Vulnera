@@ -640,6 +640,7 @@ impl PackageRegistryClient for MavenCentralRegistryClient {
 }
 
 /// A multiplexer registry client that delegates to per-ecosystem clients.
+#[allow(dead_code)] // Fields are zero-sized structs; we create new instances in match for clarity
 pub struct MultiplexRegistryClient {
     npm: NpmRegistryClient,
     pypi: PyPiRegistryClient,
@@ -693,12 +694,13 @@ impl PackageRegistryClient for MultiplexRegistryClient {
         let ecosystem_clone = ecosystem.clone();
 
         // Apply retry logic to registry calls
-        // Note: We create new client instances for each retry attempt (they are stateless)
+        // Note: We create new client instances for each retry attempt (they are zero-sized stateless structs)
         retry_with_backoff_registry(retry_config, move || {
             let name = name.clone();
             let ecosystem = ecosystem_clone.clone();
             async move {
-                // Re-dispatch based on ecosystem - create new client instances as needed
+                // Dispatch to the appropriate client based on ecosystem
+                // Create new instances (zero-sized, so no allocation overhead)
                 match ecosystem {
                     Ecosystem::Npm => NpmRegistryClient.list_versions(ecosystem, &name).await,
                     Ecosystem::PyPI => PyPiRegistryClient.list_versions(ecosystem, &name).await,

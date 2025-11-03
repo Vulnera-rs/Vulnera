@@ -119,21 +119,16 @@ pub struct PackageConfig {
 }
 
 /// Rate limit strategy
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum RateLimitStrategy {
     /// Rate limit per IP address
+    #[default]
     Ip,
     /// Rate limit per API key
     ApiKey,
     /// Global rate limit for all requests
     Global,
-}
-
-impl Default for RateLimitStrategy {
-    fn default() -> Self {
-        RateLimitStrategy::Ip
-    }
 }
 
 /// Rate limiting configuration
@@ -271,15 +266,16 @@ pub struct NvdConfig {
 
 impl Default for NvdConfig {
     fn default() -> Self {
-        let mut retry = RetryConfigSerializable::default();
-        retry.initial_delay_ms = 2000; // NVD: 2s initial delay (slower service)
         Self {
             base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
             api_key: None,
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
             circuit_breaker: CircuitBreakerConfigSerializable::default(),
-            retry,
+            retry: RetryConfigSerializable {
+                initial_delay_ms: 2000, // NVD: 2s initial delay (slower service)
+                ..RetryConfigSerializable::default()
+            },
         }
     }
 }
@@ -415,11 +411,10 @@ impl Default for Config {
                 ttl_hours: 24,
             },
             apis: ApiConfig {
-                nvd: {
-                    let mut nvd = NvdConfig::default();
-                    nvd.base_url = "https://services.nvd.nist.gov/rest/json".to_string();
-                    nvd.rate_limit_per_30s = 5; // Without API key
-                    nvd
+                nvd: NvdConfig {
+                    base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
+                    rate_limit_per_30s: 5, // Without API key
+                    ..NvdConfig::default()
                 },
                 ghsa: GhsaConfig {
                     graphql_url: "https://api.github.com/graphql".to_string(),
