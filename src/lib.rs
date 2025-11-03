@@ -30,7 +30,9 @@ use infrastructure::{
 use presentation::{AppState, create_router};
 
 /// Create the application with the given configuration
-pub async fn create_app(config: Config) -> Result<axum::Router, Box<dyn std::error::Error>> {
+pub async fn create_app(
+    config: Config,
+) -> Result<axum::Router, Box<dyn std::error::Error + Send + Sync>> {
     // Initialize infrastructure services
     let cache_repository = Arc::new(FileCacheRepository::new(
         config.cache.directory.clone(),
@@ -46,10 +48,19 @@ pub async fn create_app(config: Config) -> Result<axum::Router, Box<dyn std::err
         config.apis.nvd.api_key.clone(),
     ));
     let ghsa_token_opt = config.apis.ghsa.token.clone().filter(|t| !t.is_empty());
-    let ghsa_client = Arc::new(GhsaClient::new(
-        ghsa_token_opt.unwrap_or_default(),
-        config.apis.ghsa.graphql_url.clone(),
-    ));
+    let ghsa_client = Arc::new(
+        GhsaClient::new(
+            ghsa_token_opt.unwrap_or_default(),
+            config.apis.ghsa.graphql_url.clone(),
+        )
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            tracing::error!(error=%e, "Failed to create GHSA client");
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to create GHSA client: {}", e),
+            ))
+        })?,
+    );
 
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
         osv_client,
@@ -73,13 +84,27 @@ pub async fn create_app(config: Config) -> Result<axum::Router, Box<dyn std::err
             config.apis.github.timeout_seconds,
             config.apis.github.reuse_ghsa_token,
         ).await.unwrap_or_else(|e| {
-            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, repository analysis disabled");
-            GitHubRepositoryClient::new(
-                octocrab::Octocrab::builder().build().expect("octocrab build"),
-                "https://api.github.com".into(),
-                false,
-                10,
-            )
+            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, attempting fallback");
+            // Fallback: try to create client without token
+            match octocrab::Octocrab::builder().build() {
+                Ok(octo) => GitHubRepositoryClient::new(
+                    octo,
+                    "https://api.github.com".into(),
+                    false,
+                    10,
+                ),
+                Err(err) => {
+                    tracing::error!(error=?err, "Failed to create fallback GitHubRepositoryClient, repository analysis disabled");
+                    // Create a client that will fail gracefully when used
+                    // This is a workaround for now - ideally we'd handle None in the service layer
+                    GitHubRepositoryClient::new(
+                        octocrab::Octocrab::default(),
+                        "https://api.github.com".into(),
+                        false,
+                        10,
+                    )
+                }
+            }
         })
     );
     let repository_analysis_service: Option<Arc<dyn application::RepositoryAnalysisService>> =

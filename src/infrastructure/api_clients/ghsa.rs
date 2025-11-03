@@ -184,22 +184,24 @@ impl GraphQLLocation {
 
 impl GhsaClient {
     /// Create a new GHSA client with the given token and GraphQL URL
-    pub fn new(token: String, graphql_url: String) -> Self {
+    pub fn new(token: String, graphql_url: String) -> Result<Self, VulnerabilityError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .user_agent("vulnera-rust/0.1.0")
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| VulnerabilityError::Network(
+                reqwest::Error::from(e).into()
+            ))?;
 
-        Self {
+        Ok(Self {
             client,
             token,
             graphql_url,
-        }
+        })
     }
 
     /// Create a new GHSA client with default configuration
-    pub fn default(token: String) -> Self {
+    pub fn default(token: String) -> Result<Self, VulnerabilityError> {
         Self::new(token, "https://api.github.com/graphql".to_string())
     }
 
@@ -293,8 +295,7 @@ impl GhsaClient {
 
             // Log individual errors with full context
             for (index, error) in errors.iter().enumerate() {
-                if error.has_location_info() {
-                    let primary_loc = error.primary_location().unwrap();
+                if let Some(primary_loc) = error.primary_location() {
                     tracing::warn!(
                         error_index = index,
                         message = %error.message,
@@ -378,8 +379,8 @@ impl GhsaClient {
             return format!(
                 "GraphQL error: {} {}",
                 error.message,
-                if error.has_location_info() {
-                    format!("at {}", error.primary_location().unwrap().format_location())
+                if let Some(loc) = error.primary_location() {
+                    format!("at {}", loc.format_location())
                 } else {
                     "(no location info)".to_string()
                 }
@@ -930,7 +931,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        );
+        ).expect("Failed to create test client");
 
         let result = client.security_advisories("express", "NPM", 50, None).await;
 
@@ -998,7 +999,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        );
+        ).expect("Failed to create test client");
         let package = create_test_package();
 
         let result = client.query_vulnerabilities(&package).await;
@@ -1053,7 +1054,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        );
+        ).expect("Failed to create test client");
 
         let result = client
             .get_vulnerability_details("GHSA-xxxx-xxxx-xxxx")
@@ -1093,7 +1094,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        );
+        ).expect("Failed to create test client");
 
         let result = client
             .get_vulnerability_details("GHSA-nonexistent-xxxx")
@@ -1111,7 +1112,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             "https://api.github.com/graphql".to_string(),
-        );
+        ).expect("Failed to create test client");
 
         let result = client.get_vulnerability_details("CVE-2022-24999").await;
 
@@ -1125,7 +1126,8 @@ mod tests {
         let server = Server::new_async().await;
 
         // Minimal GraphQL error response isn't needed; client returns 401 before calling server
-        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()));
+        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()))
+            .expect("Failed to create test client");
 
         let result = client.security_advisories("express", "NPM", 1, None).await;
 
@@ -1170,7 +1172,8 @@ mod tests {
             .create_async()
             .await;
 
-        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()));
+        let client = GhsaClient::new("".to_string(), format!("{}/graphql", server.url()))
+            .expect("Failed to create test client");
 
         let result = crate::infrastructure::api_clients::ghsa::with_request_ghsa_token(
             "scoped-token-123".to_string(),
@@ -1215,7 +1218,7 @@ mod tests {
         let client = GhsaClient::new(
             "test-token".to_string(),
             format!("{}/graphql", server.url()),
-        );
+        ).expect("Failed to create test client");
 
         let result = client.security_advisories("express", "NPM", 50, None).await;
 
