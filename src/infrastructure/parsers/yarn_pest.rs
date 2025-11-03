@@ -20,7 +20,6 @@ struct YarnLockPest;
 /// - It attempts to infer package names from header key specs by taking the substring
 ///   up to the last '@' (to support scoped packages like @scope/name@^1.2.3).
 /// - It returns packages with Ecosystem::Npm.
-/// - Priority is higher than the legacy YarnLockParser to ensure this runs first when registered.
 ///
 /// Wiring:
 /// - Ensure ParserFactory registers `YarnPestParser` before the legacy YarnLockParser and

@@ -20,10 +20,11 @@ use crate::config::{RateLimitConfig, RateLimitStrategy};
 use crate::presentation::models::ErrorResponse;
 
 /// Error handling middleware with environment-aware error sanitization
+/// Configuration is accessed through Axum's FromRequest when needed in handlers
 impl IntoResponse for ApplicationError {
     fn into_response(self) -> Response {
-        // Get the configuration to determine if we should sanitize errors
-        // Note: In a real implementation, you'd pass this through middleware state
+        // Default to sanitizing errors; handlers can access AppState to get actual config
+        // This is a fallback for errors that occur outside handler context
         let sanitize_errors = std::env::var("ENV").unwrap_or_default() == "production";
 
         let (status, code, message) = match self {

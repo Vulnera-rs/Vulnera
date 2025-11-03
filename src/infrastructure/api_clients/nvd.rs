@@ -550,14 +550,19 @@ impl VulnerabilityApiClient for NvdClient {
         let name = package.name.clone();
 
         // Execute blocking sqlite queries on a blocking thread
+        // Optimized: pre-allocate output vector and avoid unnecessary allocations
         let cves = task::spawn_blocking(move || {
             // 1) search in descriptions for the package name -> CVE IDs
             let ids = search_description(&cfg, &name).unwrap_or_default();
+            if ids.is_empty() {
+                return Vec::new();
+            }
 
             // 2) fetch each CVE and return Cve objects
+            // Pre-allocate with known capacity for better performance
             let mut out = Vec::with_capacity(ids.len());
-            for id in ids {
-                if let Ok(c) = search_by_id(&cfg, &id) {
+            for id in &ids {
+                if let Ok(c) = search_by_id(&cfg, id) {
                     out.push(c);
                 }
             }

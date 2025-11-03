@@ -65,19 +65,47 @@ pub async fn create_app(
         config.apis.nvd.base_url.clone(),
         config.apis.nvd.api_key.clone(),
     ));
-    let ghsa_token_opt = config.apis.ghsa.token.clone().filter(|t| !t.is_empty());
+
+    // Determine GHSA token: reuse GitHub token if enabled, otherwise use GHSA-specific token
+    let ghsa_token = if config.apis.github.reuse_ghsa_token {
+        // Token sharing optimization: use GitHub token for GHSA when enabled
+        config
+            .apis
+            .github
+            .token
+            .clone()
+            .filter(|t| !t.is_empty())
+            .or_else(|| config.apis.ghsa.token.clone().filter(|t| !t.is_empty()))
+            .unwrap_or_default()
+    } else {
+        // Use GHSA-specific token when not sharing
+        config
+            .apis
+            .ghsa
+            .token
+            .clone()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_default()
+    };
+
+    if ghsa_token.is_empty() {
+        tracing::info!(
+            "GHSA token not provided; GitHub advisories lookups will be skipped unless provided via environment."
+        );
+    } else if config.apis.github.reuse_ghsa_token && config.apis.github.token.is_some() {
+        tracing::info!("GHSA client configured to reuse GitHub token for authentication");
+    }
+
     let ghsa_client_inner = Arc::new(
-        GhsaClient::new(
-            ghsa_token_opt.unwrap_or_default(),
-            config.apis.ghsa.graphql_url.clone(),
-        )
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            tracing::error!(error=%e, "Failed to create GHSA client");
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create GHSA client: {}", e),
-            ))
-        })?,
+        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone()).map_err(
+            |e| -> Box<dyn std::error::Error + Send + Sync> {
+                tracing::error!(error=%e, "Failed to create GHSA client");
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create GHSA client: {}", e),
+                ))
+            },
+        )?,
     );
 
     // Create retry configs (OSV uses default, NVD and GHSA from config)
@@ -122,44 +150,36 @@ pub async fn create_app(
     ));
     let report_service = Arc::new(ReportServiceImpl::new());
 
-    // GitHub repository analysis components
-    let github_client = Arc::new(
-        GitHubRepositoryClient::from_token(
+    // Initialize GitHub repository client for repository analysis feature
+    let github_client: Option<Arc<GitHubRepositoryClient>> =
+        match GitHubRepositoryClient::from_token(
             config.apis.github.token.clone(),
             Some(config.apis.github.base_url.clone()),
             config.apis.github.timeout_seconds,
             config.apis.github.reuse_ghsa_token,
-        ).await.unwrap_or_else(|e| {
-            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, attempting fallback");
-            // Fallback: try to create client without token
-            match octocrab::Octocrab::builder().build() {
-                Ok(octo) => GitHubRepositoryClient::new(
-                    octo,
-                    "https://api.github.com".into(),
-                    false,
-                    10,
-                ),
-                Err(err) => {
-                    tracing::error!(error=?err, "Failed to create fallback GitHubRepositoryClient, repository analysis disabled");
-                    // Create a client that will fail gracefully when used
-                    // This is a workaround for now - ideally we'd handle None in the service layer
-                    GitHubRepositoryClient::new(
-                        octocrab::Octocrab::default(),
-                        "https://api.github.com".into(),
-                        false,
-                        10,
-                    )
-                }
+        )
+        .await
+        {
+            Ok(client) => Some(Arc::new(client)),
+            Err(e) => {
+                tracing::warn!(error=?e, "Failed to initialize GitHubRepositoryClient, repository analysis will be disabled");
+                // Gracefully disable repository analysis feature when client initialization fails
+                None
             }
-        })
-    );
+        };
+
+    // Create repository analysis service only if GitHub client is available
     let repository_analysis_service: Option<Arc<dyn application::RepositoryAnalysisService>> =
-        Some(Arc::new(application::RepositoryAnalysisServiceImpl::new(
-            github_client.clone(),
-            vulnerability_repository.clone(),
-            parser_factory.clone(),
-            Arc::new(config.clone()),
-        )));
+        if let Some(client) = github_client {
+            Some(Arc::new(application::RepositoryAnalysisServiceImpl::new(
+                client,
+                vulnerability_repository.clone(),
+                parser_factory.clone(),
+                Arc::new(config.clone()),
+            )))
+        } else {
+            None
+        };
 
     // Create popular package service with config
     let config_arc = Arc::new(config.clone());
@@ -177,6 +197,7 @@ pub async fn create_app(
     ));
 
     // Create application state
+    let config_arc = Arc::new(config.clone());
     let app_state = AppState {
         analysis_service,
         cache_service,
@@ -185,6 +206,7 @@ pub async fn create_app(
         popular_package_service,
         repository_analysis_service,
         version_resolution_service,
+        config: config_arc.clone(),
         startup_time: std::time::Instant::now(),
     };
 
