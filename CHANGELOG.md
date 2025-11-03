@@ -3,6 +3,50 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.1.1]
+
+### Added
+
+- Token sharing optimization between GitHub and GHSA clients:
+  - New configuration option `reuse_ghsa_token` in `GitHubConfig` (default: `true`)
+  - When enabled, the GitHub token is automatically shared with the GHSA client
+  - Eliminates the need for separate GHSA token configuration in most cases
+  - Graceful fallback to GHSA-specific token if GitHub token is unavailable
+  - Benefits: Simplified configuration, reduced token management overhead, improved security
+
+### Changed
+
+- **Architectural improvements - converted workarounds to proper implementations:**
+  - Error sanitization middleware now passes configuration through `AppState` instead of reading environment variables directly
+  - GitHub repository client initialization now properly handles `None` cases instead of creating fallback clients
+  - `AppState` now includes `config` field for proper configuration access throughout the application
+  - Removed all temporary workarounds and converted them to production-ready architectural patterns
+
+- **Legacy code removal:**
+  - Removed legacy Gradle parser from production code (only Pest-based parser remains)
+  - Legacy parser kept in tests only for backward compatibility verification
+  - Removed "skeleton", "stub", and "initial scaffold" comments from production code
+  - Cleaned up all `#[allow(dead_code)]` annotations with proper documentation
+
+- **Performance optimizations:**
+  - `ParserFactory` now uses `HashMap` for O(1) parser lookup instead of linear scan
+  - Cache key generation optimized with pre-allocated capacity to reduce reallocations
+  - NVD client query optimization: early return for empty CVE lists and pre-allocated vectors
+  - Parallelized popular package vulnerability queries using `tokio::task::JoinSet` with bounded concurrency (10 concurrent queries)
+
+- **Code quality improvements:**
+  - Fixed all clippy warnings across the codebase
+  - Improved error handling: `GhsaClient::new` now returns `Result` instead of panicking
+  - Enhanced error logging with proper optional value handling
+  - Removed redundant error conversions and closures
+  - Improved type safety and removed unnecessary type conversions
+
+### Documentation
+
+- README.md: Added comprehensive "Token Sharing Optimization" section explaining the feature, configuration, and benefits
+- CHANGELOG.md: Documented all architectural improvements, legacy code removal, performance optimizations, and code quality improvements
+- Configuration examples updated to include token sharing environment variables
+
 ## [0.1.0]
 
 ### Added
@@ -68,6 +112,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
     - `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3`
     - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false`
     - `VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50`
+    - `VULNERA__APIS__GITHUB__REUSE_GHSA_TOKEN=true` (token sharing optimization)
 
 ### Fixed
 
