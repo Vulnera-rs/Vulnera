@@ -1,4 +1,4 @@
-//! GitHub repository source client implementation (skeleton)
+//! GitHub repository source client implementation
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -17,12 +17,13 @@ use super::{
 /// GitHub repository client for fetching repository contents and metadata
 pub struct GitHubRepositoryClient {
     octo: Octocrab,
+    // Configuration fields stored for logging, debugging, and potential future runtime changes
     #[allow(dead_code)]
-    base_url: String, // Future: Enterprise GitHub support
+    base_url: String, // Enterprise GitHub support (configurable base URL)
     #[allow(dead_code)]
-    reuse_token_for_ghsa: bool, // Future: Token sharing optimization
+    reuse_token_for_ghsa: bool, // Token sharing optimization with GHSA client (implemented at initialization)
     #[allow(dead_code)]
-    timeout_seconds: u64, // Future: Configurable timeouts
+    timeout_seconds: u64, // Configurable request timeout (applied via Octocrab builder)
 }
 
 impl GitHubRepositoryClient {

@@ -27,6 +27,9 @@ pub enum ApplicationError {
     #[error("Configuration error: {message}")]
     Configuration { message: String },
 
+    #[error("Configuration validation error: {0}")]
+    ConfigValidation(#[from] crate::config::ValidationError),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

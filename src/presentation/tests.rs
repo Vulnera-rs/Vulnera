@@ -77,6 +77,7 @@ fn dummy_state() -> AppState {
         MultiplexRegistryClient::new(),
     )));
 
+    let config = Arc::new(crate::Config::default());
     AppState {
         analysis_service,
         cache_service,
@@ -85,6 +86,7 @@ fn dummy_state() -> AppState {
         popular_package_service,
         repository_analysis_service: None,
         version_resolution_service,
+        config,
         startup_time: std::time::Instant::now(),
     }
 }

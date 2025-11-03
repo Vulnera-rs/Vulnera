@@ -24,11 +24,12 @@ use crate::presentation::{
         health::{health_check, metrics},
     },
     middleware::{
-        ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
-        security_headers_middleware,
+        RateLimiterState, ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
+        rate_limit_middleware, security_headers_middleware,
     },
     models::*,
 };
+use std::sync::Arc;
 
 /// OpenAPI documentation
 #[derive(OpenApi)]
@@ -205,6 +206,15 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     // Conditionally add HTTPS enforcement middleware
     if config.server.security.enforce_https {
         router = router.layer(middleware::from_fn(https_enforcement_middleware));
+    }
+
+    // Conditionally add rate limiting middleware
+    if config.server.rate_limit.enabled {
+        let rate_limiter_state = Arc::new(RateLimiterState::new(config.server.rate_limit.clone()));
+        router = router.layer(middleware::from_fn_with_state(
+            rate_limiter_state.clone(),
+            rate_limit_middleware,
+        ));
     }
 
     router

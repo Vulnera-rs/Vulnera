@@ -20,7 +20,6 @@ struct YarnLockPest;
 /// - It attempts to infer package names from header key specs by taking the substring
 ///   up to the last '@' (to support scoped packages like @scope/name@^1.2.3).
 /// - It returns packages with Ecosystem::Npm.
-/// - Priority is higher than the legacy YarnLockParser to ensure this runs first when registered.
 ///
 /// Wiring:
 /// - Ensure ParserFactory registers `YarnPestParser` before the legacy YarnLockParser and
@@ -93,8 +92,17 @@ impl YarnPestParser {
     }
 
     fn parse_file_pairs<'a>(&self, content: &'a str) -> Result<Pairs<'a, Rule>, ParseError> {
-        YarnLockPest::parse(Rule::file, content).map_err(move |e| ParseError::MissingField {
-            field: format!("yarn.lock parse error: {}", e),
+        YarnLockPest::parse(Rule::file, content).map_err(move |e| {
+            // Extract line number from error if available
+            let (line, col) = match e.line_col {
+                pest::error::LineColLocation::Pos((l, c)) => (l, c),
+                pest::error::LineColLocation::Span((l, c), _) => (l, c),
+            };
+            let error_msg = format!(
+                "yarn.lock parse error at line {}, column {}: {}",
+                line, col, e
+            );
+            ParseError::MissingField { field: error_msg }
         })
     }
 
@@ -141,16 +149,21 @@ impl YarnPestParser {
                     }
                 }
                 Rule::version_line => {
-                    // version_line captures: INDENT "version" quoted_string
-                    // Extract via child quoted_string or fallback to raw scan
+                    // version_line captures: INDENT "version" version_string
+                    // Extract via child version_string (which captures quoted_string)
                     let mut found: Option<String> = None;
                     for vp in p.clone().into_inner() {
-                        if vp.as_rule() == Rule::quoted_string {
-                            found = Some(Self::dequote(vp.as_str()));
-                            break;
+                        // version_string is a typed capture, check for it or quoted_string
+                        match vp.as_rule() {
+                            Rule::version_string | Rule::quoted_string => {
+                                found = Some(Self::dequote(vp.as_str()));
+                                break;
+                            }
+                            _ => {}
                         }
                     }
                     if found.is_none() {
+                        // Fallback: scan raw text
                         let raw = p.as_str();
                         if let Some(start) = raw.find('"') {
                             if let Some(end_off) = raw[start + 1..].find('"') {
@@ -161,8 +174,49 @@ impl YarnPestParser {
                     }
                     version = found;
                 }
+                Rule::peer_dependencies_block
+                | Rule::bundled_dependencies_block
+                | Rule::dependencies_block
+                | Rule::optional_dependencies_block => {
+                    // Process dependency blocks (peerDependencies, bundledDependencies, etc.)
+                    // Extract dependency names for potential future use or validation
+                    // For now, we just recognize these blocks - they don't affect package extraction
+                    // but improve error recovery by not failing on unknown blocks
+                    for dep_item in p.into_inner() {
+                        match dep_item.as_rule() {
+                            Rule::dep_kv_line => {
+                                // Extract dependency name from dep_key
+                                for dep_part in dep_item.into_inner() {
+                                    if dep_part.as_rule() == Rule::dep_key {
+                                        // Dependency key captured - could be used for validation
+                                        // Currently we just acknowledge it for error recovery
+                                        let _dep_name = dep_part.as_str();
+                                    }
+                                }
+                            }
+                            Rule::dep_name_line => {
+                                // For bundledDependencies, sometimes just names are listed
+                                for dep_part in dep_item.into_inner() {
+                                    if dep_part.as_rule() == Rule::dep_key {
+                                        let _dep_name = dep_part.as_str();
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Rule::malformed_line => {
+                    // Error recovery: log malformed lines but continue parsing
+                    let line_num = entry_text[..entry.as_span().start()].lines().count() + 1;
+                    tracing::debug!(
+                        line = line_num,
+                        content = %p.as_str().trim(),
+                        "Skipping malformed line in yarn.lock (error recovery)"
+                    );
+                }
                 _ => {
-                    // ignore other blocks
+                    // ignore other blocks (resolved, integrity, comments, etc.)
                 }
             }
         }
@@ -486,6 +540,62 @@ minimist@^1.2.8:
 
         assert!(pkgs.iter().any(|p| p.name == "minimist"
             && p.version == Version::parse("1.2.8").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
+    }
+
+    #[tokio::test]
+    async fn test_peer_dependencies_entry() {
+        // Entry with peerDependencies block should parse correctly
+        let content = r#"
+react-redux@^8.1.0:
+  version "8.1.3"
+  peerDependencies:
+    react "^16.8.0 || ^17.0.0 || ^18.0.0"
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        assert!(pkgs.iter().any(|p| p.name == "react-redux"
+            && p.version == Version::parse("8.1.3").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
+    }
+
+    #[tokio::test]
+    async fn test_bundled_dependencies_entry() {
+        // Entry with bundledDependencies block should parse correctly
+        let content = r#"
+some-package@^1.0.0:
+  version "1.2.3"
+  bundledDependencies:
+    - "bundled-dep"
+    other-bundled "^2.0.0"
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        assert!(pkgs.iter().any(|p| p.name == "some-package"
+            && p.version == Version::parse("1.2.3").unwrap()
+            && p.ecosystem == Ecosystem::Npm));
+    }
+
+    #[tokio::test]
+    async fn test_error_recovery_malformed_section() {
+        // Entry with malformed line should still parse valid parts
+        let content = r#"
+valid-package@^1.0.0:
+  version "1.0.0"
+  this is a malformed line that should be skipped
+  resolved "https://registry.yarnpkg.com/valid-package/-/valid-package-1.0.0.tgz"
+"#;
+
+        let parser = YarnPestParser::new();
+        let pkgs = parser.parse_file(content).await.unwrap();
+
+        // Should still parse the valid package despite malformed line
+        assert!(pkgs.iter().any(|p| p.name == "valid-package"
+            && p.version == Version::parse("1.0.0").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
 

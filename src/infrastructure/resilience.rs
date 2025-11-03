@@ -264,6 +264,15 @@ where
                     return Err(error);
                 }
 
+                // Log retry attempt
+                tracing::debug!(
+                    attempt = attempts,
+                    max_attempts = config.max_attempts,
+                    delay_ms = delay.as_millis(),
+                    error = %error,
+                    "Retrying operation with exponential backoff"
+                );
+
                 // Wait before retrying
                 tokio::time::sleep(delay).await;
 
@@ -280,7 +289,7 @@ where
 }
 
 /// Check if an error is retryable
-fn is_retryable_error(error: &VulnerabilityError) -> bool {
+pub fn is_retryable_error(error: &VulnerabilityError) -> bool {
     match error {
         VulnerabilityError::Network(_) => true,
         VulnerabilityError::Timeout { .. } => true,
@@ -289,6 +298,70 @@ fn is_retryable_error(error: &VulnerabilityError) -> bool {
             *status >= 500 || *status == 429
         }
         VulnerabilityError::Api(ApiError::ServiceUnavailable) => true,
+        _ => false,
+    }
+}
+
+/// Execute a function with exponential backoff retry logic for RegistryError
+pub async fn retry_with_backoff_registry<F, Fut, T>(
+    config: RetryConfig,
+    mut operation: F,
+) -> Result<T, crate::infrastructure::registries::RegistryError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, crate::infrastructure::registries::RegistryError>>,
+{
+    let mut attempts = 0;
+    let mut delay = config.initial_delay;
+
+    loop {
+        attempts += 1;
+
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(error) => {
+                if attempts >= config.max_attempts {
+                    return Err(error);
+                }
+
+                // Check if error is retryable
+                if !is_retryable_registry_error(&error) {
+                    return Err(error);
+                }
+
+                // Log retry attempt
+                tracing::debug!(
+                    attempt = attempts,
+                    max_attempts = config.max_attempts,
+                    delay_ms = delay.as_millis(),
+                    error = %error,
+                    "Retrying registry operation"
+                );
+
+                // Wait before retrying
+                tokio::time::sleep(delay).await;
+
+                // Calculate next delay with exponential backoff
+                delay = std::cmp::min(
+                    Duration::from_millis(
+                        (delay.as_millis() as f64 * config.backoff_multiplier) as u64,
+                    ),
+                    config.max_delay,
+                );
+            }
+        }
+    }
+}
+
+/// Check if a RegistryError is retryable
+fn is_retryable_registry_error(error: &crate::infrastructure::registries::RegistryError) -> bool {
+    match error {
+        crate::infrastructure::registries::RegistryError::Http { status, .. } => {
+            // Retry on server errors (5xx) and rate limiting (429)
+            status.map(|s| s >= 500 || s == 429).unwrap_or(true) // Default to retryable if no status
+        }
+        crate::infrastructure::registries::RegistryError::RateLimited => true,
+        // Don't retry on NotFound, Parse, UnsupportedEcosystem, or Other
         _ => false,
     }
 }

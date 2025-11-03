@@ -362,7 +362,7 @@ pub struct PackageSummary {
 }
 
 // -------------------------------------------------------------------------------------------------
-// Repository Analysis (GitHub) - Service Trait & Data Structures (initial scaffold)
+// Repository Analysis (GitHub) - Service Trait & Data Structures
 // -------------------------------------------------------------------------------------------------
 
 /// Input for analyzing a repository (already validated & parsed from request/URL)
@@ -423,7 +423,7 @@ use crate::infrastructure::repository_source::RepositorySourceClient;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// Initial scaffold implementation (logic will be filled in subsequent commits)
+/// Repository analysis service implementation
 pub struct RepositoryAnalysisServiceImpl<
     C: RepositorySourceClient,
     R: VulnerabilityRepository + 'static,
@@ -827,6 +827,7 @@ impl<C: CacheService> PopularPackageServiceImpl<C> {
     }
 
     /// Query vulnerabilities for all popular packages
+    /// Optimized: queries are executed in parallel with bounded concurrency
     async fn query_popular_packages(&self) -> Result<Vec<Vulnerability>, ApplicationError> {
         let packages = self.get_popular_packages();
         let mut all_vulnerabilities = Vec::new();
@@ -836,33 +837,53 @@ impl<C: CacheService> PopularPackageServiceImpl<C> {
             packages.len()
         );
 
-        for (ecosystem, name, version) in packages {
-            if let Ok(version_obj) = crate::domain::Version::parse(&version) {
-                if let Ok(package) = Package::new(name.clone(), version_obj, ecosystem) {
-                    match self
-                        .vulnerability_repository
-                        .find_vulnerabilities(&package)
-                        .await
-                    {
-                        Ok(vulns) => {
-                            let total = vulns.len();
-                            let filtered: Vec<Vulnerability> = vulns
-                                .into_iter()
-                                .filter(|v| v.affects_package(&package))
-                                .collect();
-                            debug!(
-                                "Found {} vulnerabilities for {} ({} affect current version {})",
-                                total,
-                                name,
-                                filtered.len(),
-                                package.version
-                            );
-                            all_vulnerabilities.extend(filtered);
-                        }
-                        Err(e) => {
-                            debug!("No vulnerabilities found for {}: {}", name, e);
-                        }
+        use tokio::task::JoinSet;
+        let mut join_set: JoinSet<Result<Vec<Vulnerability>, ApplicationError>> = JoinSet::new();
+        let max_concurrent = 10; // Limit concurrent queries to avoid overwhelming the system
+        let repo = self.vulnerability_repository.clone();
+
+        // Process packages in chunks for bounded concurrency
+        for chunk in packages.chunks(max_concurrent) {
+            // Spawn tasks for current chunk
+            for (ecosystem, name, version) in chunk {
+                if let Ok(version_obj) = crate::domain::Version::parse(version) {
+                    let ecosystem_clone = ecosystem.clone();
+                    if let Ok(package) = Package::new(name.clone(), version_obj, ecosystem_clone) {
+                        let repo_clone = repo.clone();
+                        let name_clone = name.clone();
+                        let package_clone = package.clone();
+
+                        join_set.spawn(async move {
+                            match repo_clone.find_vulnerabilities(&package_clone).await {
+                                Ok(vulns) => {
+                                    let total = vulns.len();
+                                    let filtered: Vec<Vulnerability> = vulns
+                                        .into_iter()
+                                        .filter(|v| v.affects_package(&package_clone))
+                                        .collect();
+                                    debug!(
+                                        "Found {} vulnerabilities for {} ({} affect current version {})",
+                                        total,
+                                        name_clone,
+                                        filtered.len(),
+                                        package_clone.version
+                                    );
+                                    Ok(filtered)
+                                }
+                                Err(e) => {
+                                    debug!("No vulnerabilities found for {}: {}", name_clone, e);
+                                    Ok(Vec::new())
+                                }
+                            }
+                        });
                     }
+                }
+            }
+
+            // Wait for current chunk to complete before starting next
+            while let Some(result) = join_set.join_next().await {
+                if let Ok(Ok(vulns)) = result {
+                    all_vulnerabilities.extend(vulns);
                 }
             }
         }
@@ -1012,13 +1033,19 @@ impl CacheServiceImpl {
     }
 
     /// Generate cache key for package vulnerabilities
+    /// Optimized with capacity hint to avoid reallocations
     pub fn package_vulnerabilities_key(package: &Package) -> String {
-        format!(
-            "vuln:{}:{}:{}",
-            package.ecosystem.canonical_name(),
-            package.name,
-            package.version
-        )
+        let ecosystem_name = package.ecosystem.canonical_name();
+        let version_str = package.version.to_string();
+        let estimated_capacity = 5 + ecosystem_name.len() + package.name.len() + version_str.len();
+        let mut key = String::with_capacity(estimated_capacity);
+        key.push_str("vuln:");
+        key.push_str(ecosystem_name);
+        key.push(':');
+        key.push_str(&package.name);
+        key.push(':');
+        key.push_str(&version_str);
+        key
     }
 
     /// Generate cache key for vulnerability details
@@ -1747,13 +1774,8 @@ impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
                 join_set.spawn(async move {
                     let package_id = package_clone.identifier();
 
-                    // Inline the vulnerability lookup logic
-                    let cache_key = format!(
-                        "vuln:{}:{}:{}",
-                        package_clone.ecosystem.canonical_name(),
-                        package_clone.name,
-                        package_clone.version
-                    );
+                    // Use optimized cache key generation
+                    let cache_key = CacheServiceImpl::package_vulnerabilities_key(&package_clone);
 
                     // Check cache first
                     if let Ok(Some(cached_vulns)) =
