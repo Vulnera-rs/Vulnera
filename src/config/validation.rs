@@ -276,6 +276,7 @@ mod tests {
             request_timeout_seconds: 30,
             allowed_origins: vec![],
             security: crate::config::SecurityConfig::default(),
+            rate_limit: crate::config::RateLimitConfig::default(),
         };
         assert!(valid.validate().is_ok());
 
@@ -331,6 +332,7 @@ mod tests {
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
             circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
+            retry: crate::config::RetryConfigSerializable::default(),
         };
         assert!(valid.validate().is_ok());
 
@@ -364,6 +366,7 @@ mod tests {
             token: None,
             timeout_seconds: 30,
             circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
+            retry: crate::config::RetryConfigSerializable::default(),
         };
         assert!(valid.validate().is_ok());
 

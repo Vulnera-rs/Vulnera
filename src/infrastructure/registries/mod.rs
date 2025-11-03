@@ -679,15 +679,50 @@ impl PackageRegistryClient for MultiplexRegistryClient {
         ecosystem: Ecosystem,
         name: &str,
     ) -> Result<Vec<VersionInfo>, RegistryError> {
-        match ecosystem {
-            Ecosystem::Npm => self.npm.list_versions(ecosystem, name).await,
-            Ecosystem::PyPI => self.pypi.list_versions(ecosystem, name).await,
-            Ecosystem::RubyGems => self.rubygems.list_versions(ecosystem, name).await,
-            Ecosystem::NuGet => self.nuget.list_versions(ecosystem, name).await,
-            Ecosystem::Cargo => self.crates.list_versions(ecosystem, name).await,
-            Ecosystem::Packagist => self.packagist.list_versions(ecosystem, name).await,
-            Ecosystem::Go => self.goproxy.list_versions(ecosystem, name).await,
-            Ecosystem::Maven => self.maven_central.list_versions(ecosystem, name).await,
-        }
+        use crate::infrastructure::resilience::{RetryConfig, retry_with_backoff_registry};
+
+        // Default retry config for registry calls (3 retries, 1s initial delay)
+        let retry_config = RetryConfig {
+            max_attempts: 3,
+            initial_delay: std::time::Duration::from_secs(1),
+            max_delay: std::time::Duration::from_secs(30),
+            backoff_multiplier: 2.0,
+        };
+
+        let name = name.to_string();
+        let ecosystem_clone = ecosystem.clone();
+
+        // Apply retry logic to registry calls
+        // Note: We create new client instances for each retry attempt (they are stateless)
+        retry_with_backoff_registry(retry_config, move || {
+            let name = name.clone();
+            let ecosystem = ecosystem_clone.clone();
+            async move {
+                // Re-dispatch based on ecosystem - create new client instances as needed
+                match ecosystem {
+                    Ecosystem::Npm => NpmRegistryClient.list_versions(ecosystem, &name).await,
+                    Ecosystem::PyPI => PyPiRegistryClient.list_versions(ecosystem, &name).await,
+                    Ecosystem::RubyGems => {
+                        RubyGemsRegistryClient.list_versions(ecosystem, &name).await
+                    }
+                    Ecosystem::NuGet => NuGetRegistryClient.list_versions(ecosystem, &name).await,
+                    Ecosystem::Cargo => {
+                        CratesIoRegistryClient.list_versions(ecosystem, &name).await
+                    }
+                    Ecosystem::Packagist => {
+                        PackagistRegistryClient
+                            .list_versions(ecosystem, &name)
+                            .await
+                    }
+                    Ecosystem::Go => GoProxyRegistryClient.list_versions(ecosystem, &name).await,
+                    Ecosystem::Maven => {
+                        MavenCentralRegistryClient
+                            .list_versions(ecosystem, &name)
+                            .await
+                    }
+                }
+            }
+        })
+        .await
     }
 }

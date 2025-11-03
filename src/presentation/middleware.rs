@@ -1,17 +1,22 @@
 //! HTTP middleware for the web server
 
 use axum::{
-    Json,
-    extract::Request,
+    extract::{Request, State},
     http::{HeaderValue, StatusCode},
     middleware::Next,
-    response::{IntoResponse, Redirect, Response},
+    response::{IntoResponse, Json, Redirect, Response},
 };
 use chrono::Utc;
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::application::errors::ApplicationError;
+use crate::config::{RateLimitConfig, RateLimitStrategy};
 use crate::presentation::models::ErrorResponse;
 
 /// Error handling middleware with environment-aware error sanitization
@@ -252,5 +257,292 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
         .await
     } else {
         next.run(request).await
+    }
+}
+
+/// Token bucket state for rate limiting
+#[derive(Debug, Clone)]
+struct TokenBucket {
+    /// Number of tokens available
+    tokens: u32,
+    /// Maximum capacity of the bucket
+    capacity: u32,
+    /// Last refill timestamp (Unix timestamp in seconds)
+    last_refill: u64,
+    /// Refill rate per second (tokens per second)
+    refill_rate: f64,
+}
+
+impl TokenBucket {
+    fn new(capacity: u32, refill_rate: f64) -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        Self {
+            tokens: capacity,
+            capacity,
+            last_refill: now,
+            refill_rate,
+        }
+    }
+
+    /// Check if a token can be consumed, and consume it if available
+    fn try_consume(&mut self) -> bool {
+        self.refill();
+
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get the number of tokens remaining
+    fn remaining(&self) -> u32 {
+        self.tokens
+    }
+
+    /// Get the time until the next token is available (in seconds)
+    fn retry_after(&self) -> u64 {
+        if self.tokens > 0 {
+            0
+        } else {
+            // Calculate time until next token based on refill rate
+            (1.0 / self.refill_rate).ceil() as u64
+        }
+    }
+
+    /// Refill tokens based on elapsed time
+    fn refill(&mut self) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let elapsed = now.saturating_sub(self.last_refill);
+        if elapsed == 0 {
+            return;
+        }
+
+        // Calculate tokens to add based on elapsed time
+        let tokens_to_add = (elapsed as f64 * self.refill_rate) as u32;
+        if tokens_to_add > 0 {
+            self.tokens = (self.tokens + tokens_to_add).min(self.capacity);
+            self.last_refill = now;
+        }
+    }
+}
+
+/// Rate limiter state (shared across requests)
+#[derive(Debug, Clone)]
+pub struct RateLimiterState {
+    /// Per-key token buckets (key depends on strategy: IP, API key, or "global")
+    buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
+    /// Rate limit configuration
+    config: RateLimitConfig,
+    /// Cleanup task handle (for periodic cleanup)
+    _cleanup_handle: Arc<tokio::task::JoinHandle<()>>,
+}
+
+impl RateLimiterState {
+    /// Create a new rate limiter state
+    pub fn new(config: RateLimitConfig) -> Self {
+        let buckets = Arc::new(RwLock::new(HashMap::<String, TokenBucket>::new()));
+        let buckets_clone = buckets.clone();
+
+        // Start cleanup task to remove expired entries
+        let cleanup_interval = Duration::from_secs(config.cleanup_interval_seconds);
+        let cleanup_handle = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(cleanup_interval);
+            loop {
+                interval.tick().await;
+                let mut buckets = buckets_clone.write().await;
+
+                // Remove buckets that haven't been accessed recently (older than 1 hour)
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let expire_time = 3600; // 1 hour
+
+                buckets.retain(|_, bucket| {
+                    let elapsed = now.saturating_sub(bucket.last_refill);
+                    elapsed < expire_time
+                });
+
+                if buckets.len() > 0 {
+                    tracing::debug!(
+                        buckets_count = buckets.len(),
+                        "Rate limiter cleanup: retained buckets"
+                    );
+                }
+            }
+        });
+
+        Self {
+            buckets,
+            config,
+            _cleanup_handle: Arc::new(cleanup_handle),
+        }
+    }
+
+    /// Check if a request should be rate limited
+    async fn check_rate_limit(&self, key: &str) -> Result<(), (u64, u32, u32)> {
+        // Calculate refill rate per second based on requests per minute
+        let refill_rate = self.config.requests_per_minute as f64 / 60.0;
+        let capacity = self.config.requests_per_minute;
+
+        let mut buckets = self.buckets.write().await;
+
+        let bucket = buckets
+            .entry(key.to_string())
+            .or_insert_with(|| TokenBucket::new(capacity, refill_rate));
+
+        if bucket.try_consume() {
+            Ok(())
+        } else {
+            let retry_after = bucket.retry_after();
+            let limit = self.config.requests_per_minute;
+            let remaining = bucket.remaining();
+            Err((retry_after, limit, remaining))
+        }
+    }
+
+    /// Get the rate limit key based on strategy
+    fn get_key(&self, request: &Request) -> String {
+        match self.config.strategy {
+            RateLimitStrategy::Ip => {
+                // Try to get IP from various headers (for proxied requests)
+                request
+                    .headers()
+                    .get("x-forwarded-for")
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| s.split(',').next())
+                    .map(|s| s.trim().to_string())
+                    .or_else(|| {
+                        request
+                            .headers()
+                            .get("x-real-ip")
+                            .and_then(|h| h.to_str().ok())
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_else(|| "unknown-ip".to_string())
+            }
+            RateLimitStrategy::ApiKey => {
+                // Get API key from Authorization header or X-API-Key header
+                request
+                    .headers()
+                    .get("x-api-key")
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        request
+                            .headers()
+                            .get(axum::http::header::AUTHORIZATION)
+                            .and_then(|h| h.to_str().ok())
+                            .and_then(|s| {
+                                s.strip_prefix("Bearer ")
+                                    .or_else(|| s.strip_prefix("token "))
+                                    .map(|s| s.to_string())
+                            })
+                    })
+                    .unwrap_or_else(|| "no-api-key".to_string())
+            }
+            RateLimitStrategy::Global => "global".to_string(),
+        }
+    }
+}
+
+/// Rate limiting middleware
+pub async fn rate_limit_middleware(
+    State(state): State<Arc<RateLimiterState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    // Check rate limit
+    let key = state.get_key(&request);
+    match state.check_rate_limit(&key).await {
+        Ok(()) => {
+            // Rate limit passed, continue with request
+            let mut response = next.run(request).await;
+
+            // Add rate limit headers to successful responses
+            let headers = response.headers_mut();
+            headers.insert(
+                "x-ratelimit-limit",
+                HeaderValue::from(state.config.requests_per_minute),
+            );
+
+            // Get current remaining tokens (approximate)
+            let buckets = state.buckets.read().await;
+            let remaining = buckets
+                .get(&key)
+                .map(|b| b.remaining())
+                .unwrap_or(state.config.requests_per_minute);
+
+            headers.insert(
+                "x-ratelimit-remaining",
+                HeaderValue::from(remaining.max(0) as u32),
+            );
+
+            // Reset time is current time + 1 minute
+            let reset_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 60;
+
+            let reset_time_val = reset_time.to_string();
+            if let Ok(val) = HeaderValue::from_str(&reset_time_val) {
+                headers.insert("x-ratelimit-reset", val);
+            } else {
+                headers.insert("x-ratelimit-reset", HeaderValue::from_static("0"));
+            }
+
+            response
+        }
+        Err((retry_after, limit, remaining)) => {
+            // Rate limit exceeded
+            tracing::warn!(
+                key = %key,
+                retry_after = retry_after,
+                "Rate limit exceeded"
+            );
+
+            let mut response = (
+                StatusCode::TOO_MANY_REQUESTS,
+                axum::Json(ErrorResponse {
+                    code: "RATE_LIMIT_EXCEEDED".to_string(),
+                    message: format!(
+                        "Rate limit exceeded. Please retry after {} seconds.",
+                        retry_after
+                    ),
+                    details: Some(serde_json::json!({
+                        "retry_after": retry_after,
+                        "limit": limit,
+                        "remaining": remaining,
+                    })),
+                    request_id: Uuid::new_v4(),
+                    timestamp: Utc::now(),
+                }),
+            )
+                .into_response();
+
+            // Add rate limit headers to error response
+            let headers = response.headers_mut();
+            headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
+            headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
+            let retry_after_val = retry_after.to_string();
+            if let Ok(val) = HeaderValue::from_str(&retry_after_val) {
+                headers.insert("retry-after", val);
+            } else {
+                headers.insert("retry-after", HeaderValue::from_static("60"));
+            }
+
+            response
+        }
     }
 }

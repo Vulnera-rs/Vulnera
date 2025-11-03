@@ -33,6 +33,43 @@ impl Default for CircuitBreakerConfigSerializable {
     }
 }
 
+/// Retry configuration (serializable version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RetryConfigSerializable {
+    /// Maximum number of retry attempts
+    pub max_attempts: u32,
+    /// Initial delay between retries (in milliseconds)
+    pub initial_delay_ms: u64,
+    /// Maximum delay between retries (in milliseconds)
+    pub max_delay_ms: u64,
+    /// Multiplier for exponential backoff
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryConfigSerializable {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+impl RetryConfigSerializable {
+    /// Convert to the runtime RetryConfig
+    pub fn to_retry_config(&self) -> crate::infrastructure::resilience::RetryConfig {
+        crate::infrastructure::resilience::RetryConfig {
+            max_attempts: self.max_attempts,
+            initial_delay: Duration::from_millis(self.initial_delay_ms),
+            max_delay: Duration::from_millis(self.max_delay_ms),
+            backoff_multiplier: self.backoff_multiplier,
+        }
+    }
+}
+
 impl CircuitBreakerConfigSerializable {
     /// Convert to the runtime CircuitBreakerConfig
     pub fn to_circuit_breaker_config(
@@ -81,6 +118,52 @@ pub struct PackageConfig {
     pub version: String,
 }
 
+/// Rate limit strategy
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RateLimitStrategy {
+    /// Rate limit per IP address
+    Ip,
+    /// Rate limit per API key
+    ApiKey,
+    /// Global rate limit for all requests
+    Global,
+}
+
+impl Default for RateLimitStrategy {
+    fn default() -> Self {
+        RateLimitStrategy::Ip
+    }
+}
+
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RateLimitConfig {
+    /// Whether rate limiting is enabled
+    pub enabled: bool,
+    /// Requests allowed per minute
+    pub requests_per_minute: u32,
+    /// Requests allowed per hour
+    pub requests_per_hour: u32,
+    /// Rate limit strategy (IP-based, API key, or global)
+    pub strategy: RateLimitStrategy,
+    /// Cleanup interval for expired entries in seconds (default: 300 = 5 minutes)
+    pub cleanup_interval_seconds: u64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_minute: 60,
+            requests_per_hour: 1000,
+            strategy: RateLimitStrategy::Ip,
+            cleanup_interval_seconds: 300,
+        }
+    }
+}
+
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -97,6 +180,9 @@ pub struct ServerConfig {
 
     /// Security configuration
     pub security: SecurityConfig,
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for ServerConfig {
@@ -109,6 +195,7 @@ impl Default for ServerConfig {
             request_timeout_seconds: 30,
             allowed_origins: vec!["*".to_string()],
             security: SecurityConfig::default(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
@@ -178,16 +265,21 @@ pub struct NvdConfig {
     pub rate_limit_per_30s: u32,
     #[serde(default)]
     pub circuit_breaker: CircuitBreakerConfigSerializable,
+    #[serde(default)]
+    pub retry: RetryConfigSerializable,
 }
 
 impl Default for NvdConfig {
     fn default() -> Self {
+        let mut retry = RetryConfigSerializable::default();
+        retry.initial_delay_ms = 2000; // NVD: 2s initial delay (slower service)
         Self {
             base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
             api_key: None,
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
             circuit_breaker: CircuitBreakerConfigSerializable::default(),
+            retry,
         }
     }
 }
@@ -201,6 +293,8 @@ pub struct GhsaConfig {
     pub timeout_seconds: u64,
     #[serde(default)]
     pub circuit_breaker: CircuitBreakerConfigSerializable,
+    #[serde(default)]
+    pub retry: RetryConfigSerializable,
 }
 
 impl Default for GhsaConfig {
@@ -210,6 +304,7 @@ impl Default for GhsaConfig {
             token: None,
             timeout_seconds: 30,
             circuit_breaker: CircuitBreakerConfigSerializable::default(),
+            retry: RetryConfigSerializable::default(),
         }
     }
 }
@@ -313,24 +408,25 @@ impl Default for Config {
                     hsts_max_age: 31536000, // 1 year
                     hsts_include_subdomains: true,
                 },
+                rate_limit: RateLimitConfig::default(),
             },
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),
                 ttl_hours: 24,
             },
             apis: ApiConfig {
-                nvd: NvdConfig {
-                    base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
-                    api_key: None,
-                    timeout_seconds: 30,
-                    rate_limit_per_30s: 5, // Without API key
-                    circuit_breaker: CircuitBreakerConfigSerializable::default(),
+                nvd: {
+                    let mut nvd = NvdConfig::default();
+                    nvd.base_url = "https://services.nvd.nist.gov/rest/json".to_string();
+                    nvd.rate_limit_per_30s = 5; // Without API key
+                    nvd
                 },
                 ghsa: GhsaConfig {
                     graphql_url: "https://api.github.com/graphql".to_string(),
                     token: None,
                     timeout_seconds: 30,
                     circuit_breaker: CircuitBreakerConfigSerializable::default(),
+                    retry: RetryConfigSerializable::default(),
                 },
                 github: GitHubConfig {
                     base_url: "https://api.github.com".to_string(),

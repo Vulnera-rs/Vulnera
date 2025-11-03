@@ -80,18 +80,32 @@ pub async fn create_app(
         })?,
     );
 
-    // Wrap clients with circuit breakers
+    // Create retry configs (OSV uses default, NVD and GHSA from config)
+    use infrastructure::resilience::RetryConfig;
+    let osv_retry_config = RetryConfig {
+        max_attempts: 3,
+        initial_delay: std::time::Duration::from_secs(1), // OSV: 1s initial delay
+        max_delay: std::time::Duration::from_secs(30),
+        backoff_multiplier: 2.0,
+    };
+    let nvd_retry_config = config.apis.nvd.retry.to_retry_config();
+    let ghsa_retry_config = config.apis.ghsa.retry.to_retry_config();
+
+    // Wrap clients with circuit breakers and retry logic
     let osv_client = Arc::new(CircuitBreakerApiClient::new(
         osv_client_inner,
         osv_circuit_breaker,
+        osv_retry_config,
     ));
     let nvd_client = Arc::new(CircuitBreakerApiClient::new(
         nvd_client_inner,
         nvd_circuit_breaker,
+        nvd_retry_config,
     ));
     let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
         ghsa_client_inner,
         ghsa_circuit_breaker,
+        ghsa_retry_config,
     ));
 
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
