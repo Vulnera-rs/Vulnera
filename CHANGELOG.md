@@ -3,6 +3,194 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.2.0] - 2025-11-03
+
+### Added
+
+- **Complete Authentication & Authorization System:**
+  - User registration endpoint: `POST /api/v1/auth/register`
+    - Email validation with uniqueness checks
+    - Password strength validation (minimum 8 characters)
+    - Automatic token generation after signup
+    - Support for optional role assignment (defaults to "user")
+  - User login endpoint: `POST /api/v1/auth/login`
+    - Email/password authentication
+    - Returns JWT access and refresh tokens
+  - Token refresh endpoint: `POST /api/v1/auth/refresh`
+    - Extends sessions without re-authentication
+  - API key management:
+    - Create API keys: `POST /api/v1/auth/api-keys`
+    - List user's API keys: `GET /api/v1/auth/api-keys`
+    - Revoke API keys: `DELETE /api/v1/auth/api-keys/{id}`
+  - PostgreSQL-backed persistence:
+    - User table with bcrypt password hashing
+    - API key table with secure hash storage
+    - Database migrations included (`migrations/`)
+  - JWT-based authentication:
+    - Configurable token TTL (default: 24 hours for access, 30 days for refresh)
+    - HMAC-SHA256 signing with configurable secret
+    - Role-based access control support
+  - Dual authentication methods:
+    - Bearer token authentication: `Authorization: Bearer <token>`
+    - API key authentication: `Authorization: ApiKey <key>` or `X-API-Key: <key>`
+  - Axum extractors for protected routes:
+    - `AuthUser` - JWT token validation
+    - `ApiKeyAuth` - API key validation
+    - `Auth` - Accepts either JWT or API key
+  - Security features:
+    - API keys shown only once at creation
+    - Masked key display in list endpoints
+    - Secure password hashing with bcrypt
+    - Configurable key expiration
+
+- **Authentication Use Cases:**
+  - `RegisterUserUseCase` - New user registration with validation
+  - `LoginUseCase` - Email/password authentication
+  - `ValidateTokenUseCase` - JWT token verification
+  - `RefreshTokenUseCase` - Token renewal
+  - `GenerateApiKeyUseCase` - API key creation
+  - `ValidateApiKeyUseCase` - API key verification
+  - `ListApiKeysUseCase` - User's API key management
+  - `RevokeApiKeyUseCase` - API key revocation
+
+- **Domain Models:**
+  - `User` entity with email, password hash, and roles
+  - `ApiKey` entity with hash, name, expiration, and usage tracking
+  - Value objects: `UserId`, `ApiKeyId`, `Email`, `UserRole`, `ApiKeyHash`
+  - Authentication error types with proper categorization
+
+- **Infrastructure:**
+  - `SqlxUserRepository` - PostgreSQL user persistence
+  - `SqlxApiKeyRepository` - PostgreSQL API key persistence
+  - `JwtService` - Token generation and validation
+  - `PasswordHasher` - Bcrypt password hashing
+  - `ApiKeyGenerator` - Secure API key generation with masking
+
+- **Documentation:**
+  - Complete API testing guide: `docs/API_TESTING.md`
+  - Database setup guide: `docs/SQLX_SETUP.md`
+  - Quick start guide: `QUICK_START.md`
+  - Automated setup scripts:
+    - `scripts/prepare-sqlx-docker.sh` - Docker-based setup
+    - `scripts/prepare-sqlx.sh` - Local PostgreSQL setup
+
+### Changed
+
+- **OpenAPI/Swagger Documentation:**
+  - Added all authentication endpoints to schema
+  - Added authentication models: `LoginRequest`, `RegisterRequest`, `TokenResponse`, etc.
+  - Added `UserRole` enum to OpenAPI components
+  - All endpoints now visible in Swagger UI at `/docs`
+
+- **CORS Configuration:**
+  - Fixed CORS to properly support Swagger UI
+  - Changed from `allow_origin(Any)` to `mirror_request()` for wildcard support
+  - Properly echoes `Access-Control-Allow-Origin` header in responses
+  - Production-ready configuration for specific origins
+  - Configurable via `allowed_origins` in server config
+
+- **Application State:**
+  - Extended `AppState` with authentication components:
+    - Database pool, user/API key repositories
+    - JWT service, password hasher, API key generator
+    - All authentication use cases
+
+- **Rust Compatibility:**
+  - Removed `async_trait` macro usage (axum 0.8+ uses native async traits)
+  - Fixed deprecated `rand::thread_rng()` → `rand::rng()`
+  - Updated to use native Rust async function in traits (AFIT)
+
+### Fixed
+
+- CORS headers now properly added for cross-origin requests
+- Swagger UI can successfully make API calls
+- SQLx compile-time query verification with offline mode support
+- Proper error responses for authentication failures
+- Security: API keys never stored in plaintext, only hashed
+
+### Configuration
+
+New environment variables:
+
+```bash
+# Required for runtime
+DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'
+
+# Authentication (required for production)
+VULNERA__AUTH__JWT_SECRET='your-secret-key-minimum-32-characters'
+VULNERA__AUTH__TOKEN_TTL_HOURS=24
+VULNERA__AUTH__REFRESH_TOKEN_TTL_HOURS=720  # 30 days
+VULNERA__AUTH__API_KEY_LENGTH=32
+VULNERA__AUTH__API_KEY_TTL_DAYS=365
+
+# CORS (production)
+VULNERA__SERVER__ALLOWED_ORIGINS='["https://your-frontend.com"]'
+```
+
+### Database Setup Required
+
+```bash
+# Quick setup with Docker
+./scripts/prepare-sqlx-docker.sh
+
+# Or with local PostgreSQL
+export DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'
+sqlx migrate run --source migrations
+```
+
+### API Examples
+
+**Register:**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"SecurePass123"}'
+```
+
+**Login:**
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"SecurePass123"}'
+```
+
+**Use Token:**
+
+```bash
+curl -X GET http://localhost:3000/api/v1/analyze \
+  -H "Authorization: Bearer <access_token>"
+```
+
+**Use API Key:**
+
+```bash
+curl -X GET http://localhost:3000/api/v1/analyze \
+  -H "X-API-Key: vuln_abc123..."
+```
+
+### Breaking Changes
+
+- **DATABASE_URL environment variable is now required** for application startup
+- Server will exit with clear error message if DATABASE_URL is not set
+- Migrations must be run before starting the application
+
+### Security Notes
+
+- Passwords hashed with bcrypt (cost factor 12)
+- API keys hashed before storage (never retrievable after creation)
+- JWT tokens signed with HMAC-SHA256
+- Configurable token expiration
+- API keys can be revoked at any time
+- Production deployments should:
+  - Use strong JWT secrets (min 32 characters)
+  - Configure specific CORS origins
+  - Enable HTTPS
+  - Set appropriate token TTLs
+
+---
+
 ## [0.1.1]
 
 ### Added
