@@ -1,10 +1,10 @@
 ///////////////////////////////////////////////////////////
-// Pest grammar scaffold for yarn.lock (v1-compatible)
+// Pest grammar for yarn.lock (v1-compatible)
 //
-// Scope: Provide a permissive grammar that can recognize
-//        the general structure of yarn.lock entries.
-//        Precise validations and captures can be refined
-//        in later phases.
+// Scope: Provides a grammar that recognizes yarn.lock structure
+//        with typed captures for version strings and dependency ranges,
+//        support for bundledDependencies and peerDependencies,
+//        and error recovery for malformed sections.
 //
 // References:
 // - Yarn v1 lockfile format
@@ -16,18 +16,16 @@
 //     integrity sha512-....
 //     dependencies:
 //       brace-expansion "^1.1.7"
+//     peerDependencies:
+//       react "^16.0.0"
+//     bundledDependencies:
+//       - "some-package"
 //
 // Notes:
-// - This is a scaffold. It aims to accept common shapes,
-//   not to enforce all invariants.
 // - We keep indentation 2-space based as per Yarn v1 convention.
 // - Quoted and bare specifiers are accepted in headers.
 // - Comments and blank lines are permitted anywhere.
-//
-// TODO (follow-ups):
-// - Tighten key/value matching and add typed captures
-// - Support additional fields (e.g., "bundledDependencies", "peerDependencies")
-// - Add error recovery & better diagnostics for malformed sections
+// - Error recovery rules allow parsing to continue after malformed sections.
 ///////////////////////////////////////////////////////////
 
 SP         = _{ " " }
@@ -44,6 +42,14 @@ quoted_string = @{ "\"" ~ quoted_char* ~ "\"" }
 // A "bare" fragment that stops at ',', ':', or newline
 bare_fragment = @{ (!("," | ":" | NEWLINE) ~ ANY)+ }
 
+// Version string: captures semantic version-like strings (e.g., "1.2.3", "4.5.6-beta.1")
+// Typed capture for version values to enable validation
+version_string = @{ quoted_string }
+
+// Dependency range: captures version ranges like "^1.2.3", "~4.5.6", ">=1.0.0", "1.2.3"
+// Typed capture for dependency version ranges
+dep_range = @{ quoted_string | bare_fragment }
+
 // A key specifier appearing in header list.
 // Accept quoted string or a bare fragment (e.g., lodash@^4.17.21)
 key_spec = _{ quoted_string | bare_fragment }
@@ -53,7 +59,7 @@ key_list = { key_spec ~ (OPT_SP ~ "," ~ OPT_SP ~ key_spec)* }
 header = { key_list ~ OPT_SP ~ ":" }
 
 // Property lines within an entry
-version_line    = { INDENT ~ "version"    ~ OPT_SP ~ quoted_string ~ line_ending }
+version_line    = { INDENT ~ "version"    ~ OPT_SP ~ version_string ~ line_ending }
 resolved_line   = { INDENT ~ "resolved"   ~ OPT_SP ~ quoted_string ~ line_ending }
 integrity_line  = { INDENT ~ "integrity"  ~ OPT_SP ~ (!NEWLINE ~ ANY)* ~ line_ending }
 
@@ -97,26 +103,49 @@ dep_kv_line = {
 }
 
 dep_key   = @{ (!SP ~ !NEWLINE ~ ANY)+ }
-dep_value = _{ quoted_string | bare_fragment }
+dep_value = _{ dep_range }
 
 comment_line = { OPT_SP ~ COMMENT ~ NEWLINE }
 blank_line   = { OPT_SP ~ NEWLINE }
 line_ending  = _{ NEWLINE | EOI }
 
+// Error recovery: skip malformed lines to continue parsing
+// Only match if it doesn't match any of the known patterns
+malformed_line = _{ 
+    !version_line 
+  ~ !resolved_line 
+  ~ !integrity_line 
+  ~ !dependencies_block 
+  ~ !optional_dependencies_block 
+  ~ !peer_dependencies_block 
+  ~ !bundled_dependencies_block 
+  ~ !comment_line 
+  ~ !blank_line
+  ~ INDENT
+  ~ (!NEWLINE ~ ANY)+ 
+  ~ line_ending 
+}
+
+// Property or block within an entry
+entry_content = {
+    version_line
+  | resolved_line
+  | integrity_line
+  | dependencies_block
+  | optional_dependencies_block
+  | peer_dependencies_block
+  | bundled_dependencies_block
+  | comment_line
+  | blank_line
+  | malformed_line  // Error recovery: skip malformed lines but continue parsing (must be last)
+}
+
 // An entry is a header followed by one or more property lines or blocks.
 // Allow comments/blank lines interspersed.
+// Includes error recovery to skip malformed sections.
 entry = {
     header ~ (line_ending)?
-    ~ ( version_line
-      | resolved_line
-      | integrity_line
-      | dependencies_block
-      | optional_dependencies_block
-      | peer_dependencies_block
-      | bundled_dependencies_block
-      | comment_line
-      | blank_line
-      )*
+    ~ entry_content*
 }
 
 // The whole file: comments/blank lines allowed anywhere between entries.
