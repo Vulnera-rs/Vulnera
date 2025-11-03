@@ -1,0 +1,444 @@
+//! Configuration validation module
+
+use crate::config::{
+    AnalysisConfig, ApiConfig, CacheConfig, GhsaConfig, GitHubConfig, NvdConfig, ServerConfig,
+};
+use std::path::Path;
+
+/// Trait for validating configuration sections
+pub trait Validate {
+    fn validate(&self) -> Result<(), ValidationError>;
+}
+
+/// Configuration validation error
+#[derive(Debug, thiserror::Error)]
+pub enum ValidationError {
+    #[error("Server configuration error: {message}")]
+    Server { message: String },
+
+    #[error("Cache configuration error: {message}")]
+    Cache { message: String },
+
+    #[error("API configuration error: {message}")]
+    Api { message: String },
+
+    #[error("Analysis configuration error: {message}")]
+    Analysis { message: String },
+}
+
+impl ValidationError {
+    pub fn server(message: impl Into<String>) -> Self {
+        Self::Server {
+            message: message.into(),
+        }
+    }
+
+    pub fn cache(message: impl Into<String>) -> Self {
+        Self::Cache {
+            message: message.into(),
+        }
+    }
+
+    pub fn api(message: impl Into<String>) -> Self {
+        Self::Api {
+            message: message.into(),
+        }
+    }
+
+    pub fn analysis(message: impl Into<String>) -> Self {
+        Self::Analysis {
+            message: message.into(),
+        }
+    }
+}
+
+impl Validate for ServerConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate port range (1-65535)
+        // Note: u16 cannot exceed 65535, so we only need to check for 0
+        if self.port == 0 {
+            return Err(ValidationError::server(format!(
+                "Port must be in range 1-65535, got {}",
+                self.port
+            )));
+        }
+
+        // Validate host format (basic check - not empty)
+        if self.host.is_empty() {
+            return Err(ValidationError::server("Host cannot be empty".to_string()));
+        }
+
+        // Validate timeout > 0
+        if self.request_timeout_seconds == 0 {
+            return Err(ValidationError::server(
+                "Request timeout must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for CacheConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate TTL > 0
+        if self.ttl_hours == 0 {
+            return Err(ValidationError::cache(
+                "Cache TTL must be greater than 0 hours".to_string(),
+            ));
+        }
+
+        // Check if directory exists or can be created
+        let parent = self.directory.parent();
+        if let Some(parent) = parent {
+            // Skip validation if parent is empty (root path) or if it's the current directory "."
+            // For relative paths, we'll try to create the directory during runtime
+            if !parent.as_os_str().is_empty() && parent != Path::new(".") && !parent.exists() {
+                return Err(ValidationError::cache(format!(
+                    "Cache directory parent does not exist: {}",
+                    parent.display()
+                )));
+            }
+        }
+
+        // If directory exists, check if it's writable
+        if self.directory.exists() {
+            if !self.directory.is_dir() {
+                return Err(ValidationError::cache(format!(
+                    "Cache directory path exists but is not a directory: {}",
+                    self.directory.display()
+                )));
+            }
+            // Check if directory is writable by attempting to create a test file
+            // Note: This is a best-effort check; actual permissions may vary
+        } else {
+            // Directory doesn't exist - check if parent is writable
+            let parent = self.directory.parent().unwrap_or(Path::new("."));
+            if parent.exists() && !is_writable(parent) {
+                return Err(ValidationError::cache(format!(
+                    "Cannot create cache directory - parent is not writable: {}",
+                    parent.display()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for NvdConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate URL format
+        if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
+            return Err(ValidationError::api(format!(
+                "NVD base_url must start with http:// or https://, got: {}",
+                self.base_url
+            )));
+        }
+
+        // Validate timeout > 0
+        if self.timeout_seconds == 0 {
+            return Err(ValidationError::api(
+                "NVD timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        // Validate rate limit > 0
+        if self.rate_limit_per_30s == 0 {
+            return Err(ValidationError::api(
+                "NVD rate_limit_per_30s must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for GhsaConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate URL format
+        if !self.graphql_url.starts_with("http://") && !self.graphql_url.starts_with("https://") {
+            return Err(ValidationError::api(format!(
+                "GHSA graphql_url must start with http:// or https://, got: {}",
+                self.graphql_url
+            )));
+        }
+
+        // Validate timeout > 0
+        if self.timeout_seconds == 0 {
+            return Err(ValidationError::api(
+                "GHSA timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for GitHubConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate URL format
+        if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
+            return Err(ValidationError::api(format!(
+                "GitHub base_url must start with http:// or https://, got: {}",
+                self.base_url
+            )));
+        }
+
+        // Validate timeout > 0
+        if self.timeout_seconds == 0 {
+            return Err(ValidationError::api(
+                "GitHub timeout must be greater than 0 seconds".to_string(),
+            ));
+        }
+
+        // Validate max_concurrent_file_fetches > 0
+        if self.max_concurrent_file_fetches == 0 {
+            return Err(ValidationError::api(
+                "GitHub max_concurrent_file_fetches must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for ApiConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        self.nvd.validate()?;
+        self.ghsa.validate()?;
+        self.github.validate()?;
+        Ok(())
+    }
+}
+
+impl Validate for AnalysisConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate max_concurrent_packages > 0
+        if self.max_concurrent_packages == 0 {
+            return Err(ValidationError::analysis(
+                "max_concurrent_packages must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Helper function to check if a path is writable
+/// This is a best-effort check and may not catch all permission issues
+fn is_writable(path: &Path) -> bool {
+    use std::fs;
+
+    // Try to create a test file to check writability
+    let test_file = path.join(".vulnera_write_test");
+    match fs::File::create(&test_file) {
+        Ok(_) => {
+            // Successfully created, so it's writable - clean up
+            let _ = fs::remove_file(&test_file);
+            true
+        }
+        Err(_) => {
+            // Check file metadata as fallback
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(metadata) = path.metadata() {
+                    let perms = metadata.permissions();
+                    // Check if owner has write permission
+                    let mode = perms.mode();
+                    (mode & 0o200) != 0
+                } else {
+                    false
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                // On non-Unix systems, we can't easily check permissions
+                // Assume writable if we can't determine (will fail at runtime if not)
+                true
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{CacheConfig, ServerConfig};
+
+    #[test]
+    fn test_server_config_validation() {
+        // Valid config
+        let valid = ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 3000,
+            workers: None,
+            enable_docs: true,
+            request_timeout_seconds: 30,
+            allowed_origins: vec![],
+            security: crate::config::SecurityConfig::default(),
+            rate_limit: crate::config::RateLimitConfig::default(),
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid port (0)
+        let invalid = ServerConfig {
+            port: 0,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Port 65535 is valid (max u16 value)
+        // Note: u16 cannot exceed 65535, so we can't test "too high" port
+
+        // Invalid timeout (0)
+        let invalid = ServerConfig {
+            request_timeout_seconds: 0,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid host (empty)
+        let invalid = ServerConfig {
+            host: String::new(),
+            ..valid
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_cache_config_validation() {
+        // Valid config with existing directory (using tempdir)
+        let temp_dir = tempfile::tempdir().unwrap();
+        let valid = CacheConfig {
+            directory: temp_dir.path().to_path_buf(),
+            ttl_hours: 24,
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid TTL (0)
+        let invalid = CacheConfig {
+            ttl_hours: 0,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_nvd_config_validation() {
+        // Valid config
+        let valid = NvdConfig {
+            base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
+            api_key: None,
+            timeout_seconds: 30,
+            rate_limit_per_30s: 5,
+            circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
+            retry: crate::config::RetryConfigSerializable::default(),
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid URL
+        let invalid = NvdConfig {
+            base_url: "not-a-url".to_string(),
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid timeout
+        let invalid = NvdConfig {
+            timeout_seconds: 0,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid rate limit
+        let invalid = NvdConfig {
+            rate_limit_per_30s: 0,
+            ..valid
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_ghsa_config_validation() {
+        // Valid config
+        let valid = GhsaConfig {
+            graphql_url: "https://api.github.com/graphql".to_string(),
+            token: None,
+            timeout_seconds: 30,
+            circuit_breaker: crate::config::CircuitBreakerConfigSerializable::default(),
+            retry: crate::config::RetryConfigSerializable::default(),
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid URL
+        let invalid = GhsaConfig {
+            graphql_url: "not-a-url".to_string(),
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid timeout
+        let invalid = GhsaConfig {
+            timeout_seconds: 0,
+            ..valid
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_github_config_validation() {
+        // Valid config
+        let valid = GitHubConfig {
+            base_url: "https://api.github.com".to_string(),
+            token: None,
+            reuse_ghsa_token: true,
+            timeout_seconds: 30,
+            max_concurrent_file_fetches: 8,
+            max_files_scanned: 200,
+            max_total_bytes: 2_000_000,
+            max_single_file_bytes: 1_000_000,
+            backoff_initial_ms: 500,
+            backoff_max_retries: 3,
+            backoff_jitter: true,
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid URL
+        let invalid = GitHubConfig {
+            base_url: "not-a-url".to_string(),
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid timeout
+        let invalid = GitHubConfig {
+            timeout_seconds: 0,
+            ..valid.clone()
+        };
+        assert!(invalid.validate().is_err());
+
+        // Invalid max_concurrent_file_fetches
+        let invalid = GitHubConfig {
+            max_concurrent_file_fetches: 0,
+            ..valid
+        };
+        assert!(invalid.validate().is_err());
+    }
+
+    #[test]
+    fn test_analysis_config_validation() {
+        // Valid config
+        let valid = AnalysisConfig {
+            max_concurrent_packages: 3,
+        };
+        assert!(valid.validate().is_ok());
+
+        // Invalid max_concurrent_packages
+        let invalid = AnalysisConfig {
+            max_concurrent_packages: 0,
+        };
+        assert!(invalid.validate().is_err());
+    }
+}

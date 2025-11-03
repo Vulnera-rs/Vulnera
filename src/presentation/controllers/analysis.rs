@@ -112,7 +112,7 @@ impl VulnerabilityListQuery {
     }
 }
 
-/// Application state containing services
+/// Application state containing services and configuration
 #[derive(Clone)]
 pub struct AppState {
     pub analysis_service: Arc<dyn crate::application::AnalysisService>,
@@ -120,8 +120,9 @@ pub struct AppState {
     pub report_service: Arc<crate::application::ReportServiceImpl>,
     pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
     pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
-    pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>, // optional until fully wired
+    pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>,
     pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
+    pub config: Arc<crate::Config>,
     pub startup_time: std::time::Instant,
 }
 

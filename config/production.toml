@@ -5,6 +5,7 @@ workers = 0
 enable_docs = false
 request_timeout_seconds = 30
 allowed_origins = ["${ALLOWED_ORIGIN}"]
+rate_limit.enabled = true
 
 [server.security]
 enforce_https = true
@@ -15,7 +16,6 @@ hsts_include_subdomains = true
 
 [cache]
 ttl_hours = 24
-
 
 
 [apis.nvd]

@@ -1,7 +1,88 @@
 //! Configuration management
 
+pub mod validation;
+
+pub use validation::{Validate, ValidationError};
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
+
+/// Circuit breaker configuration (serializable version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CircuitBreakerConfigSerializable {
+    /// Number of consecutive failures before opening the circuit
+    pub failure_threshold: u32,
+    /// Duration to wait before transitioning from Open to HalfOpen (in seconds)
+    pub recovery_timeout_seconds: u64,
+    /// Maximum number of requests allowed in HalfOpen state
+    pub half_open_max_requests: u32,
+    /// Timeout for individual requests (in seconds)
+    pub request_timeout_seconds: u64,
+}
+
+impl Default for CircuitBreakerConfigSerializable {
+    fn default() -> Self {
+        Self {
+            failure_threshold: 5,
+            recovery_timeout_seconds: 60,
+            half_open_max_requests: 3,
+            request_timeout_seconds: 30,
+        }
+    }
+}
+
+/// Retry configuration (serializable version)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RetryConfigSerializable {
+    /// Maximum number of retry attempts
+    pub max_attempts: u32,
+    /// Initial delay between retries (in milliseconds)
+    pub initial_delay_ms: u64,
+    /// Maximum delay between retries (in milliseconds)
+    pub max_delay_ms: u64,
+    /// Multiplier for exponential backoff
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetryConfigSerializable {
+    fn default() -> Self {
+        Self {
+            max_attempts: 3,
+            initial_delay_ms: 1000,
+            max_delay_ms: 30000,
+            backoff_multiplier: 2.0,
+        }
+    }
+}
+
+impl RetryConfigSerializable {
+    /// Convert to the runtime RetryConfig
+    pub fn to_retry_config(&self) -> crate::infrastructure::resilience::RetryConfig {
+        crate::infrastructure::resilience::RetryConfig {
+            max_attempts: self.max_attempts,
+            initial_delay: Duration::from_millis(self.initial_delay_ms),
+            max_delay: Duration::from_millis(self.max_delay_ms),
+            backoff_multiplier: self.backoff_multiplier,
+        }
+    }
+}
+
+impl CircuitBreakerConfigSerializable {
+    /// Convert to the runtime CircuitBreakerConfig
+    pub fn to_circuit_breaker_config(
+        &self,
+    ) -> crate::infrastructure::resilience::CircuitBreakerConfig {
+        crate::infrastructure::resilience::CircuitBreakerConfig {
+            failure_threshold: self.failure_threshold,
+            recovery_timeout: Duration::from_secs(self.recovery_timeout_seconds),
+            half_open_max_requests: self.half_open_max_requests,
+            request_timeout: Duration::from_secs(self.request_timeout_seconds),
+        }
+    }
+}
 
 /// Application configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +118,47 @@ pub struct PackageConfig {
     pub version: String,
 }
 
+/// Rate limit strategy
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RateLimitStrategy {
+    /// Rate limit per IP address
+    #[default]
+    Ip,
+    /// Rate limit per API key
+    ApiKey,
+    /// Global rate limit for all requests
+    Global,
+}
+
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RateLimitConfig {
+    /// Whether rate limiting is enabled
+    pub enabled: bool,
+    /// Requests allowed per minute
+    pub requests_per_minute: u32,
+    /// Requests allowed per hour
+    pub requests_per_hour: u32,
+    /// Rate limit strategy (IP-based, API key, or global)
+    pub strategy: RateLimitStrategy,
+    /// Cleanup interval for expired entries in seconds (default: 300 = 5 minutes)
+    pub cleanup_interval_seconds: u64,
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            requests_per_minute: 60,
+            requests_per_hour: 1000,
+            strategy: RateLimitStrategy::Ip,
+            cleanup_interval_seconds: 300,
+        }
+    }
+}
+
 /// Server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -53,6 +175,9 @@ pub struct ServerConfig {
 
     /// Security configuration
     pub security: SecurityConfig,
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 impl Default for ServerConfig {
@@ -65,6 +190,7 @@ impl Default for ServerConfig {
             request_timeout_seconds: 30,
             allowed_origins: vec!["*".to_string()],
             security: SecurityConfig::default(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }
@@ -132,6 +258,10 @@ pub struct NvdConfig {
     pub api_key: Option<String>,
     pub timeout_seconds: u64,
     pub rate_limit_per_30s: u32,
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfigSerializable,
+    #[serde(default)]
+    pub retry: RetryConfigSerializable,
 }
 
 impl Default for NvdConfig {
@@ -141,6 +271,11 @@ impl Default for NvdConfig {
             api_key: None,
             timeout_seconds: 30,
             rate_limit_per_30s: 5,
+            circuit_breaker: CircuitBreakerConfigSerializable::default(),
+            retry: RetryConfigSerializable {
+                initial_delay_ms: 2000, // NVD: 2s initial delay (slower service)
+                ..RetryConfigSerializable::default()
+            },
         }
     }
 }
@@ -152,6 +287,10 @@ pub struct GhsaConfig {
     pub graphql_url: String,
     pub token: Option<String>,
     pub timeout_seconds: u64,
+    #[serde(default)]
+    pub circuit_breaker: CircuitBreakerConfigSerializable,
+    #[serde(default)]
+    pub retry: RetryConfigSerializable,
 }
 
 impl Default for GhsaConfig {
@@ -160,6 +299,8 @@ impl Default for GhsaConfig {
             graphql_url: "https://api.github.com/graphql".to_string(),
             token: None,
             timeout_seconds: 30,
+            circuit_breaker: CircuitBreakerConfigSerializable::default(),
+            retry: RetryConfigSerializable::default(),
         }
     }
 }
@@ -170,6 +311,7 @@ impl Default for GhsaConfig {
 pub struct GitHubConfig {
     pub base_url: String,
     pub token: Option<String>,
+    #[serde(default = "default_reuse_ghsa_token")]
     pub reuse_ghsa_token: bool,
     pub timeout_seconds: u64,
     pub max_concurrent_file_fetches: usize,
@@ -179,6 +321,10 @@ pub struct GitHubConfig {
     pub backoff_initial_ms: u64,
     pub backoff_max_retries: u32,
     pub backoff_jitter: bool,
+}
+
+fn default_reuse_ghsa_token() -> bool {
+    true
 }
 
 impl Default for GitHubConfig {
@@ -263,6 +409,7 @@ impl Default for Config {
                     hsts_max_age: 31536000, // 1 year
                     hsts_include_subdomains: true,
                 },
+                rate_limit: RateLimitConfig::default(),
             },
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),
@@ -271,14 +418,15 @@ impl Default for Config {
             apis: ApiConfig {
                 nvd: NvdConfig {
                     base_url: "https://services.nvd.nist.gov/rest/json".to_string(),
-                    api_key: None,
-                    timeout_seconds: 30,
                     rate_limit_per_30s: 5, // Without API key
+                    ..NvdConfig::default()
                 },
                 ghsa: GhsaConfig {
                     graphql_url: "https://api.github.com/graphql".to_string(),
                     token: None,
                     timeout_seconds: 30,
+                    circuit_breaker: CircuitBreakerConfigSerializable::default(),
+                    retry: RetryConfigSerializable::default(),
                 },
                 github: GitHubConfig {
                     base_url: "https://api.github.com".to_string(),
@@ -309,9 +457,19 @@ impl Default for Config {
     }
 }
 
+impl Validate for Config {
+    fn validate(&self) -> Result<(), ValidationError> {
+        self.server.validate()?;
+        self.cache.validate()?;
+        self.apis.validate()?;
+        self.analysis.validate()?;
+        Ok(())
+    }
+}
+
 impl Config {
     /// Load configuration from files and environment variables
-    pub fn load() -> Result<Self, config::ConfigError> {
+    pub fn load() -> Result<Self, ConfigLoadError> {
         let mut builder = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false));
 
@@ -326,6 +484,21 @@ impl Config {
             .add_source(config::File::with_name("config/local").required(false))
             .add_source(config::Environment::with_prefix("VULNERA").separator("__"));
 
-        builder.build()?.try_deserialize()
+        let config: Config = builder.build()?.try_deserialize()?;
+
+        // Validate the loaded configuration
+        config.validate()?;
+
+        Ok(config)
     }
+}
+
+/// Error type for configuration loading
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigLoadError {
+    #[error("Configuration file error: {0}")]
+    Config(#[from] config::ConfigError),
+
+    #[error("Configuration validation error: {0}")]
+    Validation(#[from] ValidationError),
 }
