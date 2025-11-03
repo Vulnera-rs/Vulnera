@@ -41,6 +41,40 @@ impl Default for CircuitBreakerConfig {
 }
 
 /// Circuit breaker implementation for resilient API calls
+///
+/// Implements the **Circuit Breaker Pattern** to prevent cascading failures when external
+/// services become unavailable. This provides fault tolerance and automatic recovery.
+///
+/// **State Machine:**
+/// ```
+///    ┌─────────────┐    Failure Threshold     ┌──────────────┐
+///    │   CLOSED    │ ───────────────────────► │     OPEN      │
+///    └─────────────┘                          └──────────────┘
+///    │         ▲ Recovery Timeout                 │ Success
+///    │         │                                  ▼
+///    └─────────┼──────────────────────────────────┐
+///              │                                  │
+///              ▼                                  │
+///         ┌──────────────┐   Half-Open Max        │
+///         │  HALF_OPEN   │ ───────────────────────┘
+///         └──────────────┘     Requests Limit
+/// ```
+///
+/// **Behavior by State:**
+/// - **CLOSED**: All requests pass through normally, failures are counted
+/// - **OPEN**: All requests fail immediately with `ServiceUnavailable`
+/// - **HALF_OPEN**: Limited requests allowed to test service recovery
+///
+/// **Configuration:**
+/// - `failure_threshold`: Number of consecutive failures before opening
+/// - `recovery_timeout`: How long to wait before trying half-open state
+/// - `half_open_max_requests`: Max test requests in half-open state
+/// - `request_timeout`: Per-request timeout
+///
+/// **Thread Safety:**
+/// - Uses `Arc<Mutex<>>` for safe concurrent access to state
+/// - Atomic operations prevent race conditions
+/// - Lock contention minimized for high-performance scenarios
 #[derive(Debug)]
 pub struct CircuitBreaker {
     config: CircuitBreakerConfig,
@@ -81,6 +115,33 @@ impl CircuitBreaker {
     }
 
     /// Execute a function with circuit breaker protection
+    ///
+    /// This is the core method that implements the circuit breaker logic. It follows
+    /// this decision tree:
+    ///
+    /// ```
+    /// Can Execute?
+    ///    ├─ No → Return ServiceUnavailable error
+    ///    └─ Yes → Execute with timeout
+    ///        ├─ Success → Reset failure count, return result
+    ///        ├─ Timeout → Record failure, check state transition
+    ///        └─ Error → Record failure, check state transition
+    /// ```
+    ///
+    /// **Concurrency Model:**
+    /// - Uses async/await for non-blocking execution
+    /// - Timeout prevents hanging on slow/unresponsive services
+    /// - State transitions are atomic and thread-safe
+    ///
+    /// **Performance Characteristics:**
+    /// - Minimal overhead when circuit is closed (just a few atomic operations)
+    /// - Fast failure when circuit is open (immediate return, no network call)
+    /// - Controlled testing when circuit is half-open
+    ///
+    /// **Error Handling:**
+    /// - Timeouts are treated as failures and count toward the threshold
+    /// - All error types are captured and counted
+    /// - State transitions happen after each operation
     pub async fn execute<F, Fut, T>(&self, operation: F) -> Result<T, VulnerabilityError>
     where
         F: FnOnce() -> Fut,

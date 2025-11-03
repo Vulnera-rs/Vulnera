@@ -26,6 +26,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# Claude Code agents and configuration
+.claude/agents/
+CLAUDE.md
 
 # PyInstaller
 *.manifest
@@ -161,6 +164,3 @@ criterion/
 
 # Cache directories
 .vulnera_cache/
-
-# Claude Code agents and configuration
-.claude/agents/
