@@ -1,5 +1,9 @@
 //! Configuration management
 
+pub mod validation;
+
+pub use validation::{Validate, ValidationError};
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -309,9 +313,19 @@ impl Default for Config {
     }
 }
 
+impl Validate for Config {
+    fn validate(&self) -> Result<(), ValidationError> {
+        self.server.validate()?;
+        self.cache.validate()?;
+        self.apis.validate()?;
+        self.analysis.validate()?;
+        Ok(())
+    }
+}
+
 impl Config {
     /// Load configuration from files and environment variables
-    pub fn load() -> Result<Self, config::ConfigError> {
+    pub fn load() -> Result<Self, ConfigLoadError> {
         let mut builder = config::Config::builder()
             .add_source(config::File::with_name("config/default").required(false));
 
@@ -326,6 +340,21 @@ impl Config {
             .add_source(config::File::with_name("config/local").required(false))
             .add_source(config::Environment::with_prefix("VULNERA").separator("__"));
 
-        builder.build()?.try_deserialize()
+        let config: Config = builder.build()?.try_deserialize()?;
+
+        // Validate the loaded configuration
+        config.validate()?;
+
+        Ok(config)
     }
+}
+
+/// Error type for configuration loading
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigLoadError {
+    #[error("Configuration file error: {0}")]
+    Config(#[from] config::ConfigError),
+
+    #[error("Configuration validation error: {0}")]
+    Validation(#[from] ValidationError),
 }

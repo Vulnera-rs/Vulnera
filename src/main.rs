@@ -24,8 +24,9 @@ use vulnera_rust::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
-    let config = Config::load().unwrap_or_else(|_| {
-        eprintln!("Failed to load configuration, using defaults");
+    let config = Config::load().unwrap_or_else(|e| {
+        eprintln!("Failed to load configuration: {}", e);
+        eprintln!("Using default configuration");
         Config::default()
     });
 
@@ -59,10 +60,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GHSA token not provided; GitHub advisories lookups will be skipped unless provided via environment."
         );
     }
-    let ghsa_client = Arc::new(GhsaClient::new(
-        ghsa_token_opt.unwrap_or_default(),
-        config.apis.ghsa.graphql_url.clone(),
-    ));
+    let ghsa_client = Arc::new(
+        GhsaClient::new(
+            ghsa_token_opt.unwrap_or_default(),
+            config.apis.ghsa.graphql_url.clone(),
+        )
+        .map_err(|e| {
+            eprintln!("Failed to create GHSA client: {}", e);
+            e
+        })?,
+    );
 
     let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
         osv_client,
@@ -85,13 +92,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.apis.github.timeout_seconds,
             config.apis.github.reuse_ghsa_token,
         ).await.unwrap_or_else(|e| {
-            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, repository analysis disabled");
-            GitHubRepositoryClient::new(
-                octocrab::Octocrab::builder().build().expect("octocrab build"),
-                "https://api.github.com".into(),
-                false,
-                10,
-            )
+            tracing::warn!(error=?e, "Failed to init GitHubRepositoryClient, attempting fallback");
+            // Fallback: try to create client without token
+            match octocrab::Octocrab::builder().build() {
+                Ok(octo) => GitHubRepositoryClient::new(
+                    octo,
+                    "https://api.github.com".into(),
+                    false,
+                    10,
+                ),
+                Err(err) => {
+                    tracing::error!(error=?err, "Failed to create fallback GitHubRepositoryClient, repository analysis disabled");
+                    // Create a client that will fail gracefully when used
+                    // This is a workaround for now - ideally we'd handle None in the service layer
+                    GitHubRepositoryClient::new(
+                        octocrab::Octocrab::default(),
+                        "https://api.github.com".into(),
+                        false,
+                        10,
+                    )
+                }
+            }
         })
     );
     let repository_analysis_service: Option<
