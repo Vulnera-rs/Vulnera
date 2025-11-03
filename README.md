@@ -12,17 +12,24 @@ Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and 
 
 - **Multi-Ecosystem Support:** npm, PyPI, Maven/Gradle, Cargo, Go, Packagist, and more
 - **Aggregated Vulnerability Data:** Combines OSV, NVD, and GitHub Security Advisories
+- **Authentication & Authorization:** JWT tokens and API keys with PostgreSQL-backed user management
 - **Async & Concurrent:** Built with Tokio for high throughput and bounded concurrency
 - **Smart Caching & Recommendations:** Filesystem-based, TTL-configurable cache for reduced API calls; safe version recommendations (nearest and most up-to-date), upgrade impact classification (major/minor/patch), and next safe minor within current major, with a prerelease exclusion toggle
 - **Domain-Driven Design:** Clean separation of domain, application, infrastructure, and presentation layers
 - **OpenAPI Documentation:** Auto-generated Swagger UI for easy API exploration
-- **Secure by Default:** Input validation, rate limiting, and secure API handling
+- **Secure by Default:** Input validation, rate limiting, secure API handling, bcrypt password hashing
 - **Container Ready:** Docker and Kubernetes support for production deployments
 - **Developer Friendly:** Comprehensive tooling, linting, and CI/CD integration
 
 ---
 
 ## ⚡ Quick Start
+
+### Prerequisites
+
+- **Rust 1.82+**
+- **PostgreSQL 12+** (or Docker for quick setup)
+- **SQLx CLI** (for migrations): `cargo install sqlx-cli --no-default-features --features postgres`
 
 ### Installation
 
@@ -39,6 +46,12 @@ source ~/.cargo/env
 # System deps (Ubuntu/Debian)
 sudo apt-get install -y pkg-config libssl-dev
 
+# Setup database
+# Local PostgreSQL
+export DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'
+sqlx migrate run --source migrations
+
+# Build and run
 cargo build --release
 cargo run
 ```
@@ -75,7 +88,147 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 
 ---
 
+## 🔐 Authentication & Authorization
+
+Vulnera includes a complete authentication system with support for both JWT tokens and API keys.
+
+### Quick Setup
+
+### User Registration
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePassword123"
+  }'
+```
+
+Returns access and refresh tokens immediately.
+
+### Login
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePassword123"
+  }'
+```
+
+### Authentication Methods
+
+#### Method 1: JWT Bearer Token (Interactive Sessions)
+
+```bash
+curl -X POST http://localhost:3000/api/v1/analyze \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"ecosystem": "npm", "content": "express@4.17.1"}'
+```
+
+**Best for:**
+
+- Web applications
+- Interactive API clients
+- Short-lived sessions (default 24 hours)
+
+#### Method 2: API Keys (Service Integration)
+
+First, create an API key:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/api-keys \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "CI/CD Integration"}'
+```
+
+Then use it:
+
+```bash
+# Option A: X-API-Key header
+curl -X POST http://localhost:3000/api/v1/analyze \
+  -H "X-API-Key: vuln_abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"ecosystem": "npm", "content": "express@4.17.1"}'
+
+# Option B: Authorization header
+curl -X POST http://localhost:3000/api/v1/analyze \
+  -H "Authorization: ApiKey vuln_abc123..." \
+  -H "Content-Type: application/json" \
+  -d '{"ecosystem": "npm", "content": "express@4.17.1"}'
+```
+
+**Best for:**
+
+- CI/CD pipelines
+- Automated scripts
+- Service-to-service communication
+- Long-lived integrations
+
+### API Endpoints
+
+| Endpoint                     | Method | Auth          | Description                  |
+| ---------------------------- | ------ | ------------- | ---------------------------- |
+| `/api/v1/auth/register`      | POST   | None          | Create new user account      |
+| `/api/v1/auth/login`         | POST   | None          | Login with email/password    |
+| `/api/v1/auth/refresh`       | POST   | None          | Refresh expired access token |
+| `/api/v1/auth/api-keys`      | POST   | Bearer        | Create new API key           |
+| `/api/v1/auth/api-keys`      | GET    | Bearer/ApiKey | List your API keys           |
+| `/api/v1/auth/api-keys/{id}` | DELETE | Bearer        | Revoke an API key            |
+
+### Configuration
+
+```bash
+# Required
+DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'
+
+# Authentication settings
+VULNERA__AUTH__JWT_SECRET='your-secret-minimum-32-characters'
+VULNERA__AUTH__TOKEN_TTL_HOURS=24
+VULNERA__AUTH__REFRESH_TOKEN_TTL_HOURS=720  # 30 days
+VULNERA__AUTH__API_KEY_LENGTH=32
+```
+
+### Security Features
+
+- ✅ Bcrypt password hashing (cost factor 12)
+- ✅ API keys hashed before storage (never retrievable)
+- ✅ JWT tokens with HMAC-SHA256 signing
+- ✅ Configurable token expiration
+- ✅ API key masking in list operations
+- ✅ Role-based access control support
+
+### Documentation
+
+- **Detailed Testing Guide:** [docs/API_TESTING.md](docs/API_TESTING.md)
+- **Database Setup:** [docs/SQLX_SETUP.md](docs/SQLX_SETUP.md)
+- **Quick Start:** [QUICK_START.md](QUICK_START.md)
+
+---
+
 ## 📦 Supported Ecosystems & File Formats
+
+</text>
+
+<old_text line=95>
+
+- Example environment overrides:
+
+  ```bash
+  VULNERA__SERVER__PORT=8080
+  VULNERA__CACHE__TTL_HOURS=24
+  VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
+  VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false
+  VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
+  VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
+  VULNERA__APIS__GHSA__TOKEN=your_github_token
+  VULNERA__APIS__GITHUB__TOKEN=your_github_token
+  VULNERA__APIS__GITHUB__REUSE_GHSA_TOKEN=true
+  ```
 
 - **Python:** `requirements.txt`, `Pipfile`, `pyproject.toml`
 - **Node.js:** `package.json`, `package-lock.json`, `yarn.lock`
@@ -97,11 +250,29 @@ curl -X POST http://localhost:3000/api/v1/analyze/repository \
 - Example environment overrides:
 
   ```bash
+  # Server
   VULNERA__SERVER__PORT=8080
+  VULNERA__SERVER__ALLOWED_ORIGINS='["*"]'  # Use specific origins in production
+
+  # Database (Required)
+  DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'
+
+  # Authentication (Required for production)
+  VULNERA__AUTH__JWT_SECRET='your-secret-minimum-32-characters'
+  VULNERA__AUTH__TOKEN_TTL_HOURS=24
+  VULNERA__AUTH__REFRESH_TOKEN_TTL_HOURS=720
+  VULNERA__AUTH__API_KEY_LENGTH=32
+  VULNERA__AUTH__API_KEY_TTL_DAYS=365
+
+  # Analysis & Caching
   VULNERA__CACHE__TTL_HOURS=24
   VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
+
+  # Recommendations
   VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES=false
   VULNERA__RECOMMENDATIONS__MAX_VERSION_QUERIES_PER_REQUEST=50
+
+  # External APIs
   VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
   VULNERA__APIS__GHSA__TOKEN=your_github_token
   VULNERA__APIS__GITHUB__TOKEN=your_github_token
@@ -204,17 +375,6 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 
 ---
 
-## 🚢 Deployment
-
-- **Docker:**
-
-  ```bash
-  docker build -t vulnera-rust .
-  docker run -p 3000:3000 vulnera-rust
-  ```
-
-- (Kubernetes manifests are intentionally not included in this repo yet.)
-
 - **Production:**
   Harden config, disable docs, restrict CORS, provide API keys.
 
@@ -290,7 +450,6 @@ This architecture provides global reach, strong identity and secret management, 
 - Khaled Mahmoud — Project Manager, Main Developer, Rust Backend Developer
 - Abd El-Rahman Mossad — Frontend Developer - Extension , LSP Server Developer and Maintainer
 - Amr Medhat — Cloud Engineer
-- Youssef Mohammed — Database Engineer
 - Gasser Mohammed — Frontend Developer
 
 ---

@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::application::{CacheService, errors::ApplicationError};
 use crate::domain::{Ecosystem, VulnerabilityId};
+use crate::presentation::auth::extractors::Auth;
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, AnalysisResponse, ErrorResponse,
     PaginationDto, RepositoryAnalysisMetadataDto, RepositoryAnalysisRequest,
@@ -124,6 +125,18 @@ pub struct AppState {
     pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
     pub config: Arc<crate::Config>,
     pub startup_time: std::time::Instant,
+    // Auth-related state
+    pub db_pool: Arc<sqlx::PgPool>,
+    pub user_repository: Arc<dyn crate::domain::auth::repositories::IUserRepository>,
+    pub api_key_repository: Arc<dyn crate::domain::auth::repositories::IApiKeyRepository>,
+    pub jwt_service: Arc<crate::infrastructure::auth::JwtService>,
+    pub password_hasher: Arc<crate::infrastructure::auth::PasswordHasher>,
+    pub api_key_generator: Arc<crate::infrastructure::auth::ApiKeyGenerator>,
+    pub login_use_case: Arc<crate::application::auth::use_cases::LoginUseCase>,
+    pub register_use_case: Arc<crate::application::auth::use_cases::RegisterUserUseCase>,
+    pub validate_token_use_case: Arc<crate::application::auth::use_cases::ValidateTokenUseCase>,
+    pub refresh_token_use_case: Arc<crate::application::auth::use_cases::RefreshTokenUseCase>,
+    pub validate_api_key_use_case: Arc<crate::application::auth::use_cases::ValidateApiKeyUseCase>,
 }
 
 /// Analyze an entire repository for dependency vulnerabilities
@@ -135,10 +148,16 @@ pub struct AppState {
     responses(
         (status = 200, description = "Repository analysis completed", body = RepositoryAnalysisResponse),
         (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized - Authentication required", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("Bearer" = []),
+        ("ApiKey" = [])
     )
 )]
 pub async fn analyze_repository(
+    Auth { .. }: Auth,
     State(app_state): State<AppState>,
     Json(request): Json<RepositoryAnalysisRequest>,
 ) -> Result<Json<RepositoryAnalysisResponse>, ApplicationError> {
@@ -396,11 +415,17 @@ pub async fn analyze_repository(
     responses(
         (status = 200, description = "Analysis completed successfully", body = AnalysisResponse),
         (status = 400, description = "Invalid request format", body = ErrorResponse),
+        (status = 401, description = "Unauthorized - Authentication required", body = ErrorResponse),
         (status = 422, description = "Unsupported file format", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("Bearer" = []),
+        ("ApiKey" = [])
     )
 )]
 pub async fn analyze_dependencies(
+    Auth { .. }: Auth,
     State(app_state): State<AppState>,
     Json(request): Json<AnalysisRequest>,
 ) -> Result<Json<AnalysisResponse>, ApplicationError> {

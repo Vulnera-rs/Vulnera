@@ -1,7 +1,7 @@
 //! Configuration validation module
 
 use crate::config::{
-    AnalysisConfig, ApiConfig, CacheConfig, GhsaConfig, GitHubConfig, NvdConfig, ServerConfig,
+    AnalysisConfig, ApiConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig, NvdConfig, ServerConfig,
 };
 use std::path::Path;
 
@@ -24,6 +24,12 @@ pub enum ValidationError {
 
     #[error("Analysis configuration error: {message}")]
     Analysis { message: String },
+
+    #[error("Authentication configuration error: {message}")]
+    Auth { message: String },
+
+    #[error("Database configuration error: {message}")]
+    Database { message: String },
 }
 
 impl ValidationError {
@@ -47,6 +53,18 @@ impl ValidationError {
 
     pub fn analysis(message: impl Into<String>) -> Self {
         Self::Analysis {
+            message: message.into(),
+        }
+    }
+
+    pub fn auth(message: impl Into<String>) -> Self {
+        Self::Auth {
+            message: message.into(),
+        }
+    }
+
+    pub fn database(message: impl Into<String>) -> Self {
+        Self::Database {
             message: message.into(),
         }
     }
@@ -218,6 +236,68 @@ impl Validate for AnalysisConfig {
         if self.max_concurrent_packages == 0 {
             return Err(ValidationError::analysis(
                 "max_concurrent_packages must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for AuthConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate JWT secret length (at least 32 characters in production)
+        // In development, we allow shorter secrets for convenience
+        if self.jwt_secret.len() < 16 {
+            return Err(ValidationError::auth(
+                "JWT secret must be at least 16 characters long".to_string(),
+            ));
+        }
+
+        // Validate token TTL > 0
+        if self.token_ttl_hours == 0 {
+            return Err(ValidationError::auth(
+                "Access token TTL must be greater than 0 hours".to_string(),
+            ));
+        }
+
+        // Validate refresh token TTL > 0
+        if self.refresh_token_ttl_hours == 0 {
+            return Err(ValidationError::auth(
+                "Refresh token TTL must be greater than 0 hours".to_string(),
+            ));
+        }
+
+        // Validate API key length (16-128 bytes)
+        if self.api_key_length < 16 || self.api_key_length > 128 {
+            return Err(ValidationError::auth(
+                "API key length must be between 16 and 128 bytes".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for DatabaseConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate database URL is not empty
+        if self.url.is_empty() {
+            return Err(ValidationError::database(
+                "Database URL cannot be empty".to_string(),
+            ));
+        }
+
+        // Validate URL format (basic check)
+        if !self.url.starts_with("postgres://") && !self.url.starts_with("postgresql://") {
+            return Err(ValidationError::database(
+                "Database URL must start with postgres:// or postgresql://".to_string(),
+            ));
+        }
+
+        // Validate max_connections > 0
+        if self.max_connections == 0 {
+            return Err(ValidationError::database(
+                "Max connections must be greater than 0".to_string(),
             ));
         }
 
