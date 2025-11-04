@@ -1,5 +1,4 @@
 name: CI
-
 on:
   push:
     branches:
@@ -17,20 +16,19 @@ jobs:
         - name: Checkout repository
           uses: actions/checkout@v4
 
-        - name: setup Rust
-          run: |
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-              source ~/.cargo/env  
-
-        - name: setup Rust
-          run: cargo build --release
-
-
         - name: Log in to Docker Hub
           uses: docker/login-action@v2
           with:
             username: amramer2000
             password: dckr_pat_fi1-ncItcBM8OYBIhWTGcYRu660
+
+        - uses: actions-rs/toolchain@v1
+          with:
+            toolchain: stable
+        - uses: actions-rs/cargo@v1
+          with:
+            command: build
+            args: --release 
 
         - name: Build and push Docker image
           uses: docker/build-push-action@v4
