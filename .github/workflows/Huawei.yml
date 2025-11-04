@@ -23,10 +23,19 @@ jobs:
             username: amramer2000
             password: dckr_pat_fi1-ncItcBM8OYBIhWTGcYRu660
 
+        - uses: actions-rs/toolchain@v1
+          with:
+            toolchain: stable
+        - uses: actions-rs/cargo@v1
+          with:
+            command: build
+            args: --release 
+
         - name: Build and push Docker image
           uses: docker/build-push-action@v4
           with:
-            context: . 
+            context: .
+            file: ./Dockerfile
             push: true
             tags: amramer2000/vprofile-app:latest        
         
