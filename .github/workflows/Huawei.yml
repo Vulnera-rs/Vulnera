@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+          - 'src/**'
+          - '.github/workflows/Huawei.yml'
+  workflow_dispatch:    
+      
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+
+        - name: Log in to Docker Hub
+          uses: docker/login-action@v2
+          with:
+            username: amramer2000
+            password: dckr_pat_fi1-ncItcBM8OYBIhWTGcYRu660
+
+        - name: Build and push Docker image
+          uses: docker/build-push-action@v4
+          with:
+            context: . 
+            push: true
+            tags: amramer2000/vprofile-app:latest        
+        
