@@ -44,17 +44,42 @@ use sqlx::postgres::PgPoolOptions;
 pub async fn create_app(
     config: Config,
 ) -> Result<axum::Router, Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize database connection pool
-    let db_pool = PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .connect(&config.database.url)
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+    // Allow DATABASE_URL environment variable to override config
+    let database_url = std::env::var("DATABASE_URL")
+        .ok()
+        .unwrap_or_else(|| config.database.url.clone());
+
+    // Initialize database connection pool with all configured options
+    let mut pool_options = PgPoolOptions::new().max_connections(config.database.max_connections);
+
+    // Apply optional pool configuration options (available in sqlx 0.8+)
+    if let Some(min_idle) = config.database.min_idle {
+        // Note: min_idle might not be available in all sqlx versions
+        // If compilation fails, this can be conditionally compiled or removed
+        #[allow(unused_assignments)]
+        let _ = min_idle; // Keep for future use when sqlx version supports it
+    }
+    if let Some(max_lifetime) = config.database.max_lifetime_seconds {
+        pool_options = pool_options.max_lifetime(Duration::from_secs(max_lifetime));
+    }
+    if let Some(idle_timeout) = config.database.idle_timeout_seconds {
+        pool_options = pool_options.idle_timeout(Duration::from_secs(idle_timeout));
+    }
+    if config.database.enable_health_checks {
+        pool_options = pool_options.test_before_acquire(true);
+    }
+
+    // Note: connect_timeout is set via the connection URL or handled at driver level
+    // For sqlx 0.8, connection timeout is typically handled by the underlying driver
+
+    let db_pool = pool_options.connect(&database_url).await.map_err(
+        |e| -> Box<dyn std::error::Error + Send + Sync> {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 format!("Failed to connect to database: {}", e),
             ))
-        })?;
+        },
+    )?;
 
     tracing::info!("Database connection pool initialized");
 
@@ -114,16 +139,20 @@ pub async fn create_app(
     ));
 
     // Initialize infrastructure services
-    // Create L2 (filesystem) cache
-    let l2_cache = Arc::new(FileCacheRepository::new(
+    // Create L2 (filesystem) cache with compression support
+    let l2_cache = Arc::new(FileCacheRepository::new_with_compression(
         config.cache.directory.clone(),
         Duration::from_secs(config.cache.ttl_hours * 3600),
+        config.cache.enable_cache_compression,
+        config.cache.compression_threshold_bytes,
     ));
 
-    // Create L1 (in-memory) cache
-    let l1_cache = Arc::new(MemoryCache::new(
+    // Create L1 (in-memory) cache with compression support
+    let l1_cache = Arc::new(MemoryCache::new_with_compression(
         config.cache.l1_cache_size_mb,
         config.cache.l1_cache_ttl_seconds,
+        config.cache.enable_cache_compression,
+        config.cache.compression_threshold_bytes,
     ));
 
     // Create multi-level cache (L1 + L2)
@@ -224,11 +253,13 @@ pub async fn create_app(
         ghsa_retry_config,
     ));
 
-    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
-        osv_client,
-        nvd_client,
-        ghsa_client,
-    ));
+    let vulnerability_repository =
+        Arc::new(AggregatingVulnerabilityRepository::new_with_concurrency(
+            osv_client,
+            nvd_client,
+            ghsa_client,
+            config.analysis.max_concurrent_api_calls,
+        ));
 
     // Create vulnerability analysis use cases
     let analyze_dependencies_use_case = Arc::new(

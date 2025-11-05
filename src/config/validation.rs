@@ -395,6 +395,10 @@ mod tests {
         let valid = CacheConfig {
             directory: temp_dir.path().to_path_buf(),
             ttl_hours: 24,
+            l1_cache_size_mb: 100,
+            l1_cache_ttl_seconds: 300,
+            enable_cache_compression: true,
+            compression_threshold_bytes: 10240,
         };
         assert!(valid.validate().is_ok());
 
@@ -513,12 +517,16 @@ mod tests {
         // Valid config
         let valid = AnalysisConfig {
             max_concurrent_packages: 3,
+            max_concurrent_registry_queries: 5,
+            max_concurrent_api_calls: 10,
         };
         assert!(valid.validate().is_ok());
 
         // Invalid max_concurrent_packages
         let invalid = AnalysisConfig {
             max_concurrent_packages: 0,
+            max_concurrent_registry_queries: 5,
+            max_concurrent_api_calls: 10,
         };
         assert!(invalid.validate().is_err());
     }
