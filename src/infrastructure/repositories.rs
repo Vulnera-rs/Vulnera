@@ -77,6 +77,21 @@ impl AggregatingVulnerabilityRepository {
         }
     }
 
+    /// Create a new aggregating repository with configurable concurrency limit
+    pub fn new_with_concurrency(
+        osv_client: Arc<dyn VulnerabilityApiClient>,
+        nvd_client: Arc<dyn VulnerabilityApiClient>,
+        ghsa_client: Arc<dyn VulnerabilityApiClient>,
+        max_concurrent_requests: usize,
+    ) -> Self {
+        Self {
+            osv_client,
+            nvd_client,
+            ghsa_client,
+            max_concurrent_requests,
+        }
+    }
+
     /// Convert RawVulnerability to domain Vulnerability
     ///
     /// This method implements the **Adapter Pattern** to convert between external API formats
@@ -507,7 +522,7 @@ impl AggregatingVulnerabilityRepository {
         let package_arc_osv = Arc::clone(&package_arc);
         join_set.spawn(async move {
             let package_id = package_arc_osv.identifier();
-            match osv_client.query_vulnerabilities(&*package_arc_osv).await {
+            match osv_client.query_vulnerabilities(&package_arc_osv).await {
                 Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::OSV)),
                 Err(e) => {
                     match e {
@@ -532,7 +547,7 @@ impl AggregatingVulnerabilityRepository {
         let package_arc_nvd = Arc::clone(&package_arc);
         join_set.spawn(async move {
             let package_id = package_arc_nvd.identifier();
-            match nvd_client.query_vulnerabilities(&*package_arc_nvd).await {
+            match nvd_client.query_vulnerabilities(&package_arc_nvd).await {
                 Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::NVD)),
                 Err(e) => {
                     warn!("NVD query failed for {}: {}", package_id, e);
@@ -550,7 +565,7 @@ impl AggregatingVulnerabilityRepository {
             let package_arc_ghsa = Arc::clone(&package_arc);
             join_set.spawn(async move {
                 let package_id = package_arc_ghsa.identifier();
-                match ghsa_client.query_vulnerabilities(&*package_arc_ghsa).await {
+                match ghsa_client.query_vulnerabilities(&package_arc_ghsa).await {
                     Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::GHSA)),
                     Err(e) => {
                         warn!(
