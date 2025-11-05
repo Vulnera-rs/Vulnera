@@ -41,6 +41,7 @@ thiserror = "2.0"
 
 # Configuration
 config = "0.15"
+dotenvy = "0.15"
 
 # Logging and tracing
 tracing = "0.1.41"

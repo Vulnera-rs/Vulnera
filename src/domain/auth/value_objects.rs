@@ -406,3 +406,4 @@ mod tests {
         assert!(!token.is_refresh_token());
     }
 }
+
