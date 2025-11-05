@@ -17,8 +17,8 @@ use vulnera_rust::application::services::{
     AnalysisService, CacheService, PopularPackageService, ReportService, RepositoryAnalysisService,
     VersionResolutionService,
 };
-use vulnera_rust::domain::entities::{AnalysisMetadata, AnalysisReport, Package, Vulnerability};
-use vulnera_rust::domain::value_objects::{
+use vulnera_rust::domain::vulnerability::entities::{AnalysisMetadata, AnalysisReport, Package, SeverityBreakdown, Vulnerability};
+use vulnera_rust::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VulnerabilityId, VulnerabilitySource,
 };
 use vulnera_rust::infrastructure::repositories::VulnerabilityRepository;
@@ -176,7 +176,7 @@ impl RepositoryAnalysisService for MockRepositoryAnalysisService {
                 files: vec![],
                 vulnerabilities: vec![],
                 severity_breakdown:
-                    vulnera_rust::domain::entities::SeverityBreakdown::from_vulnerabilities(&[]),
+                    SeverityBreakdown::from_vulnerabilities(&[]),
                 total_files_scanned: 10,
                 analyzed_files: 5,
                 skipped_files: 5,

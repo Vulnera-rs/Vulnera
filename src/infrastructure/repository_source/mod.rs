@@ -12,7 +12,10 @@ pub mod url_parser;
 pub use github_client::GitHubRepositoryClient;
 pub use url_parser::{ParsedRepositoryUrl, parse_github_repo_url};
 
-use crate::domain::{Ecosystem, Package};
+use crate::domain::vulnerability::{
+    entities::Package,
+    value_objects::Ecosystem,
+};
 
 #[derive(Debug, Error)]
 pub enum RepositorySourceError {

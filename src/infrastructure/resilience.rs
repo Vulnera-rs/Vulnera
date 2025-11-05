@@ -46,18 +46,18 @@ impl Default for CircuitBreakerConfig {
 /// services become unavailable. This provides fault tolerance and automatic recovery.
 ///
 /// **State Machine:**
-/// ```
-///    ┌─────────────┐    Failure Threshold     ┌──────────────┐
-///    │   CLOSED    │ ───────────────────────► │     OPEN      │
-///    └─────────────┘                          └──────────────┘
-///    │         ▲ Recovery Timeout                 │ Success
-///    │         │                                  ▼
-///    └─────────┼──────────────────────────────────┐
-///              │                                  │
-///              ▼                                  │
-///         ┌──────────────┐   Half-Open Max        │
-///         │  HALF_OPEN   │ ───────────────────────┘
-///         └──────────────┘     Requests Limit
+/// ```text
+///    +-------------+    Failure Threshold     +--------------+
+///    |   CLOSED    | -----------------------> |     OPEN      |
+///    +-------------+                          +--------------+
+///    |         ^ Recovery Timeout                 | Success
+///    |         |                                  v
+///    +---------+----------------------------------+
+///              |                                  |
+///              v                                  |
+///         +--------------+   Half-Open Max        |
+///         |  HALF_OPEN   | -----------------------+
+///         +--------------+     Requests Limit
 /// ```
 ///
 /// **Behavior by State:**
@@ -119,13 +119,13 @@ impl CircuitBreaker {
     /// This is the core method that implements the circuit breaker logic. It follows
     /// this decision tree:
     ///
-    /// ```
+    /// ```text
     /// Can Execute?
-    ///    ├─ No → Return ServiceUnavailable error
-    ///    └─ Yes → Execute with timeout
-    ///        ├─ Success → Reset failure count, return result
-    ///        ├─ Timeout → Record failure, check state transition
-    ///        └─ Error → Record failure, check state transition
+    ///    +- No -> Return ServiceUnavailable error
+    ///    +- Yes -> Execute with timeout
+    ///        +- Success -> Reset failure count, return result
+    ///        +- Timeout -> Record failure, check state transition
+    ///        +- Error -> Record failure, check state transition
     /// ```
     ///
     /// **Concurrency Model:**

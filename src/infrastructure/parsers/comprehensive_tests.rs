@@ -1,7 +1,7 @@
 //! Comprehensive tests for all package file parsers
 
 use super::*;
-use crate::domain::{Ecosystem, Version};
+use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
 
 // Test data for different ecosystems
 

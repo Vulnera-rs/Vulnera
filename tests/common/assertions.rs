@@ -3,7 +3,7 @@
 //! This module provides domain-specific assertions that make tests more
 //! expressive and easier to understand.
 
-use vulnera_rust::domain::{
+use vulnera_rust::domain::vulnerability::{
     entities::{Package, Vulnerability, AnalysisReport},
     value_objects::{Severity, VulnerabilityId},
 };
@@ -62,10 +62,10 @@ pub trait PackageAssertions {
     fn assert_contains_name(&self, package_name: &str) -> &Self;
 
     /// Assert the collection contains a package with the specified ecosystem
-    fn assert_contains_ecosystem(&self, ecosystem: vulnera_rust::domain::value_objects::Ecosystem) -> &Self;
+    fn assert_contains_ecosystem(&self, ecosystem: vulnera_rust::domain::vulnerability::value_objects::Ecosystem) -> &Self;
 
     /// Assert all packages are from the specified ecosystem
-    fn assert_all_from_ecosystem(&self, ecosystem: vulnera_rust::domain::value_objects::Ecosystem) -> &Self;
+    fn assert_all_from_ecosystem(&self, ecosystem: vulnera_rust::domain::vulnerability::value_objects::Ecosystem) -> &Self;
 
     /// Assert no duplicate package names exist
     fn assert_no_duplicate_names(&self) -> &Self;

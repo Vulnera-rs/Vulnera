@@ -6,28 +6,28 @@
 //! and external APIs.
 //!
 //! **Architecture Overview:**
-//! ```
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                    Presentation Layer                        │
-//! │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-//! │  │ Controllers │  │   Routes    │  │  DTOs/Models│         │
-//! │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘         │
-//!         │                 │                 │                 │
-//! └─────────┼─────────────────┼─────────────────┼─────────────┘
-//!           │                 │                 │
-//! ┌─────────▼─────────────────▼─────────────────▼─────────────┐
-//! │                  Application Layer                         │
-//! │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-//! │  │ Analysis    │  │ Version     │  │ Report      │         │
-//! │  │ Service     │  │ Resolution  │  │ Service     │         │
-//! │  └─────────────┘  └─────────────┘  └─────────────┘         │
-//!         │                 │                 │                 │
-//! └─────────┼─────────────────┼─────────────────┼─────────────┘
-//!           │                 │                 │
-//! ┌─────────▼─────────────────▼─────────────────▼─────────────┐
-//! │                    Domain Layer                            │
-//! │           (Entities, Value Objects, Domain Services)       │
-//! └─────────────────────────────────────────────────────────────┘
+//! ```text
+//! +-------------------------------------------------------------+
+//! |                    Presentation Layer                        |
+//! |  +-------------+  +-------------+  +-------------+         |
+//! |  | Controllers |  |   Routes    |  |  DTOs/Models|         |
+//! |  +------+------+  +------+------+  +------+------+         |
+//!         |                 |                 |                 |
+//! +--------+-----------------+-----------------+-------------+
+//!           |                 |                 |
+//! +---------+-----------------+-----------------+-------------+
+//! |                  Application Layer                         |
+//! |  +-------------+  +-------------+  +-------------+         |
+//! |  | Analysis    |  | Version     |  | Report      |         |
+//! |  | Service     |  | Resolution  |  | Service     |         |
+//! |  +-------------+  +-------------+  +-------------+         |
+//!         |                 |                 |                 |
+//! +--------+-----------------+-----------------+-------------+
+//!           |                 |                 |
+//! +---------+-----------------+-----------------+-------------+
+//! |                    Domain Layer                            |
+//! |           (Entities, Value Objects, Domain Services)       |
+//! +-------------------------------------------------------------+
 //! ```
 //!
 //! **Service Responsibilities:**
@@ -60,11 +60,11 @@
 /// 4. **Recommendation Logic**: Suggests safe upgrade paths with minimal breaking changes
 ///
 /// **Architecture:**
-/// ```
-/// Request → Cache Check → Registry Query → Version Analysis → Recommendation
-///    │            │             │              │              │
-///    │            │             │              │              │
-///    ▼            ▼             ▼              ▼              ▼
+/// ```text
+/// Request -> Cache Check -> Registry Query -> Version Analysis -> Recommendation
+///    |            |             |              |              |
+///    |            |             |              |              |
+///    v            v             v              v              v
 /// Check if    Query       Fetch all      Filter out    Find nearest
 /// cached      package     available    vulnerable    safe version
 /// results     versions    versions     versions       (patch > minor > major)
@@ -162,10 +162,10 @@ where
     #[tracing::instrument(skip(self, name, current, vulnerabilities))]
     async fn recommend(
         &self,
-        ecosystem: crate::domain::Ecosystem,
+        ecosystem: crate::domain::vulnerability::value_objects::Ecosystem,
         name: &str,
-        current: Option<crate::domain::Version>,
-        vulnerabilities: &[crate::domain::Vulnerability],
+        current: Option<crate::domain::vulnerability::value_objects::Version>,
+        vulnerabilities: &[crate::domain::vulnerability::entities::Vulnerability],
     ) -> Result<super::VersionRecommendation, crate::application::errors::ApplicationError> {
         // Fetch available versions from registry with optional cache
         let versions_res = if let Some(cache) = &self.cache_service {
@@ -208,13 +208,15 @@ where
         };
 
         // Helper: vulnerability predicate using merged OSV + GHSA model
-        let is_vulnerable = |v: &crate::domain::Version| -> bool {
+        let is_vulnerable = |v: &crate::domain::vulnerability::value_objects::Version| -> bool {
             vulnerabilities.iter().any(|vv| {
                 vv.affected_packages.iter().any(|ap| {
                     // Build a package for matching name/ecosystem, with candidate version
-                    if let Ok(pkg) =
-                        crate::domain::Package::new(name.to_string(), v.clone(), ecosystem.clone())
-                    {
+                    if let Ok(pkg) = crate::domain::vulnerability::entities::Package::new(
+                        name.to_string(),
+                        v.clone(),
+                        ecosystem.clone(),
+                    ) {
                         ap.package.matches(&pkg) && ap.is_vulnerable(v)
                     } else {
                         false
@@ -231,7 +233,8 @@ where
 
             let nearest_safe_above_current = current.as_ref().and_then(|cur| {
                 // collect minimal fixed version >= current
-                let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                let mut candidates: Vec<crate::domain::vulnerability::value_objects::Version> =
+                    Vec::new();
                 for vv in vulnerabilities {
                     for ap in &vv.affected_packages {
                         if ap.package.name == name && ap.package.ecosystem == ecosystem {
@@ -255,7 +258,8 @@ where
                 nearest_safe_above_current,
                 most_up_to_date_safe: None,
                 next_safe_minor_within_current_major: current.as_ref().and_then(|cur| {
-                    let mut candidates: Vec<crate::domain::Version> = Vec::new();
+                    let mut candidates: Vec<crate::domain::vulnerability::value_objects::Version> =
+                        Vec::new();
                     for vv in vulnerabilities {
                         for ap in &vv.affected_packages {
                             if ap.package.name == name && ap.package.ecosystem == ecosystem {
@@ -390,19 +394,18 @@ where
 }
 
 use async_trait::async_trait;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::errors::ApplicationError;
-use crate::domain::{
-    AnalysisMetadata, AnalysisReport, Ecosystem, Package, Vulnerability, VulnerabilityId,
+use crate::domain::vulnerability::entities::AnalysisMetadata;
+use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
+use crate::domain::vulnerability::{
+    entities::{AnalysisReport, Package, Vulnerability},
+    value_objects::{Ecosystem, VulnerabilityId},
 };
-use crate::infrastructure::{
-    VulnerabilityRepository,
-    cache::file_cache::FileCacheRepository,
-    registries::{CratesIoRegistryClient, PackageRegistryClient},
-};
+use crate::infrastructure::cache::file_cache::FileCacheRepository;
 
 /// Structured report data for API consumption
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -410,7 +413,7 @@ pub struct StructuredReport {
     pub id: uuid::Uuid,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub summary: ReportSummary,
-    pub severity_breakdown: crate::domain::SeverityBreakdown,
+    pub severity_breakdown: crate::domain::vulnerability::entities::SeverityBreakdown,
     pub package_summaries: Vec<PackageSummary>,
     pub prioritized_vulnerabilities: Vec<Vulnerability>,
 }
@@ -431,10 +434,10 @@ pub struct ReportSummary {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PackageSummary {
     pub name: String,
-    pub version: crate::domain::Version,
+    pub version: crate::domain::vulnerability::value_objects::Version,
     pub ecosystem: Ecosystem,
     pub vulnerability_count: usize,
-    pub highest_severity: crate::domain::Severity,
+    pub highest_severity: crate::domain::vulnerability::value_objects::Severity,
     pub vulnerabilities: Vec<VulnerabilityId>,
 }
 
@@ -474,7 +477,7 @@ pub struct RepositoryAnalysisInternalResult {
     pub commit_sha: String,
     pub files: Vec<RepositoryFileResultInternal>,
     pub vulnerabilities: Vec<Vulnerability>,
-    pub severity_breakdown: crate::domain::SeverityBreakdown,
+    pub severity_breakdown: crate::domain::vulnerability::entities::SeverityBreakdown,
     pub total_files_scanned: u32,
     pub analyzed_files: u32,
     pub skipped_files: u32,
@@ -503,7 +506,7 @@ use std::sync::Arc;
 /// Repository analysis service implementation
 pub struct RepositoryAnalysisServiceImpl<
     C: RepositorySourceClient,
-    R: VulnerabilityRepository + 'static,
+    R: IVulnerabilityRepository + 'static,
 > {
     source_client: Arc<C>,
     vuln_repo: Arc<R>,
@@ -511,7 +514,7 @@ pub struct RepositoryAnalysisServiceImpl<
     config: Arc<Config>,
 }
 
-impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisServiceImpl<C, R> {
+impl<C: RepositorySourceClient, R: IVulnerabilityRepository> RepositoryAnalysisServiceImpl<C, R> {
     pub fn new(
         source_client: Arc<C>,
         vuln_repo: Arc<R>,
@@ -531,7 +534,7 @@ impl<C: RepositorySourceClient, R: VulnerabilityRepository> RepositoryAnalysisSe
 impl<C, R> RepositoryAnalysisService for RepositoryAnalysisServiceImpl<C, R>
 where
     C: RepositorySourceClient + 'static,
-    R: VulnerabilityRepository + 'static,
+    R: IVulnerabilityRepository + 'static,
 {
     #[tracing::instrument(skip(self, input))]
     async fn analyze_repository(
@@ -566,10 +569,12 @@ where
                 } => ApplicationError::RateLimited { message },
                 crate::infrastructure::repository_source::RepositorySourceError::Validation(
                     msg,
-                ) => ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
-                    field: "ref".into(),
-                    message: msg,
-                }),
+                ) => ApplicationError::Domain(
+                    crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
+                        field: "ref".into(),
+                        message: msg,
+                    },
+                ),
                 other => ApplicationError::Configuration {
                     message: format!("repository source error: {}", other),
                 },
@@ -631,7 +636,7 @@ where
                         ApplicationError::NotFound { resource: "file contents".into(), id: format!("{}/{}", &input.owner, &input.repo) }
                     }
                     crate::infrastructure::repository_source::RepositorySourceError::Validation(msg) => {
-                        ApplicationError::Domain(crate::domain::DomainError::InvalidInput { field: "ref".into(), message: msg })
+                        ApplicationError::Domain(crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput { field: "ref".into(), message: msg })
                     }
                     other => ApplicationError::Configuration { message: format!("repository source error: {}", other) },
                 })?
@@ -711,7 +716,10 @@ where
         // Deduplicate vulnerabilities by id
         let mut seen = HashSet::new();
         all_vulns.retain(|v| seen.insert(v.id.as_str().to_string()));
-        let severity_breakdown = crate::domain::SeverityBreakdown::from_vulnerabilities(&all_vulns);
+        let severity_breakdown =
+            crate::domain::vulnerability::entities::SeverityBreakdown::from_vulnerabilities(
+                &all_vulns,
+            );
 
         let internal = RepositoryAnalysisInternalResult {
             id: uuid::Uuid::new_v4(),
@@ -734,22 +742,6 @@ where
         };
         Ok(internal)
     }
-}
-
-/// Service for orchestrating vulnerability analysis
-#[async_trait]
-pub trait AnalysisService: Send + Sync {
-    async fn analyze_dependencies(
-        &self,
-        file_content: &str,
-        ecosystem: Ecosystem,
-        filename: Option<&str>,
-    ) -> Result<AnalysisReport, ApplicationError>;
-
-    async fn get_vulnerability_details(
-        &self,
-        vulnerability_id: &VulnerabilityId,
-    ) -> Result<Vulnerability, ApplicationError>;
 }
 
 /// Service for managing caching strategies
@@ -802,7 +794,7 @@ pub struct PopularPackageVulnerabilityResult {
 
 /// Service implementation for popular package vulnerability management
 pub struct PopularPackageServiceImpl<C: CacheService> {
-    vulnerability_repository: Arc<dyn VulnerabilityRepository>,
+    vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
     cache_service: Arc<C>,
     config: Arc<crate::config::Config>,
 }
@@ -810,7 +802,7 @@ pub struct PopularPackageServiceImpl<C: CacheService> {
 impl<C: CacheService> PopularPackageServiceImpl<C> {
     /// Create a new popular package service
     pub fn new(
-        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
+        vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
         cache_service: Arc<C>,
         config: Arc<crate::config::Config>,
     ) -> Self {
@@ -923,7 +915,9 @@ impl<C: CacheService> PopularPackageServiceImpl<C> {
         for chunk in packages.chunks(max_concurrent) {
             // Spawn tasks for current chunk
             for (ecosystem, name, version) in chunk {
-                if let Ok(version_obj) = crate::domain::Version::parse(version) {
+                if let Ok(version_obj) =
+                    crate::domain::vulnerability::value_objects::Version::parse(version)
+                {
                     let ecosystem_clone = ecosystem.clone();
                     if let Ok(package) = Package::new(name.clone(), version_obj, ecosystem_clone) {
                         let repo_clone = repo.clone();
@@ -1041,10 +1035,10 @@ impl<C: CacheService> PopularPackageService for PopularPackageServiceImpl<C> {
         // Apply severity filter if specified
         if let Some(severity_filter) = severity_filter {
             let filter_severity = match severity_filter.to_lowercase().as_str() {
-                "critical" => Some(crate::domain::Severity::Critical),
-                "high" => Some(crate::domain::Severity::High),
-                "medium" => Some(crate::domain::Severity::Medium),
-                "low" => Some(crate::domain::Severity::Low),
+                "critical" => Some(crate::domain::vulnerability::value_objects::Severity::Critical),
+                "high" => Some(crate::domain::vulnerability::value_objects::Severity::High),
+                "medium" => Some(crate::domain::vulnerability::value_objects::Severity::Medium),
+                "low" => Some(crate::domain::vulnerability::value_objects::Severity::Low),
                 _ => None,
             };
 
@@ -1192,7 +1186,7 @@ impl CacheServiceImpl {
     pub async fn preload_vulnerabilities(
         &self,
         packages: &[Package],
-        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
+        vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
     ) -> Result<(), ApplicationError> {
         info!(
             "Preloading vulnerability cache for {} packages",
@@ -1467,10 +1461,10 @@ impl ReportServiceImpl {
     /// Calculate severity score for prioritization
     pub fn calculate_severity_score(&self, vulnerability: &Vulnerability) -> f64 {
         let base_score = match vulnerability.severity {
-            crate::domain::Severity::Critical => 10.0,
-            crate::domain::Severity::High => 7.5,
-            crate::domain::Severity::Medium => 5.0,
-            crate::domain::Severity::Low => 2.5,
+            crate::domain::vulnerability::value_objects::Severity::Critical => 10.0,
+            crate::domain::vulnerability::value_objects::Severity::High => 7.5,
+            crate::domain::vulnerability::value_objects::Severity::Medium => 5.0,
+            crate::domain::vulnerability::value_objects::Severity::Low => 2.5,
         };
 
         // Adjust score based on number of affected packages
@@ -1635,7 +1629,7 @@ impl ReportServiceImpl {
                     .map(|v| &v.severity)
                     .max()
                     .cloned()
-                    .unwrap_or(crate::domain::Severity::Low);
+                    .unwrap_or(crate::domain::vulnerability::value_objects::Severity::Low);
 
                 PackageSummary {
                     name: package.name.clone(),
@@ -1727,382 +1721,5 @@ impl ReportService for ReportServiceImpl {
 
         info!("Generated HTML report ({} characters)", report.len());
         Ok(report)
-    }
-}
-
-/// Implementation of the analysis service
-pub struct AnalysisServiceImpl<C: CacheService> {
-    parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
-    vulnerability_repository: Arc<dyn VulnerabilityRepository>,
-    cache_service: Arc<C>,
-    max_concurrent_requests: usize, // Maximum number of packages to process concurrently
-}
-
-impl<C: CacheService + 'static> AnalysisServiceImpl<C> {
-    /// Create a new analysis service implementation with configuration
-    pub fn new(
-        parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
-        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
-        cache_service: Arc<C>,
-        config: &crate::config::Config,
-    ) -> Self {
-        Self {
-            parser_factory,
-            vulnerability_repository,
-            cache_service,
-            max_concurrent_requests: config.analysis.max_concurrent_packages,
-        }
-    }
-
-    /// Create a new analysis service with custom concurrency limit
-    pub fn with_concurrency(
-        parser_factory: Arc<crate::infrastructure::parsers::ParserFactory>,
-        vulnerability_repository: Arc<dyn VulnerabilityRepository>,
-        cache_service: Arc<C>,
-        max_concurrent_requests: usize,
-    ) -> Self {
-        Self {
-            parser_factory,
-            vulnerability_repository,
-            cache_service,
-            max_concurrent_requests,
-        }
-    }
-
-    /// Get the current max concurrent requests setting (for testing)
-    #[cfg(test)]
-    pub fn max_concurrent_requests(&self) -> usize {
-        self.max_concurrent_requests
-    }
-
-    /// Parse dependency file content into packages
-    async fn parse_dependencies(
-        &self,
-        file_content: &str,
-        ecosystem: Ecosystem,
-        filename: Option<&str>,
-    ) -> Result<Vec<Package>, ApplicationError> {
-        // Try to find a parser based on filename first
-        if let Some(filename) = filename {
-            if let Some(parser) = self.parser_factory.create_parser(filename) {
-                debug!("Using parser for filename: {}", filename);
-                return parser
-                    .parse_file(file_content)
-                    .await
-                    .map_err(ApplicationError::Parse);
-            }
-        }
-
-        // Fall back to ecosystem-based parsing by trying common filenames for the ecosystem
-        let common_filenames = match ecosystem {
-            Ecosystem::Npm => vec!["package.json", "package-lock.json", "yarn.lock"],
-            Ecosystem::PyPI => vec!["requirements.txt", "Pipfile", "pyproject.toml"],
-            Ecosystem::Maven => vec!["pom.xml"],
-            Ecosystem::Cargo => vec!["Cargo.toml", "Cargo.lock"],
-            Ecosystem::Go => vec!["go.mod", "go.sum"],
-            Ecosystem::Packagist => vec!["composer.json", "composer.lock"],
-            _ => vec![],
-        };
-
-        // Try each common filename for the ecosystem
-        for filename in common_filenames {
-            if let Some(parser) = self.parser_factory.create_parser(filename) {
-                debug!(
-                    "Using parser for ecosystem {:?} with filename: {}",
-                    ecosystem, filename
-                );
-                return parser
-                    .parse_file(file_content)
-                    .await
-                    .map_err(ApplicationError::Parse);
-            }
-        }
-
-        error!("No parser found for ecosystem: {:?}", ecosystem);
-        Err(ApplicationError::InvalidEcosystem {
-            ecosystem: format!("{:?}", ecosystem),
-        })
-    }
-
-    /// Process packages concurrently with proper error handling and bounded concurrency
-    async fn process_packages_concurrently(
-        &self,
-        packages: Vec<Package>,
-    ) -> Result<Vec<Vulnerability>, ApplicationError> {
-        let mut all_vulnerabilities = Vec::new();
-        let mut processed_count = 0;
-        let mut join_set: JoinSet<Result<(String, Vec<Vulnerability>), ApplicationError>> =
-            JoinSet::new();
-
-        info!(
-            "Processing {} packages with max_concurrent_requests: {}",
-            packages.len(),
-            self.max_concurrent_requests
-        );
-
-        // Process packages in chunks to respect concurrency limits
-        for chunk in packages.chunks(self.max_concurrent_requests) {
-            // Spawn tasks for current chunk
-            for package in chunk {
-                let package_clone = package.clone();
-                let vuln_repo = self.vulnerability_repository.clone();
-                let cache_service = self.cache_service.clone();
-
-                join_set.spawn(async move {
-                    let package_id = package_clone.identifier();
-
-                    // Use optimized cache key generation
-                    let cache_key = CacheServiceImpl::package_vulnerabilities_key(&package_clone);
-
-                    // Check cache first
-                    if let Ok(Some(cached_vulns)) =
-                        cache_service.get::<Vec<Vulnerability>>(&cache_key).await
-                    {
-                        let total = cached_vulns.len();
-                        // Filter to only vulnerabilities that actually affect this package version
-                        let filtered: Vec<Vulnerability> = cached_vulns
-                            .into_iter()
-                            .filter(|v| v.affects_package(&package_clone))
-                            .collect();
-                        debug!("Cache hit for package: {} (filtered {} -> {} affecting current version)", package_id, total, filtered.len());
-                        return Ok((package_id, filtered));
-                    }
-
-                    // Cache miss - query repository
-                    debug!(
-                        "Cache miss for package: {}, querying repository",
-                        package_id
-                    );
-
-                    match vuln_repo.find_vulnerabilities(&package_clone).await {
-                        Ok(vulnerabilities) => {
-                            let total = vulnerabilities.len();
-                            let filtered: Vec<Vulnerability> = vulnerabilities
-                                .into_iter()
-                                .filter(|v| v.affects_package(&package_clone))
-                                .collect();
-
-                            // Cache the filtered result for future use
-                            let cache_ttl = std::time::Duration::from_secs(24 * 3600); // 24 hours
-                            if let Err(e) = cache_service
-                                .set(&cache_key, &filtered, cache_ttl)
-                                .await
-                            {
-                                warn!("Failed to cache vulnerabilities for {}: {}", package_id, e);
-                            }
-
-                            debug!(
-                                "Found {} vulnerabilities for package: {} ({} affect current version)",
-                                total,
-                                package_id,
-                                filtered.len()
-                            );
-                            Ok((package_id, filtered))
-                        }
-                        Err(e) => {
-                            error!(
-                                "Failed to lookup vulnerabilities for package {}: {}",
-                                package_id, e
-                            );
-                            // Continue processing other packages instead of failing completely
-                            Ok((package_id, vec![]))
-                        }
-                    }
-                });
-            }
-
-            // Collect results from current chunk
-            while let Some(result) = join_set.join_next().await {
-                match result {
-                    Ok(Ok((package_id, vulnerabilities))) => {
-                        processed_count += 1;
-                        debug!("Completed processing package: {}", package_id);
-                        all_vulnerabilities.extend(vulnerabilities);
-                    }
-                    Ok(Err(e)) => {
-                        error!("Package processing error: {}", e);
-                        processed_count += 1;
-                    }
-                    Err(e) => {
-                        error!("Join error: {}", e);
-                        processed_count += 1;
-                    }
-                }
-            }
-        }
-
-        info!(
-            "Processed {} packages, found {} total vulnerabilities",
-            processed_count,
-            all_vulnerabilities.len()
-        );
-
-        Ok(all_vulnerabilities)
-    }
-}
-
-#[async_trait]
-impl<C: CacheService + 'static> AnalysisService for AnalysisServiceImpl<C> {
-    async fn analyze_dependencies(
-        &self,
-        file_content: &str,
-        ecosystem: Ecosystem,
-        filename: Option<&str>,
-    ) -> Result<AnalysisReport, ApplicationError> {
-        let start_time = Instant::now();
-        info!(
-            "Starting dependency analysis for ecosystem: {:?}",
-            ecosystem
-        );
-
-        // Precompute Cargo resolution flag before moving ecosystem
-        let do_cargo_resolution = matches!(ecosystem, Ecosystem::Cargo)
-            && filename.map(|f| f.ends_with("Cargo.toml")).unwrap_or(false);
-
-        // Parse the dependency file
-        let mut packages = self
-            .parse_dependencies(file_content, ecosystem, filename)
-            .await?;
-
-        // Resolve Cargo.toml minor/major specs to latest available version from crates.io (caret semantics)
-        if do_cargo_resolution {
-            let registry = CratesIoRegistryClient;
-            for pkg in packages.iter_mut() {
-                if !matches!(pkg.ecosystem, Ecosystem::Cargo) {
-                    continue;
-                }
-                let lower = pkg.version.clone();
-                // caret upper bound per Cargo semantics
-                let upper = if lower.0.major > 0 {
-                    crate::domain::Version::new(lower.0.major + 1, 0, 0)
-                } else if lower.0.minor > 0 {
-                    crate::domain::Version::new(0, lower.0.minor + 1, 0)
-                } else {
-                    crate::domain::Version::new(0, 0, lower.0.patch + 1)
-                };
-
-                match registry.list_versions(Ecosystem::Cargo, &pkg.name).await {
-                    Ok(mut vers) => {
-                        // Prefer stable, non-yanked versions within [lower, upper)
-                        vers.retain(|vi| {
-                            !vi.yanked
-                                && !vi.is_prerelease
-                                && vi.version >= lower
-                                && vi.version < upper
-                        });
-                        vers.sort_by(|a, b| a.version.cmp(&b.version));
-                        if let Some(best) = vers.last() {
-                            if best.version > pkg.version {
-                                debug!(
-                                    "Resolved Cargo.toml spec for {}: {} -> {}",
-                                    pkg.name, lower, best.version
-                                );
-                                pkg.version = best.version.clone();
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        debug!(
-                            "crates.io version resolution failed for {}: {} (using {})",
-                            pkg.name, e, pkg.version
-                        );
-                    }
-                }
-            }
-        }
-
-        if packages.is_empty() {
-            warn!("No packages found in dependency file");
-            let analysis_duration = start_time.elapsed();
-            return Ok(AnalysisReport::new(
-                packages,
-                vec![],
-                analysis_duration,
-                vec!["No packages found".to_string()],
-            ));
-        }
-
-        info!("Parsed {} packages from dependency file", packages.len());
-
-        // Look up vulnerabilities for all packages concurrently
-        let vulnerabilities = self.process_packages_concurrently(packages.clone()).await?;
-
-        let analysis_duration = start_time.elapsed();
-        let sources_queried = {
-            let mut set = std::collections::BTreeSet::new();
-            for v in &vulnerabilities {
-                for src in &v.sources {
-                    set.insert(format!("{:?}", src));
-                }
-            }
-            if set.is_empty() {
-                vec!["OSV".to_string(), "NVD".to_string()]
-            } else {
-                set.into_iter().collect()
-            }
-        };
-
-        let report = AnalysisReport::new(
-            packages,
-            vulnerabilities,
-            analysis_duration,
-            sources_queried,
-        );
-
-        info!(
-            "Analysis completed in {:?}: {} packages, {} vulnerabilities",
-            analysis_duration,
-            report.metadata.total_packages,
-            report.metadata.total_vulnerabilities
-        );
-
-        Ok(report)
-    }
-
-    async fn get_vulnerability_details(
-        &self,
-        vulnerability_id: &VulnerabilityId,
-    ) -> Result<Vulnerability, ApplicationError> {
-        let cache_key = format!("vuln_details:{}", vulnerability_id.as_str());
-
-        // Try cache first
-        if let Some(cached_vulnerability) =
-            self.cache_service.get::<Vulnerability>(&cache_key).await?
-        {
-            debug!("Cache hit for vulnerability: {}", vulnerability_id.as_str());
-            return Ok(cached_vulnerability);
-        }
-
-        debug!(
-            "Cache miss for vulnerability: {}, querying repository",
-            vulnerability_id.as_str()
-        );
-
-        // Query repository
-        let vulnerability = self
-            .vulnerability_repository
-            .get_vulnerability_by_id(vulnerability_id)
-            .await
-            .map_err(ApplicationError::Vulnerability)?
-            .ok_or_else(|| ApplicationError::NotFound {
-                resource: "vulnerability".to_string(),
-                id: vulnerability_id.as_str().to_string(),
-            })?;
-
-        // Cache for 24 hours
-        let cache_ttl = Duration::from_secs(24 * 60 * 60);
-        if let Err(e) = self
-            .cache_service
-            .set(&cache_key, &vulnerability, cache_ttl)
-            .await
-        {
-            warn!(
-                "Failed to cache vulnerability details for {}: {}",
-                vulnerability_id.as_str(),
-                e
-            );
-        }
-
-        Ok(vulnerability)
     }
 }

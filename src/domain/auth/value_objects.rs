@@ -66,31 +66,31 @@ impl Email {
 
         // Basic email validation
         if !email.contains('@') {
-            return Err(format!("Invalid email format: missing @ symbol"));
+            return Err("Invalid email format: missing @ symbol".to_string());
         }
 
         let parts: Vec<&str> = email.split('@').collect();
         if parts.len() != 2 {
-            return Err(format!("Invalid email format: multiple @ symbols"));
+            return Err("Invalid email format: multiple @ symbols".to_string());
         }
 
         let local = parts[0];
         let domain = parts[1];
 
         if local.is_empty() {
-            return Err(format!("Invalid email format: empty local part"));
+            return Err("Invalid email format: empty local part".to_string());
         }
 
         if domain.is_empty() {
-            return Err(format!("Invalid email format: empty domain part"));
+            return Err("Invalid email format: empty domain part".to_string());
         }
 
         if !domain.contains('.') {
-            return Err(format!("Invalid email format: domain must contain a dot"));
+            return Err("Invalid email format: domain must contain a dot".to_string());
         }
 
         if email.len() > 255 {
-            return Err(format!("Email too long (max 255 characters)"));
+            return Err("Email too long (max 255 characters)".to_string());
         }
 
         Ok(Email(email))

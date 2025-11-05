@@ -1,7 +1,7 @@
 //! Circuit breaker and retry wrapper for API clients
 
 use crate::application::errors::VulnerabilityError;
-use crate::domain::Package;
+use crate::domain::vulnerability::entities::Package;
 use crate::infrastructure::api_clients::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::infrastructure::resilience::{CircuitBreaker, RetryConfig, retry_with_backoff};
 use async_trait::async_trait;
@@ -24,13 +24,13 @@ use std::sync::Arc;
 /// - Configurable maximum attempts and backoff parameters
 ///
 /// **Combined Resilience Strategy:**
-/// ```
-/// Request → Circuit Breaker (First Line of Defense)
-///    ├─ Circuit Open → Immediate Failure
-///    └─ Circuit Closed → Retry Logic (Second Line of Defense)
-///        ├─ Success → Return Result
-///        ├─ All Retries Failed → Record Failure, Update Circuit State
-///        └─ Timeout → Record Failure, Update Circuit State
+/// ```text
+/// Request -> Circuit Breaker (First Line of Defense)
+///    +- Circuit Open -> Immediate Failure
+///    +- Circuit Closed -> Retry Logic (Second Line of Defense)
+///        +- Success -> Return Result
+///        +- All Retries Failed -> Record Failure, Update Circuit State
+///        +- Timeout -> Record Failure, Update Circuit State
 /// ```
 ///
 /// **Configuration:**

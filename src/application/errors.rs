@@ -1,14 +1,14 @@
 //! Application layer error types
 
-use crate::domain::DomainError;
 use crate::domain::auth::AuthError;
+use crate::domain::vulnerability::errors::VulnerabilityDomainError;
 use thiserror::Error;
 
 /// Application-level errors
 #[derive(Error, Debug)]
 pub enum ApplicationError {
     #[error("Domain error: {0}")]
-    Domain(#[from] DomainError),
+    Domain(#[from] VulnerabilityDomainError),
 
     #[error("Authentication error: {0}")]
     Authentication(#[from] AuthError),

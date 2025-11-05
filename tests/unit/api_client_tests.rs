@@ -5,8 +5,8 @@ use chrono::{DateTime, Utc};
 use mockito::{Mock, Server};
 use serde_json::json;
 use std::collections::HashMap;
-use vulnera_rust::domain::entities::{Package, Vulnerability};
-use vulnera_rust::domain::value_objects::{
+use vulnera_rust::domain::vulnerability::entities::{Package, Vulnerability};
+use vulnera_rust::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VulnerabilityId, VulnerabilitySource,
 };
 use vulnera_rust::infrastructure::api_clients::traits::VulnerabilityApiClient;
