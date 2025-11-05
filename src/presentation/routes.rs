@@ -7,11 +7,7 @@ use axum::{
 };
 use std::time::Duration;
 use tower::ServiceBuilder;
-use tower_http::{
-    cors::CorsLayer,
-    timeout::TimeoutLayer,
-    trace::TraceLayer,
-};
+use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 

@@ -1,7 +1,7 @@
 //! JWT service for token generation and validation
 
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use std::sync::Arc;
 
 use crate::domain::auth::{
@@ -39,7 +39,7 @@ impl JwtService {
     ) -> Result<String, AuthError> {
         let now = Utc::now();
         let exp = now + Duration::hours(self.access_token_ttl_hours as i64);
-        
+
         let claims = AuthToken::new_access(
             user_id,
             email,
@@ -61,21 +61,17 @@ impl JwtService {
     pub fn generate_refresh_token(&self, user_id: UserId) -> Result<String, AuthError> {
         let now = Utc::now();
         let exp = now + Duration::hours(self.refresh_token_ttl_hours as i64);
-        
-        let claims = AuthToken::new_refresh(
-            user_id,
-            exp.timestamp() as usize,
-            now.timestamp() as usize,
-        );
+
+        let claims =
+            AuthToken::new_refresh(user_id, exp.timestamp() as usize, now.timestamp() as usize);
 
         let header = Header::default();
         let encoding_key = EncodingKey::from_secret(self.secret.as_bytes());
 
-        encode(&header, &claims, &encoding_key)
-            .map_err(|e| {
-                tracing::error!("Failed to encode refresh token: {}", e);
-                AuthError::InvalidToken
-            })
+        encode(&header, &claims, &encoding_key).map_err(|e| {
+            tracing::error!("Failed to encode refresh token: {}", e);
+            AuthError::InvalidToken
+        })
     }
 
     /// Validate and decode a token
@@ -102,12 +98,18 @@ mod tests {
 
     #[test]
     fn test_token_generation_and_validation() {
-        let service = JwtService::new("test-secret-key-at-least-32-characters-long".to_string(), 24, 720);
+        let service = JwtService::new(
+            "test-secret-key-at-least-32-characters-long".to_string(),
+            24,
+            720,
+        );
         let user_id = UserId::generate();
         let email = Email::new("test@example.com".to_string()).unwrap();
         let roles = vec![UserRole::User];
 
-        let token = service.generate_access_token(user_id, email, roles.clone()).unwrap();
+        let token = service
+            .generate_access_token(user_id, email, roles.clone())
+            .unwrap();
         let validated = service.validate_token(&token).unwrap();
 
         assert_eq!(validated.user_id().unwrap(), user_id);
@@ -116,7 +118,11 @@ mod tests {
 
     #[test]
     fn test_refresh_token() {
-        let service = JwtService::new("test-secret-key-at-least-32-characters-long".to_string(), 24, 720);
+        let service = JwtService::new(
+            "test-secret-key-at-least-32-characters-long".to_string(),
+            24,
+            720,
+        );
         let user_id = UserId::generate();
 
         let token = service.generate_refresh_token(user_id).unwrap();
@@ -126,4 +132,3 @@ mod tests {
         assert!(validated.is_refresh_token());
     }
 }
-

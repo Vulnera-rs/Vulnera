@@ -1,11 +1,8 @@
 //! Password hashing service using bcrypt
 
-use bcrypt::{hash, verify, DEFAULT_COST};
+use bcrypt::{DEFAULT_COST, hash, verify};
 
-use crate::domain::auth::{
-    errors::AuthError,
-    value_objects::PasswordHash,
-};
+use crate::domain::auth::{errors::AuthError, value_objects::PasswordHash};
 
 /// Password hashing service using bcrypt
 #[derive(Clone)]
@@ -17,9 +14,7 @@ pub struct PasswordHasher {
 impl PasswordHasher {
     /// Create a new password hasher with default cost
     pub fn new() -> Self {
-        Self {
-            cost: DEFAULT_COST,
-        }
+        Self { cost: DEFAULT_COST }
     }
 
     /// Create a new password hasher with custom cost
@@ -80,10 +75,9 @@ mod tests {
 
         // Hashes should be different (bcrypt uses salt)
         assert_ne!(hash1.as_str(), hash2.as_str());
-        
+
         // But both should verify correctly
         assert!(hasher.verify(password, &hash1).unwrap());
         assert!(hasher.verify(password, &hash2).unwrap());
     }
 }
-

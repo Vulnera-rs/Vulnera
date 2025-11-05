@@ -11,4 +11,3 @@ pub use api_key_repository::SqlxApiKeyRepository;
 pub use jwt_service::JwtService;
 pub use password_hasher::PasswordHasher;
 pub use user_repository::SqlxUserRepository;
-

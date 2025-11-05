@@ -178,7 +178,11 @@ impl IApiKeyRepository for SqlxApiKeyRepository {
         Ok(())
     }
 
-    async fn update_last_used(&self, key_id: &ApiKeyId, used_at: DateTime<Utc>) -> Result<(), AuthError> {
+    async fn update_last_used(
+        &self,
+        key_id: &ApiKeyId,
+        used_at: DateTime<Utc>,
+    ) -> Result<(), AuthError> {
         let key_uuid = key_id.as_uuid();
 
         let result = sqlx::query!(
@@ -255,4 +259,3 @@ impl IApiKeyRepository for SqlxApiKeyRepository {
         Ok(())
     }
 }
-

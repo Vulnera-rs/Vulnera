@@ -43,7 +43,11 @@ pub trait IApiKeyRepository: Send + Sync {
     async fn create(&self, api_key: &ApiKey) -> Result<(), AuthError>;
 
     /// Update the last_used_at timestamp for an API key
-    async fn update_last_used(&self, key_id: &ApiKeyId, used_at: DateTime<Utc>) -> Result<(), AuthError>;
+    async fn update_last_used(
+        &self,
+        key_id: &ApiKeyId,
+        used_at: DateTime<Utc>,
+    ) -> Result<(), AuthError>;
 
     /// Revoke an API key (soft delete)
     async fn revoke(&self, key_id: &ApiKeyId) -> Result<(), AuthError>;
@@ -51,7 +55,3 @@ pub trait IApiKeyRepository: Send + Sync {
     /// Delete an API key permanently
     async fn delete(&self, key_id: &ApiKeyId) -> Result<(), AuthError>;
 }
-
-
-
-

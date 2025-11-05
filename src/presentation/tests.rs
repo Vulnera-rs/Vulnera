@@ -78,12 +78,12 @@ fn dummy_state() -> AppState {
     )));
 
     let config = Arc::new(crate::Config::default());
-    
+
     // Note: For tests, auth-related fields are required but won't be used in existing tests.
     // In a real test scenario, you would set up a test database or use mocks.
     // For now, we'll create minimal implementations that satisfy the type system.
     // TODO: Create proper test database setup or mock implementations for auth services
-    
+
     // Create a minimal PostgreSQL pool for tests (this will fail if DB is not available)
     // In practice, tests should use a test database or mocks
     // Note: This is a sync function, so we can't use .await here
@@ -104,12 +104,15 @@ fn dummy_state() -> AppState {
                 panic!("Test database not available. Please set up a test PostgreSQL database or use mocks.");
             })
     );
-    
-    let user_repository: Arc<dyn crate::domain::auth::repositories::IUserRepository> =
-        Arc::new(crate::infrastructure::auth::SqlxUserRepository::new(db_pool.clone()));
+
+    let user_repository: Arc<dyn crate::domain::auth::repositories::IUserRepository> = Arc::new(
+        crate::infrastructure::auth::SqlxUserRepository::new(db_pool.clone()),
+    );
     let api_key_repository: Arc<dyn crate::domain::auth::repositories::IApiKeyRepository> =
-        Arc::new(crate::infrastructure::auth::SqlxApiKeyRepository::new(db_pool.clone()));
-    
+        Arc::new(crate::infrastructure::auth::SqlxApiKeyRepository::new(
+            db_pool.clone(),
+        ));
+
     let jwt_service = Arc::new(crate::infrastructure::auth::JwtService::new(
         "test-secret-key-for-testing-only".to_string(),
         24,
@@ -117,22 +120,33 @@ fn dummy_state() -> AppState {
     ));
     let password_hasher = Arc::new(crate::infrastructure::auth::PasswordHasher::new());
     let api_key_generator = Arc::new(crate::infrastructure::auth::ApiKeyGenerator::new());
-    
+
     let login_use_case = Arc::new(crate::application::auth::use_cases::LoginUseCase::new(
         user_repository.clone(),
         password_hasher.clone(),
         jwt_service.clone(),
     ));
-    let validate_token_use_case = Arc::new(crate::application::auth::use_cases::ValidateTokenUseCase::new(jwt_service.clone()));
-    let refresh_token_use_case = Arc::new(crate::application::auth::use_cases::RefreshTokenUseCase::new(
-        jwt_service.clone(),
+    let register_use_case = Arc::new(crate::application::auth::use_cases::RegisterUserUseCase::new(
         user_repository.clone(),
+        password_hasher.clone(),
+        jwt_service.clone(),
     ));
-    let validate_api_key_use_case = Arc::new(crate::application::auth::use_cases::ValidateApiKeyUseCase::new(
-        api_key_repository.clone(),
-        api_key_generator.clone(),
-    ));
-    
+    let validate_token_use_case = Arc::new(
+        crate::application::auth::use_cases::ValidateTokenUseCase::new(jwt_service.clone()),
+    );
+    let refresh_token_use_case = Arc::new(
+        crate::application::auth::use_cases::RefreshTokenUseCase::new(
+            jwt_service.clone(),
+            user_repository.clone(),
+        ),
+    );
+    let validate_api_key_use_case = Arc::new(
+        crate::application::auth::use_cases::ValidateApiKeyUseCase::new(
+            api_key_repository.clone(),
+            api_key_generator.clone(),
+        ),
+    );
+
     AppState {
         analysis_service,
         cache_service,
@@ -150,6 +164,7 @@ fn dummy_state() -> AppState {
         password_hasher,
         api_key_generator,
         login_use_case,
+        register_use_case,
         validate_token_use_case,
         refresh_token_use_case,
         validate_api_key_use_case,

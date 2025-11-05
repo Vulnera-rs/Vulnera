@@ -227,7 +227,13 @@ mod tests {
         let key_hash = ApiKeyHash::new("hashed_key".to_string());
         let expires_at = Utc::now() - chrono::Duration::hours(1); // Expired 1 hour ago
 
-        let api_key = ApiKey::new(key_id, user_id, key_hash, "Test".to_string(), Some(expires_at));
+        let api_key = ApiKey::new(
+            key_id,
+            user_id,
+            key_hash,
+            "Test".to_string(),
+            Some(expires_at),
+        );
 
         assert!(api_key.is_expired());
         assert!(!api_key.is_active());
@@ -245,4 +251,3 @@ mod tests {
         assert!(api_key.last_used_at.is_some());
     }
 }
-

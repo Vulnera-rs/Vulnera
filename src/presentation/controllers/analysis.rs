@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::application::{CacheService, errors::ApplicationError};
 use crate::domain::{Ecosystem, VulnerabilityId};
-use crate::presentation::auth::extractors::Auth;
+use crate::presentation::auth::extractors::{Auth, HasRole};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, AnalysisResponse, ErrorResponse,
     PaginationDto, RepositoryAnalysisMetadataDto, RepositoryAnalysisRequest,
@@ -788,12 +788,25 @@ pub async fn list_vulnerabilities(
     tag = "vulnerabilities",
     responses(
         (status = 200, description = "Cache refreshed successfully"),
+        (status = 401, description = "Unauthorized - Authentication required", body = ErrorResponse),
+        (status = 403, description = "Forbidden - Admin role required", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
+    ),
+    security(
+        ("Bearer" = []),
+        ("ApiKey" = [])
     )
 )]
 pub async fn refresh_vulnerability_cache(
+    auth: Auth,
     State(app_state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApplicationError> {
+    // Require admin role for cache refresh
+    auth.require_admin().map_err(|e| {
+        ApplicationError::Authentication(
+            crate::domain::auth::errors::AuthError::InsufficientPermissions,
+        )
+    })?;
     tracing::info!("Refreshing popular packages vulnerability cache");
 
     app_state.popular_package_service.refresh_cache().await?;

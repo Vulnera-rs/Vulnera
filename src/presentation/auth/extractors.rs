@@ -332,6 +332,9 @@ impl IntoResponse for AuthErrorResponse {
                     }
                     crate::domain::auth::errors::AuthError::ApiKeyInvalid => "API_KEY_INVALID",
                     crate::domain::auth::errors::AuthError::ApiKeyExpired => "API_KEY_EXPIRED",
+                    crate::domain::auth::errors::AuthError::InsufficientPermissions => {
+                        "INSUFFICIENT_PERMISSIONS"
+                    }
                     _ => "AUTHENTICATION_ERROR",
                 },
                 _ => "AUTHENTICATION_ERROR",
@@ -344,5 +347,75 @@ impl IntoResponse for AuthErrorResponse {
         };
 
         (status, axum::Json(error_response)).into_response()
+    }
+}
+
+/// Helper trait for checking user roles
+pub trait HasRole {
+    /// Check if the user has admin role
+    fn is_admin(&self) -> bool;
+
+    /// Check if the user has a specific role
+    fn has_role(&self, role: UserRole) -> bool;
+
+    /// Require admin role or return error
+    fn require_admin(&self) -> Result<(), AuthErrorResponse> {
+        if !self.is_admin() {
+            return Err(AuthErrorResponse {
+                status: StatusCode::FORBIDDEN,
+                error: ApplicationError::Authentication(
+                    crate::domain::auth::errors::AuthError::InsufficientPermissions,
+                ),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl HasRole for Auth {
+    fn is_admin(&self) -> bool {
+        self.roles.iter().any(|r| r.is_admin())
+    }
+
+    fn has_role(&self, role: UserRole) -> bool {
+        self.roles.contains(&role)
+    }
+}
+
+impl HasRole for AuthUser {
+    fn is_admin(&self) -> bool {
+        self.roles.iter().any(|r| r.is_admin())
+    }
+
+    fn has_role(&self, role: UserRole) -> bool {
+        self.roles.contains(&role)
+    }
+}
+
+/// Optional authentication extractor - returns None if no valid auth is provided
+/// This is useful for endpoints that can work with or without authentication
+#[derive(Debug, Clone)]
+pub struct OptionalAuth(pub Option<Auth>);
+
+impl<S> FromRequestParts<S> for OptionalAuth
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Try to extract Auth, but don't fail if it's missing
+        // We need to check if AuthState is available first
+        let auth_state_available = parts.extensions.get::<AuthState>().is_some();
+        
+        if !auth_state_available {
+            return Ok(OptionalAuth(None));
+        }
+
+        // Try to extract Auth, but don't fail if it's missing
+        match Auth::from_request_parts(parts, _state).await {
+            Ok(auth) => Ok(OptionalAuth(Some(auth))),
+            Err(_) => Ok(OptionalAuth(None)),
+        }
     }
 }
