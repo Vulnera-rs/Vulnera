@@ -16,7 +16,7 @@ pub use config::Config;
 pub use logging::init_tracing;
 
 use application::{
-    AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+    CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
     VersionResolutionServiceImpl,
     auth::use_cases::{
         LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
@@ -217,12 +217,21 @@ pub async fn create_app(
         ghsa_client,
     ));
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(
-        parser_factory.clone(),
-        vulnerability_repository.clone(),
-        cache_service.clone(),
-        &config,
-    ));
+    // Create vulnerability analysis use cases
+    let analyze_dependencies_use_case = Arc::new(
+        application::vulnerability::AnalyzeDependenciesUseCase::new(
+            parser_factory.clone(),
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+            config.analysis.max_concurrent_packages,
+        ),
+    );
+    let get_vulnerability_details_use_case = Arc::new(
+        application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+        ),
+    );
     let report_service = Arc::new(ReportServiceImpl::new());
 
     // Initialize GitHub repository client for repository analysis feature
@@ -271,10 +280,19 @@ pub async fn create_app(
         cache_service.clone(),
     ));
 
+    // Create vulnerability use cases
+    let list_vulnerabilities_use_case = Arc::new(
+        application::vulnerability::ListVulnerabilitiesUseCase::new(
+            popular_package_service.clone(),
+        ),
+    );
+
     // Create application state
     let config_arc = Arc::new(config.clone());
     let app_state = AppState {
-        analysis_service,
+        analyze_dependencies_use_case,
+        get_vulnerability_details_use_case,
+        list_vulnerabilities_use_case,
         cache_service,
         report_service,
         vulnerability_repository,

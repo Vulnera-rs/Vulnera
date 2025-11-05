@@ -10,24 +10,11 @@ use tracing::{debug, error, info, warn};
 
 use super::api_clients::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::VulnerabilityError;
-use crate::domain::{
-    AffectedPackage, Ecosystem, Package, Severity, Version, VersionRange, Vulnerability,
-    VulnerabilityId, VulnerabilitySource,
+use crate::domain::vulnerability::entities::{AffectedPackage, Package, Vulnerability};
+use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
+use crate::domain::vulnerability::value_objects::{
+    Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource,
 };
-
-/// Repository trait for vulnerability data access
-#[async_trait]
-pub trait VulnerabilityRepository: Send + Sync {
-    async fn find_vulnerabilities(
-        &self,
-        package: &Package,
-    ) -> Result<Vec<Vulnerability>, VulnerabilityError>;
-
-    async fn get_vulnerability_by_id(
-        &self,
-        id: &VulnerabilityId,
-    ) -> Result<Option<Vulnerability>, VulnerabilityError>;
-}
 
 /// Aggregating repository that combines multiple vulnerability sources
 ///
@@ -42,19 +29,19 @@ pub trait VulnerabilityRepository: Send + Sync {
 /// - **Intelligent merging**: Combines complementary data from different sources
 ///
 /// **Architecture:**
-/// ```
-///                 ┌─────────────┐
-///                 │   Package   │
-///                 └──────┬──────┘
-///                        │
-///              ┌─────────▼─────────┐
-///              │ Aggregating Repo  │
-///              └─────────┬─────────┘
-///        ┌──────────────┼──────────────┐
-///        │              │              │
-///   ┌────▼────┐   ┌─────▼─────┐   ┌───▼────┐
-///   │ OSV API │   │ NVD API   │   │ GHSA   │
-///   └─────────┘   └───────────┘   └────────┘
+/// ```text
+///                 +-------------+
+///                 |   Package   |
+///                 +------+------+
+///                        |
+///              +---------+---------+
+///              | Aggregating Repo  |
+///              +---------+---------+
+///        +--------------+--------------+
+///        |              |              |
+///   +----+----+   +-----+-----+   +---+----+
+///   | OSV API |   | NVD API   |   | GHSA   |
+///   +---------+   +-----------+   +--------+
 /// ```
 ///
 /// **Concurrency Model:**
@@ -723,17 +710,13 @@ impl AggregatingVulnerabilityRepository {
                             affected.package.name.clone(),
                             Version::parse("1.0.0")
                                 .unwrap_or_else(|_| Version::parse("0.1.0").unwrap()),
-                            affected
-                                .package
-                                .ecosystem
-                                .parse()
-                                .unwrap_or(crate::domain::Ecosystem::Npm),
+                            affected.package.ecosystem.parse().unwrap_or(Ecosystem::Npm),
                         )
                         .unwrap_or_else(|_| {
                             Package::new(
                                 "unknown".to_string(),
                                 Version::parse("1.0.0").unwrap(),
-                                crate::domain::Ecosystem::Npm,
+                                Ecosystem::Npm,
                             )
                             .unwrap()
                         })
@@ -741,7 +724,7 @@ impl AggregatingVulnerabilityRepository {
                         Package::new(
                             "unknown".to_string(),
                             Version::parse("1.0.0").unwrap(),
-                            crate::domain::Ecosystem::Npm,
+                            Ecosystem::Npm,
                         )
                         .map_err(|e| {
                             VulnerabilityError::DomainCreation {
@@ -794,7 +777,7 @@ impl AggregatingVulnerabilityRepository {
 }
 
 #[async_trait]
-impl VulnerabilityRepository for AggregatingVulnerabilityRepository {
+impl IVulnerabilityRepository for AggregatingVulnerabilityRepository {
     #[tracing::instrument(skip(self))]
     async fn find_vulnerabilities(
         &self,

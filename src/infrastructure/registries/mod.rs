@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::domain::{Ecosystem, Version};
+use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
 
 /// Information about a single published version in a package registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]

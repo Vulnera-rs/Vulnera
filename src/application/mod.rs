@@ -4,9 +4,9 @@
 //! the domain and infrastructure layers.
 
 pub mod auth;
+pub mod vulnerability;
 pub mod errors;
 pub mod services;
-pub mod use_cases;
 
 #[cfg(test)]
 mod tests;
@@ -14,7 +14,7 @@ mod tests;
 pub use errors::*;
 pub use services::*;
 pub use services::{RepositoryAnalysisInput, RepositoryAnalysisService};
-pub use use_cases::*;
+pub use vulnerability::*;
 
 use async_trait::async_trait;
 
@@ -29,8 +29,8 @@ pub enum UpgradeImpact {
 /// Compute semantic upgrade impact between current and target versions.
 /// Returns Major/Minor/Patch when target is higher than current on that axis, Unknown otherwise.
 pub fn compute_upgrade_impact(
-    current: &crate::domain::Version,
-    target: &crate::domain::Version,
+    current: &crate::domain::vulnerability::value_objects::Version,
+    target: &crate::domain::vulnerability::value_objects::Version,
 ) -> UpgradeImpact {
     let c = &current.0;
     let t = &target.0;
@@ -73,11 +73,11 @@ impl Default for VersionResolutionOptions {
 #[derive(Debug, Clone)]
 pub struct VersionRecommendation {
     /// Minimal safe version >= current (if current known)
-    pub nearest_safe_above_current: Option<crate::domain::Version>,
+    pub nearest_safe_above_current: Option<crate::domain::vulnerability::value_objects::Version>,
     /// Newest safe version available (may equal nearest)
-    pub most_up_to_date_safe: Option<crate::domain::Version>,
+    pub most_up_to_date_safe: Option<crate::domain::vulnerability::value_objects::Version>,
     /// Next safe version within the current major (minor bump or patch), if available
-    pub next_safe_minor_within_current_major: Option<crate::domain::Version>,
+    pub next_safe_minor_within_current_major: Option<crate::domain::vulnerability::value_objects::Version>,
     /// Classification of the nearest upgrade impact (major/minor/patch/unknown)
     pub nearest_impact: Option<UpgradeImpact>,
     /// Classification of the most up-to-date upgrade impact (major/minor/patch/unknown)
@@ -94,9 +94,9 @@ pub struct VersionRecommendation {
 pub trait VersionResolutionService: Send + Sync {
     async fn recommend(
         &self,
-        ecosystem: crate::domain::Ecosystem,
+        ecosystem: crate::domain::vulnerability::value_objects::Ecosystem,
         name: &str,
-        current: Option<crate::domain::Version>,
-        vulnerabilities: &[crate::domain::Vulnerability],
+        current: Option<crate::domain::vulnerability::value_objects::Version>,
+        vulnerabilities: &[crate::domain::vulnerability::entities::Vulnerability],
     ) -> Result<VersionRecommendation, crate::application::errors::ApplicationError>;
 }

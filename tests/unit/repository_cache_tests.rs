@@ -10,8 +10,8 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 use vulnera_rust::application::errors::ApplicationError;
 use vulnera_rust::application::services::{CacheService, CacheStatistics};
-use vulnera_rust::domain::entities::{Package, Vulnerability};
-use vulnera_rust::domain::value_objects::{
+use vulnera_rust::domain::vulnerability::entities::{AffectedPackage, Package, Vulnerability};
+use vulnera_rust::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VulnerabilityId, VulnerabilitySource,
 };
 use vulnera_rust::infrastructure::api_clients::traits::VulnerabilityApiClient;
@@ -115,7 +115,7 @@ fn create_test_vulnerability(id: &str, package_name: &str, ecosystem: Ecosystem)
     .unwrap();
 
     let affected_package =
-        vulnera_rust::domain::entities::AffectedPackage::new(package, vec![], vec![]);
+        AffectedPackage::new(package, vec![], vec![]);
 
     Vulnerability::new(
         VulnerabilityId::new(id.to_string()).unwrap(),

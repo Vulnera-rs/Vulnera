@@ -1,6 +1,6 @@
 use super::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::{ApiError, VulnerabilityError};
-use crate::domain::Package;
+use crate::domain::vulnerability::entities::Package;
 use async_trait::async_trait;
 use chrono::{Datelike, Utc};
 use nvd_cve::client::BlockingHttpClient;

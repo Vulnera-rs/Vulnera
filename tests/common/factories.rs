@@ -5,8 +5,8 @@
 
 use chrono::Utc;
 use std::collections::HashMap;
-use vulnera_rust::domain::{
-    entities::{Package, Vulnerability, AnalysisReport},
+use vulnera_rust::domain::vulnerability::{
+    entities::{AffectedPackage, AnalysisReport, Package, Vulnerability},
     value_objects::{Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource},
 };
 
@@ -200,9 +200,9 @@ impl AnalysisReportFactory {
 }
 
 /// Helper function to create affected packages
-fn create_affected_package(package: Package, fixed_version: &str) -> vulnera_rust::domain::entities::AffectedPackage {
+fn create_affected_package(package: Package, fixed_version: &str) -> AffectedPackage {
     let fixed_version = Version::parse(fixed_version).expect("Invalid fixed version");
-    vulnera_rust::domain::entities::AffectedPackage::new(
+    AffectedPackage::new(
         package,
         vec![VersionRange::less_than(fixed_version.clone())],
         vec![fixed_version],
