@@ -1,6 +1,8 @@
 // Repository analysis service tests
 
-use super::{RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl};
+use super::vulnerability::services::{
+    RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl,
+};
 use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
 use crate::infrastructure::parsers::ParserFactory;
 use crate::infrastructure::repository_source::{
@@ -10,10 +12,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::application::{
-    ApplicationError, CacheService, CacheServiceImpl, ReportService, ReportServiceImpl,
-    VersionResolutionService, VulnerabilityError,
-};
+use crate::application::{ApplicationError, VersionResolutionService, VulnerabilityError};
+use crate::application::vulnerability::services::CacheService;
+use crate::application::reporting::{ReportService, ReportServiceImpl};
+use crate::infrastructure::cache::CacheServiceImpl;
 use crate::domain::vulnerability::{
     entities::{AffectedPackage, AnalysisReport, Package, Vulnerability},
     value_objects::{
@@ -997,7 +999,7 @@ async fn test_version_resolution_normal_path() {
     .unwrap();
 
     let registry = Arc::new(MockRegistry { versions });
-    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(
@@ -1073,7 +1075,7 @@ async fn test_version_resolution_fallback_when_registry_unavailable() {
     .unwrap();
 
     let registry = Arc::new(FailingRegistry);
-    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(ecosystem.clone(), name, Some(current), &[vuln])
@@ -1164,7 +1166,7 @@ async fn test_version_resolution_ghsa_influence() {
     .unwrap();
 
     let registry = Arc::new(MockRegistryGhsa { versions });
-    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(ecosystem, name, Some(current), &[vuln_ghsa])
@@ -1246,7 +1248,7 @@ async fn test_version_resolution_nuget_four_segment() {
     .unwrap();
 
     let registry = Arc::new(MockNuGetRegistry { versions });
-    let svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(
