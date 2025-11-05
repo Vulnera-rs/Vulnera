@@ -41,8 +41,20 @@ impl IUserRepository for SqlxUserRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error finding user by email: {}", e);
-            AuthError::UserNotFound {
-                email: email_str.to_string(),
+            // Check if it's a "relation does not exist" error (table missing)
+            let error_msg = e.to_string();
+            if error_msg.contains("relation") && error_msg.contains("does not exist") {
+                AuthError::DatabaseError {
+                    message: format!("Database table 'users' does not exist. Please run migrations: {}", error_msg),
+                }
+            } else if error_msg.contains("permission denied") {
+                AuthError::DatabaseError {
+                    message: format!("Database permission denied. Check user permissions: {}", error_msg),
+                }
+            } else {
+                AuthError::DatabaseError {
+                    message: format!("Database error while checking user existence: {}", error_msg),
+                }
             }
         })?;
 
@@ -91,8 +103,15 @@ impl IUserRepository for SqlxUserRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error finding user by id: {}", e);
-            AuthError::UserIdNotFound {
-                user_id: user_id.as_str(),
+            let error_msg = e.to_string();
+            if error_msg.contains("relation") && error_msg.contains("does not exist") {
+                AuthError::DatabaseError {
+                    message: format!("Database table 'users' does not exist. Please run migrations: {}", error_msg),
+                }
+            } else {
+                AuthError::DatabaseError {
+                    message: format!("Database error while finding user: {}", error_msg),
+                }
             }
         })?;
 
