@@ -45,15 +45,24 @@ impl IUserRepository for SqlxUserRepository {
             let error_msg = e.to_string();
             if error_msg.contains("relation") && error_msg.contains("does not exist") {
                 AuthError::DatabaseError {
-                    message: format!("Database table 'users' does not exist. Please run migrations: {}", error_msg),
+                    message: format!(
+                        "Database table 'users' does not exist. Please run migrations: {}",
+                        error_msg
+                    ),
                 }
             } else if error_msg.contains("permission denied") {
                 AuthError::DatabaseError {
-                    message: format!("Database permission denied. Check user permissions: {}", error_msg),
+                    message: format!(
+                        "Database permission denied. Check user permissions: {}",
+                        error_msg
+                    ),
                 }
             } else {
                 AuthError::DatabaseError {
-                    message: format!("Database error while checking user existence: {}", error_msg),
+                    message: format!(
+                        "Database error while checking user existence: {}",
+                        error_msg
+                    ),
                 }
             }
         })?;
@@ -62,14 +71,14 @@ impl IUserRepository for SqlxUserRepository {
             Some(row) => {
                 let user_id = UserId::from(row.id);
                 let email_str = row.email.clone();
-                let email = Email::new(email_str.clone()).map_err(|_| AuthError::InvalidEmail {
-                    email: email_str,
-                })?;
-                let password_hash = crate::domain::auth::value_objects::PasswordHash::from(row.password_hash);
-                
+                let email = Email::new(email_str.clone())
+                    .map_err(|_| AuthError::InvalidEmail { email: email_str })?;
+                let password_hash =
+                    crate::domain::auth::value_objects::PasswordHash::from(row.password_hash);
+
                 // Parse roles from JSONB
-                let roles: Vec<String> = serde_json::from_value(row.roles)
-                    .unwrap_or_else(|_| vec![]);
+                let roles: Vec<String> =
+                    serde_json::from_value(row.roles).unwrap_or_else(|_| vec![]);
                 let roles = roles
                     .iter()
                     .filter_map(|r| UserRole::from_str(r).ok())
@@ -106,7 +115,10 @@ impl IUserRepository for SqlxUserRepository {
             let error_msg = e.to_string();
             if error_msg.contains("relation") && error_msg.contains("does not exist") {
                 AuthError::DatabaseError {
-                    message: format!("Database table 'users' does not exist. Please run migrations: {}", error_msg),
+                    message: format!(
+                        "Database table 'users' does not exist. Please run migrations: {}",
+                        error_msg
+                    ),
                 }
             } else {
                 AuthError::DatabaseError {
@@ -119,14 +131,14 @@ impl IUserRepository for SqlxUserRepository {
             Some(row) => {
                 let user_id = UserId::from(row.id);
                 let email_str = row.email.clone();
-                let email = Email::new(email_str.clone()).map_err(|_| AuthError::InvalidEmail {
-                    email: email_str,
-                })?;
-                let password_hash = crate::domain::auth::value_objects::PasswordHash::from(row.password_hash);
-                
+                let email = Email::new(email_str.clone())
+                    .map_err(|_| AuthError::InvalidEmail { email: email_str })?;
+                let password_hash =
+                    crate::domain::auth::value_objects::PasswordHash::from(row.password_hash);
+
                 // Parse roles from JSONB
-                let roles: Vec<String> = serde_json::from_value(row.roles)
-                    .unwrap_or_else(|_| vec![]);
+                let roles: Vec<String> =
+                    serde_json::from_value(row.roles).unwrap_or_else(|_| vec![]);
                 let roles = roles
                     .iter()
                     .filter_map(|r| UserRole::from_str(r).ok())
@@ -149,13 +161,13 @@ impl IUserRepository for SqlxUserRepository {
         let user_uuid = user.user_id.as_uuid();
         let email_str = user.email.as_str();
         let password_hash_str = user.password_hash.as_str();
-        
+
         // Serialize roles to JSON
         let roles_json = serde_json::to_value(
             user.roles
                 .iter()
                 .map(|r| r.to_string())
-                .collect::<Vec<String>>()
+                .collect::<Vec<String>>(),
         )
         .map_err(|e| {
             tracing::error!("Failed to serialize roles: {}", e);
@@ -199,13 +211,13 @@ impl IUserRepository for SqlxUserRepository {
         let user_uuid = user.user_id.as_uuid();
         let email_str = user.email.as_str();
         let password_hash_str = user.password_hash.as_str();
-        
+
         // Serialize roles to JSON
         let roles_json = serde_json::to_value(
             user.roles
                 .iter()
                 .map(|r| r.to_string())
-                .collect::<Vec<String>>()
+                .collect::<Vec<String>>(),
         )
         .map_err(|e| {
             tracing::error!("Failed to serialize roles: {}", e);
@@ -216,7 +228,7 @@ impl IUserRepository for SqlxUserRepository {
 
         // Update updated_at manually since trigger may not be available
         let updated_at = chrono::Utc::now();
-        
+
         sqlx::query!(
             r#"
             UPDATE users
@@ -276,4 +288,3 @@ impl IUserRepository for SqlxUserRepository {
         Ok(())
     }
 }
-

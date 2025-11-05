@@ -91,27 +91,27 @@ impl AggregatingVulnerabilityRepository {
     }
 
     /// Convert RawVulnerability to domain Vulnerability
-///
-/// This method implements the **Adapter Pattern** to convert between external API formats
-/// and our internal domain model. The conversion process includes:
-///
-/// **Validation Steps:**
-/// 1. Parse and validate vulnerability ID format
-/// 2. Normalize severity levels across different rating systems
-/// 3. Parse and validate version ranges using ecosystem-specific rules
-/// 4. Convert ecosystem identifiers to domain enums
-/// 5. Extract and normalize URLs and references
-///
-/// **Data Normalization Rules:**
-/// - **Severity**: Maps various severity scales (CVSS, GitHub severity, etc.) to unified enum
-/// - **Ecosystem**: Normalizes ecosystem strings (npm, NPM, Node.js) to standard enum values
-/// - **Versions**: Parses semantic version strings with ecosystem-specific validation
-/// - **Ranges**: Converts different range formats to our internal VersionRange representation
-///
-/// **Error Handling:**
-/// - Invalid data is logged but doesn't fail the entire conversion
-/// - Unknown ecosystems are skipped with debug logging
-/// - Malformed versions are logged and excluded from affected ranges
+    ///
+    /// This method implements the **Adapter Pattern** to convert between external API formats
+    /// and our internal domain model. The conversion process includes:
+    ///
+    /// **Validation Steps:**
+    /// 1. Parse and validate vulnerability ID format
+    /// 2. Normalize severity levels across different rating systems
+    /// 3. Parse and validate version ranges using ecosystem-specific rules
+    /// 4. Convert ecosystem identifiers to domain enums
+    /// 5. Extract and normalize URLs and references
+    ///
+    /// **Data Normalization Rules:**
+    /// - **Severity**: Maps various severity scales (CVSS, GitHub severity, etc.) to unified enum
+    /// - **Ecosystem**: Normalizes ecosystem strings (npm, NPM, Node.js) to standard enum values
+    /// - **Versions**: Parses semantic version strings with ecosystem-specific validation
+    /// - **Ranges**: Converts different range formats to our internal VersionRange representation
+    ///
+    /// **Error Handling:**
+    /// - Invalid data is logged but doesn't fail the entire conversion
+    /// - Unknown ecosystems are skipped with debug logging
+    /// - Malformed versions are logged and excluded from affected ranges
     fn convert_raw_vulnerability(
         &self,
         raw: RawVulnerability,

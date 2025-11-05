@@ -1,7 +1,8 @@
 //! Configuration validation module
 
 use crate::config::{
-    AnalysisConfig, ApiConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig, NvdConfig, ServerConfig,
+    AnalysisConfig, ApiConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig,
+    NvdConfig, ServerConfig,
 };
 use std::path::Path;
 
