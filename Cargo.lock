@@ -4431,6 +4431,7 @@ dependencies = [
  "chrono",
  "config",
  "criterion",
+ "dotenvy",
  "futures",
  "hex",
  "jsonwebtoken 10.1.0",

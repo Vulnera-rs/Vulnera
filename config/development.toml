@@ -1,0 +1,57 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+workers = 0
+enable_docs = true
+request_timeout_seconds = 60
+allowed_origins = ["*"]
+
+[server.security]
+enforce_https = false           # Don't enforce HTTPS in development
+enable_security_headers = false # But enable security headers for testing
+sanitize_errors = false         # Show full errors in development
+hsts_max_age = 31536000
+hsts_include_subdomains = false # Don't include subdomains in dev
+
+
+[cache]
+ttl_hours = 1
+
+[auth]
+# Development: shorter TTL for easier testing
+jwt_secret = "development-secret-key-change-in-production"
+token_ttl_hours = 1
+refresh_token_ttl_hours = 24
+api_key_length = 32
+api_key_ttl_days = 30
+
+[database]
+url = "postgresql://user:password@localhost:5432/vulnera"
+max_connections = 5
+
+[apis.nvd]
+base_url = "https://services.nvd.nist.gov/rest/json"
+api_key = ""
+timeout_seconds = 30
+rate_limit_per_30s = 5
+
+[apis.ghsa]
+graphql_url = "https://api.github.com/graphql"
+token = ""
+timeout_seconds = 30
+
+[apis.github]
+base_url = "https://api.github.com"
+token = ""
+reuse_ghsa_token = true
+timeout_seconds = 30
+max_concurrent_file_fetches = 8
+max_files_scanned = 200
+max_total_bytes = 2000000
+max_single_file_bytes = 1000000
+backoff_initial_ms = 500
+backoff_max_retries = 3
+backoff_jitter = true
+[logging]
+level = "debug"
+format = "pretty"
