@@ -35,6 +35,15 @@ use vulnera_rust::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load .env file if it exists (ignore errors if file doesn't exist)
+    // This must be done before loading config so environment variables are available
+    if let Err(e) = dotenvy::dotenv() {
+        // Only warn if it's not a "file not found" error
+        if !e.not_found() {
+            eprintln!("Warning: Failed to load .env file: {}", e);
+        }
+    }
+
     // Load configuration
     let config = Config::load().unwrap_or_else(|e| {
         eprintln!("Failed to load configuration: {}", e);
@@ -42,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Config::default()
     });
 
-    // Initialize tracing
+    // Initialize tracing (after config is loaded so we can use logging config)
     init_tracing(&config.logging)?;
 
     tracing::info!("Starting Vulnera Rust server...");
@@ -209,20 +218,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize database pool for authentication
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
         eprintln!("\n❌ ERROR: DATABASE_URL environment variable is required");
-        eprintln!("   The application requires a PostgreSQL database for authentication.");
-        eprintln!();
-        eprintln!("📖 Quick Setup:");
-        eprintln!("   1. Set DATABASE_URL environment variable:");
-        eprintln!("      export DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'");
-        eprintln!();
-        eprintln!("   2. Run migrations:");
-        eprintln!("      sqlx migrate run --source migrations");
-        eprintln!();
-        eprintln!("   Or use the automated setup script:");
-        eprintln!("      ./scripts/prepare-sqlx-docker.sh");
-        eprintln!();
-        eprintln!("📚 See docs/SQLX_SETUP.md for detailed setup instructions");
-        eprintln!();
         std::process::exit(1);
     });
 

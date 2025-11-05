@@ -41,3 +41,4 @@ pub enum AuthError {
     #[error("User ID not found: {user_id}")]
     UserIdNotFound { user_id: String },
 }
+

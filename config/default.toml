@@ -24,12 +24,11 @@ max_concurrent_packages = 3
 
 [auth]
 # JWT secret key (must be at least 16 characters, 32+ recommended for production)
-# Override via VULNERA__AUTH__JWT_SECRET environment variable
 jwt_secret = "change-me-in-production-use-strong-random-secret-key"
 token_ttl_hours = 24
-refresh_token_ttl_hours = 720  # 30 days
+refresh_token_ttl_hours = 720                                       # 30 days
 api_key_length = 32
-api_key_ttl_days = 365  # 1 year, set to null for no expiration
+api_key_ttl_days = 365                                              # 1 year, set to null for no expiration
 
 [database]
 # Database connection URL (can also be set via DATABASE_URL env var)

@@ -191,8 +191,9 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     // Build CORS layer from configuration
     let cors_layer =
         if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
+            // Allow all origins (development only)
             CorsLayer::new()
-                .allow_origin(tower_http::cors::AllowOrigin::mirror_request())
+                .allow_origin(tower_http::cors::AllowOrigin::any())
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
