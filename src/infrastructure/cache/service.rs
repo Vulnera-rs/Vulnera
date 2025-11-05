@@ -14,18 +14,48 @@ use crate::application::errors::ApplicationError;
 use crate::application::vulnerability::services::CacheService;
 use crate::domain::vulnerability::entities::Package;
 use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
-use crate::domain::vulnerability::value_objects::{Ecosystem, VulnerabilityId};
+use crate::domain::vulnerability::value_objects::Ecosystem;
 use crate::infrastructure::cache::file_cache::FileCacheRepository;
+use crate::infrastructure::cache::multi_level::MultiLevelCache;
 
 /// Cache service implementation with advanced features
+/// Uses an enum to support different cache implementations (FileCache or MultiLevelCache)
 pub struct CacheServiceImpl {
-    cache_repository: Arc<FileCacheRepository>,
+    cache_repository: CacheBackend,
+}
+
+/// Internal cache backend enum to support different implementations
+#[derive(Clone)]
+enum CacheBackend {
+    File(Arc<FileCacheRepository>),
+    MultiLevel(Arc<MultiLevelCache>),
 }
 
 impl CacheServiceImpl {
-    /// Create a new cache service implementation
+    /// Create a new cache service implementation with FileCacheRepository
     pub fn new(cache_repository: Arc<FileCacheRepository>) -> Self {
-        Self { cache_repository }
+        Self {
+            cache_repository: CacheBackend::File(cache_repository),
+        }
+    }
+
+    /// Create a new cache service implementation with MultiLevelCache
+    pub fn new_with_cache(cache_repository: Arc<MultiLevelCache>) -> Self {
+        Self {
+            cache_repository: CacheBackend::MultiLevel(cache_repository),
+        }
+    }
+
+    /// Get the underlying file cache repository if available (for stats)
+    pub fn get_file_cache(&self) -> Option<&FileCacheRepository> {
+        match &self.cache_repository {
+            CacheBackend::File(fc) => Some(fc.as_ref()),
+            CacheBackend::MultiLevel(_ml) => {
+                // Try to get L2 cache (FileCacheRepository) from MultiLevelCache
+                // This is a bit hacky but needed for stats
+                None // We'll handle stats differently
+            }
+        }
     }
 
     /// Generate cache key for package vulnerabilities
@@ -45,7 +75,9 @@ impl CacheServiceImpl {
     }
 
     /// Generate cache key for vulnerability details
-    pub fn vulnerability_details_key(vulnerability_id: &VulnerabilityId) -> String {
+    pub fn vulnerability_details_key(
+        vulnerability_id: &crate::domain::vulnerability::value_objects::VulnerabilityId,
+    ) -> String {
         format!("vuln_details:{}", vulnerability_id.as_str())
     }
 
@@ -78,11 +110,15 @@ impl CacheServiceImpl {
     }
 
     /// Cache warming: preload commonly accessed data
-    pub async fn warm_cache(&self, packages: &[Package]) -> Result<(), ApplicationError> {
+    pub async fn warm_cache(
+        &self,
+        packages: &[Package],
+        vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
+    ) -> Result<(), ApplicationError> {
         info!("Starting cache warming for {} packages", packages.len());
 
         let mut successful_warms = 0;
-        let failed_warms = 0;
+        let mut failed_warms = 0;
 
         for package in packages {
             let cache_key = Self::package_vulnerabilities_key(package);
@@ -93,10 +129,31 @@ impl CacheServiceImpl {
                 continue;
             }
 
-            // This would typically involve fetching from the repository
-            // For now, we'll just mark the attempt
-            debug!("Would warm cache for package: {}", package.identifier());
-            successful_warms += 1;
+            // Fetch vulnerabilities and cache them
+            match vulnerability_repository.find_vulnerabilities(package).await {
+                Ok(vulnerabilities) => {
+                    let cache_ttl = Duration::from_secs(24 * 3600); // 24 hours
+                    if let Err(e) = self.set(&cache_key, &vulnerabilities, cache_ttl).await {
+                        warn!(
+                            "Failed to cache vulnerabilities for {}: {}",
+                            package.identifier(),
+                            e
+                        );
+                        failed_warms += 1;
+                    } else {
+                        debug!("Warmed cache for package: {}", package.identifier());
+                        successful_warms += 1;
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        "Failed to fetch vulnerabilities for {} during warm-up: {}",
+                        package.identifier(),
+                        e
+                    );
+                    failed_warms += 1;
+                }
+            }
         }
 
         info!(
@@ -124,14 +181,26 @@ impl CacheServiceImpl {
         for chunk in packages.chunks(max_concurrent) {
             for package in chunk {
                 let package_clone = package.clone();
-                let cache_service = self.cache_repository.clone();
+                let cache_service_backend = self.cache_repository.clone();
                 let repo_clone = vulnerability_repository.clone();
 
                 join_set.spawn(async move {
                     let cache_key = Self::package_vulnerabilities_key(&package_clone);
 
                     // Skip if already cached
-                    if cache_service.exists(&cache_key).await.unwrap_or(false) {
+                    let exists = match &cache_service_backend {
+                        CacheBackend::File(fc) => fc.exists(&cache_key).await.unwrap_or(false),
+                        CacheBackend::MultiLevel(ml) => {
+                            // Check L1 first, then L2
+                            if let Ok(Some(_)) = ml.l1().get::<serde_json::Value>(&cache_key).await
+                            {
+                                true
+                            } else {
+                                ml.l2().exists(&cache_key).await.unwrap_or(false)
+                            }
+                        }
+                    };
+                    if exists {
                         return Ok::<_, ApplicationError>(());
                     }
 
@@ -144,10 +213,17 @@ impl CacheServiceImpl {
                                 package_clone.identifier()
                             );
                             // Cache the vulnerabilities
-                            if let Err(e) = cache_service
-                                .set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
-                                .await
-                            {
+                            let cache_result = match &cache_service_backend {
+                                CacheBackend::File(fc) => {
+                                    fc.set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
+                                        .await
+                                }
+                                CacheBackend::MultiLevel(ml) => {
+                                    ml.set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
+                                        .await
+                                }
+                            };
+                            if let Err(e) = cache_result {
                                 warn!(
                                     "Failed to cache vulnerabilities for {}: {}",
                                     package_clone.identifier(),
@@ -207,7 +283,10 @@ impl CacheServiceImpl {
         let mut invalidated_count = 0u64;
 
         // Read cache directory and find files matching ecosystem prefix
-        let cache_dir = self.cache_repository.cache_dir();
+        let cache_dir = match &self.cache_repository {
+            CacheBackend::File(fc) => fc.cache_dir(),
+            CacheBackend::MultiLevel(ml) => ml.l2().cache_dir(),
+        };
         if let Ok(mut entries) = tokio::fs::read_dir(cache_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Ok(file_type) = entry.file_type().await {
@@ -245,32 +324,73 @@ impl CacheServiceImpl {
 
     /// Get cache statistics
     pub async fn get_cache_statistics(&self) -> Result<CacheStatistics, ApplicationError> {
-        let stats = self.cache_repository.get_stats().await;
-        let (total_size, entry_count) = self.cache_repository.get_cache_info().await?;
+        match &self.cache_repository {
+            CacheBackend::File(fc) => {
+                let stats = fc.get_stats().await;
+                let (total_size, entry_count) = fc.get_cache_info().await?;
 
-        Ok(CacheStatistics {
-            hits: stats.hits,
-            misses: stats.misses,
-            hit_rate: if stats.hits + stats.misses > 0 {
-                stats.hits as f64 / (stats.hits + stats.misses) as f64
-            } else {
-                0.0
-            },
-            total_entries: entry_count,
-            total_size_bytes: total_size,
-            expired_entries: stats.expired_entries,
-            cleanup_runs: stats.cleanup_runs,
-        })
+                Ok(CacheStatistics {
+                    hits: stats.hits,
+                    misses: stats.misses,
+                    hit_rate: if stats.hits + stats.misses > 0 {
+                        stats.hits as f64 / (stats.hits + stats.misses) as f64
+                    } else {
+                        0.0
+                    },
+                    total_entries: entry_count,
+                    total_size_bytes: total_size,
+                    expired_entries: stats.expired_entries,
+                    cleanup_runs: stats.cleanup_runs,
+                })
+            }
+            CacheBackend::MultiLevel(ml) => {
+                // Get stats from L2 (FileCacheRepository)
+                let l2 = ml.l2();
+                let stats = l2.get_stats().await;
+                let (total_size, entry_count) = l2.get_cache_info().await?;
+                let (l1_entries, l1_size) = ml.l1().stats();
+
+                Ok(CacheStatistics {
+                    hits: stats.hits,
+                    misses: stats.misses,
+                    hit_rate: if stats.hits + stats.misses > 0 {
+                        stats.hits as f64 / (stats.hits + stats.misses) as f64
+                    } else {
+                        0.0
+                    },
+                    total_entries: entry_count + l1_entries,
+                    total_size_bytes: total_size + l1_size,
+                    expired_entries: stats.expired_entries,
+                    cleanup_runs: stats.cleanup_runs,
+                })
+            }
+        }
     }
 
     /// Check if a cache entry exists and is not expired
     pub async fn exists(&self, key: &str) -> Result<bool, ApplicationError> {
-        self.cache_repository.exists(key).await
+        match &self.cache_repository {
+            CacheBackend::File(fc) => fc.exists(key).await,
+            CacheBackend::MultiLevel(ml) => {
+                // Check L1 first, then L2
+                if let Ok(Some(_)) = ml.l1().get::<serde_json::Value>(key).await {
+                    Ok(true)
+                } else {
+                    ml.l2().exists(key).await
+                }
+            }
+        }
     }
 
     /// Manually trigger cache cleanup
     pub async fn cleanup_expired_entries(&self) -> Result<u64, ApplicationError> {
-        self.cache_repository.cleanup_expired().await
+        match &self.cache_repository {
+            CacheBackend::File(fc) => fc.cleanup_expired().await,
+            CacheBackend::MultiLevel(ml) => {
+                // Cleanup L2 (L1 is automatically cleaned via TTL)
+                ml.l2().cleanup_expired().await
+            }
+        }
     }
 }
 
@@ -292,17 +412,26 @@ impl CacheService for CacheServiceImpl {
     where
         T: serde::de::DeserializeOwned + Send,
     {
-        self.cache_repository.get(key).await
+        match &self.cache_repository {
+            CacheBackend::File(fc) => fc.get(key).await,
+            CacheBackend::MultiLevel(ml) => ml.get(key).await,
+        }
     }
 
     async fn set<T>(&self, key: &str, value: &T, ttl: Duration) -> Result<(), ApplicationError>
     where
         T: serde::Serialize + Send + Sync,
     {
-        self.cache_repository.set(key, value, ttl).await
+        match &self.cache_repository {
+            CacheBackend::File(fc) => fc.set(key, value, ttl).await,
+            CacheBackend::MultiLevel(ml) => ml.set(key, value, ttl).await,
+        }
     }
 
     async fn invalidate(&self, key: &str) -> Result<(), ApplicationError> {
-        self.cache_repository.invalidate(key).await
+        match &self.cache_repository {
+            CacheBackend::File(fc) => fc.invalidate(key).await,
+            CacheBackend::MultiLevel(ml) => ml.invalidate(key).await,
+        }
     }
 }
