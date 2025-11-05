@@ -79,7 +79,7 @@ regex = "1.11.1"
 pest = "2.8.1"
 pest_derive = "2.8.1"
 semver = { version = "1.0", features = ["serde"] }
-octocrab = { version = "0.44" }
+octocrab = { version = "0.47" }
 base64 = "0.22"
 percent-encoding = "2.3"
 

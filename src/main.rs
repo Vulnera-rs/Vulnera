@@ -7,7 +7,7 @@ use vulnera_rust::infrastructure::resilience::CircuitBreakerConfig;
 use vulnera_rust::{
     Config,
     application::{
-        AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
+        CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
         VersionResolutionServiceImpl,
         auth::use_cases::{
             LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
@@ -35,8 +35,6 @@ use vulnera_rust::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load .env file if it exists (ignore errors if file doesn't exist)
-    // This must be done before loading config so environment variables are available
     if let Err(e) = dotenvy::dotenv() {
         // Only warn if it's not a "file not found" error
         if !e.not_found() {
@@ -116,7 +114,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "GHSA token not provided; GitHub advisories lookups will be skipped unless provided via environment."
         );
     } else if config.apis.github.reuse_ghsa_token && config.apis.github.token.is_some() {
-        tracing::info!("GHSA client configured to reuse GitHub token for authentication");
     }
 
     let ghsa_client_inner = Arc::new(
@@ -159,12 +156,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ghsa_client,
     ));
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(
-        parser_factory.clone(),
-        vulnerability_repository.clone(),
-        cache_service.clone(),
-        &config,
-    ));
+    // Create vulnerability analysis use cases
+    let analyze_dependencies_use_case = Arc::new(
+        vulnera_rust::application::vulnerability::AnalyzeDependenciesUseCase::new(
+            parser_factory.clone(),
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+            config.analysis.max_concurrent_packages,
+        ),
+    );
+    let get_vulnerability_details_use_case = Arc::new(
+        vulnera_rust::application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+        ),
+    );
     let report_service = Arc::new(ReportServiceImpl::new());
     // Initialize GitHub repository client for repository analysis feature
     let github_client: Option<Arc<GitHubRepositoryClient>> =
@@ -282,10 +288,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         api_key_generator.clone(),
     ));
 
+    // Create vulnerability use cases
+    let list_vulnerabilities_use_case = Arc::new(
+        vulnera_rust::application::vulnerability::ListVulnerabilitiesUseCase::new(
+            popular_package_service.clone(),
+        ),
+    );
+
     // Create application state
     let config_arc = Arc::new(config.clone());
     let app_state = AppState {
-        analysis_service,
+        analyze_dependencies_use_case,
+        get_vulnerability_details_use_case,
+        list_vulnerabilities_use_case,
         cache_service,
         report_service,
         vulnerability_repository,
