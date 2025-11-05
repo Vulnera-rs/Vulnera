@@ -16,13 +16,14 @@ pub use config::Config;
 pub use logging::init_tracing;
 
 use application::{
-    CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
-    VersionResolutionServiceImpl,
     auth::use_cases::{
         LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
         ValidateTokenUseCase,
     },
+    reporting::ReportServiceImpl,
+    vulnerability::services::{PopularPackageServiceImpl, VersionResolutionServiceImpl},
 };
+use infrastructure::cache::CacheServiceImpl;
 use infrastructure::{
     api_clients::{
         circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
@@ -218,14 +219,13 @@ pub async fn create_app(
     ));
 
     // Create vulnerability analysis use cases
-    let analyze_dependencies_use_case = Arc::new(
-        application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let analyze_dependencies_use_case =
+        Arc::new(application::vulnerability::AnalyzeDependenciesUseCase::new(
             parser_factory.clone(),
             vulnerability_repository.clone(),
             cache_service.clone(),
             config.analysis.max_concurrent_packages,
-        ),
-    );
+        ));
     let get_vulnerability_details_use_case = Arc::new(
         application::vulnerability::GetVulnerabilityDetailsUseCase::new(
             vulnerability_repository.clone(),
@@ -253,21 +253,26 @@ pub async fn create_app(
         };
 
     // Create repository analysis service only if GitHub client is available
-    let repository_analysis_service: Option<Arc<dyn application::RepositoryAnalysisService>> =
-        if let Some(client) = github_client {
-            Some(Arc::new(application::RepositoryAnalysisServiceImpl::new(
+    let repository_analysis_service: Option<
+        Arc<dyn application::vulnerability::services::RepositoryAnalysisService>,
+    > = if let Some(client) = github_client {
+        Some(Arc::new(
+            application::vulnerability::services::RepositoryAnalysisServiceImpl::new(
                 client,
                 vulnerability_repository.clone(),
                 parser_factory.clone(),
                 Arc::new(config.clone()),
-            )))
-        } else {
-            None
-        };
+            ),
+        ))
+    } else {
+        None
+    };
 
     // Create popular package service with config
     let config_arc = Arc::new(config.clone());
-    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+    let popular_package_service: Arc<
+        dyn application::vulnerability::services::PopularPackageService,
+    > = Arc::new(PopularPackageServiceImpl::new(
         vulnerability_repository.clone(),
         cache_service.clone(),
         config_arc,
@@ -281,11 +286,10 @@ pub async fn create_app(
     ));
 
     // Create vulnerability use cases
-    let list_vulnerabilities_use_case = Arc::new(
-        application::vulnerability::ListVulnerabilitiesUseCase::new(
+    let list_vulnerabilities_use_case =
+        Arc::new(application::vulnerability::ListVulnerabilitiesUseCase::new(
             popular_package_service.clone(),
-        ),
-    );
+        ));
 
     // Create application state
     let config_arc = Arc::new(config.clone());
