@@ -43,6 +43,7 @@ pub enum AuthError {
 
     #[error("Database error: {message}")]
     DatabaseError { message: String },
+
+    #[error("Insufficient permissions - admin role required")]
+    InsufficientPermissions,
 }
-
-
