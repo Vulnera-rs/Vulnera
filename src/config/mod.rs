@@ -231,6 +231,14 @@ impl Default for SecurityConfig {
 pub struct CacheConfig {
     pub directory: PathBuf,
     pub ttl_hours: u64,
+    /// L1 cache size in MB (in-memory cache)
+    pub l1_cache_size_mb: u64,
+    /// L1 cache TTL in seconds
+    pub l1_cache_ttl_seconds: u64,
+    /// Enable cache compression for entries larger than threshold
+    pub enable_cache_compression: bool,
+    /// Compression threshold in bytes
+    pub compression_threshold_bytes: u64,
 }
 
 impl Default for CacheConfig {
@@ -238,6 +246,10 @@ impl Default for CacheConfig {
         Self {
             directory: PathBuf::from(".vulnera_cache"),
             ttl_hours: 24,
+            l1_cache_size_mb: 100,
+            l1_cache_ttl_seconds: 300, // 5 minutes
+            enable_cache_compression: true,
+            compression_threshold_bytes: 10240, // 10KB
         }
     }
 }
@@ -384,12 +396,18 @@ impl Default for RecommendationsConfig {
 #[serde(default)]
 pub struct AnalysisConfig {
     pub max_concurrent_packages: usize,
+    /// Maximum concurrent registry version queries
+    pub max_concurrent_registry_queries: usize,
+    /// Maximum concurrent API calls per source
+    pub max_concurrent_api_calls: usize,
 }
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
             max_concurrent_packages: 3,
+            max_concurrent_registry_queries: 5,
+            max_concurrent_api_calls: 10,
         }
     }
 }
@@ -430,6 +448,16 @@ pub struct DatabaseConfig {
     pub url: String,
     /// Maximum number of connections in the pool
     pub max_connections: u32,
+    /// Minimum number of idle connections to maintain
+    pub min_idle: Option<u32>,
+    /// Connection timeout in seconds
+    pub connect_timeout_seconds: u64,
+    /// Maximum lifetime of a connection in seconds
+    pub max_lifetime_seconds: Option<u64>,
+    /// Idle timeout in seconds (connections idle longer than this will be closed)
+    pub idle_timeout_seconds: Option<u64>,
+    /// Enable connection health checks
+    pub enable_health_checks: bool,
 }
 
 impl Default for DatabaseConfig {
@@ -437,6 +465,11 @@ impl Default for DatabaseConfig {
         Self {
             url: "postgres://postgres:postgres@localhost/vulnera".to_string(),
             max_connections: 10,
+            min_idle: Some(2),
+            connect_timeout_seconds: 30,
+            max_lifetime_seconds: Some(1800), // 30 minutes
+            idle_timeout_seconds: Some(600),  // 10 minutes
+            enable_health_checks: true,
         }
     }
 }
@@ -463,6 +496,10 @@ impl Default for Config {
             cache: CacheConfig {
                 directory: PathBuf::from(".vulnera_cache"),
                 ttl_hours: 24,
+                l1_cache_size_mb: 100,
+                l1_cache_ttl_seconds: 300,
+                enable_cache_compression: true,
+                compression_threshold_bytes: 10240,
             },
             apis: ApiConfig {
                 nvd: NvdConfig {
@@ -500,6 +537,8 @@ impl Default for Config {
             },
             analysis: AnalysisConfig {
                 max_concurrent_packages: 3,
+                max_concurrent_registry_queries: 5,
+                max_concurrent_api_calls: 10,
             },
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),

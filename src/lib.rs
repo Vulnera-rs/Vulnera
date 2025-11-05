@@ -23,7 +23,7 @@ use application::{
     reporting::ReportServiceImpl,
     vulnerability::services::{PopularPackageServiceImpl, VersionResolutionServiceImpl},
 };
-use infrastructure::cache::CacheServiceImpl;
+use infrastructure::cache::{CacheServiceImpl, MemoryCache, MultiLevelCache};
 use infrastructure::{
     api_clients::{
         circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
@@ -114,11 +114,23 @@ pub async fn create_app(
     ));
 
     // Initialize infrastructure services
-    let cache_repository = Arc::new(FileCacheRepository::new(
+    // Create L2 (filesystem) cache
+    let l2_cache = Arc::new(FileCacheRepository::new(
         config.cache.directory.clone(),
         Duration::from_secs(config.cache.ttl_hours * 3600),
     ));
-    let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
+
+    // Create L1 (in-memory) cache
+    let l1_cache = Arc::new(MemoryCache::new(
+        config.cache.l1_cache_size_mb,
+        config.cache.l1_cache_ttl_seconds,
+    ));
+
+    // Create multi-level cache (L1 + L2)
+    let multi_level_cache = Arc::new(MultiLevelCache::new(l1_cache, l2_cache.clone()));
+
+    // Use multi-level cache as the cache service
+    let cache_service = Arc::new(CacheServiceImpl::new_with_cache(multi_level_cache));
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create circuit breakers for each API service
@@ -219,13 +231,15 @@ pub async fn create_app(
     ));
 
     // Create vulnerability analysis use cases
-    let analyze_dependencies_use_case =
-        Arc::new(application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let analyze_dependencies_use_case = Arc::new(
+        application::vulnerability::AnalyzeDependenciesUseCase::new_with_config(
             parser_factory.clone(),
             vulnerability_repository.clone(),
             cache_service.clone(),
             config.analysis.max_concurrent_packages,
-        ));
+            config.analysis.max_concurrent_registry_queries,
+        ),
+    );
     let get_vulnerability_details_use_case = Arc::new(
         application::vulnerability::GetVulnerabilityDetailsUseCase::new(
             vulnerability_repository.clone(),
@@ -290,6 +304,49 @@ pub async fn create_app(
         Arc::new(application::vulnerability::ListVulnerabilitiesUseCase::new(
             popular_package_service.clone(),
         ));
+
+    // Cache warming on startup (optional - warm popular packages)
+    if let Some(popular_config) = &config.popular_packages {
+        tracing::info!("Starting cache warming for popular packages...");
+        let warm_packages: Vec<crate::domain::vulnerability::entities::Package> = {
+            let mut packages = Vec::new();
+            // Collect popular packages from config
+            if let Some(ref npm_packages) = popular_config.npm {
+                for pkg in npm_packages {
+                    if let Ok(version) =
+                        crate::domain::vulnerability::value_objects::Version::parse(&pkg.version)
+                    {
+                        if let Ok(p) = crate::domain::vulnerability::entities::Package::new(
+                            pkg.name.clone(),
+                            version,
+                            crate::domain::vulnerability::value_objects::Ecosystem::Npm,
+                        ) {
+                            packages.push(p);
+                        }
+                    }
+                }
+            }
+            // Add more ecosystems as needed...
+            packages
+        };
+        if !warm_packages.is_empty() {
+            let cache_service_warm = cache_service.clone();
+            let vuln_repo_warm = vulnerability_repository.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cache_service_warm
+                    .warm_cache(&warm_packages, vuln_repo_warm)
+                    .await
+                {
+                    tracing::warn!("Cache warming failed: {}", e);
+                } else {
+                    tracing::info!(
+                        "Cache warming completed for {} popular packages",
+                        warm_packages.len()
+                    );
+                }
+            });
+        }
+    }
 
     // Create application state
     let config_arc = Arc::new(config.clone());

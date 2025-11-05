@@ -14,7 +14,7 @@ use vulnera_rust::{
         reporting::ReportServiceImpl,
         vulnerability::services::{PopularPackageServiceImpl, VersionResolutionServiceImpl},
     },
-    infrastructure::cache::CacheServiceImpl,
+    infrastructure::cache::{CacheServiceImpl, MemoryCache, MultiLevelCache},
     infrastructure::{
         api_clients::{
             circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
@@ -61,11 +61,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Initialize infrastructure services
-    let cache_repository = Arc::new(FileCacheRepository::new(
+    // Create L2 (filesystem) cache
+    let l2_cache = Arc::new(FileCacheRepository::new(
         config.cache.directory.clone(),
         Duration::from_secs(config.cache.ttl_hours * 3600),
     ));
-    let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
+
+    // Create L1 (in-memory) cache
+    let l1_cache = Arc::new(MemoryCache::new(
+        config.cache.l1_cache_size_mb,
+        config.cache.l1_cache_ttl_seconds,
+    ));
+
+    // Create multi-level cache (L1 + L2)
+    let multi_level_cache = Arc::new(MultiLevelCache::new(l1_cache, l2_cache.clone()));
+
+    // Use multi-level cache as the cache service
+    let cache_service = Arc::new(CacheServiceImpl::new_with_cache(multi_level_cache));
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create circuit breakers for each API service
