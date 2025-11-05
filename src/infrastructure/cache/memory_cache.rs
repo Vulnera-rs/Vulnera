@@ -7,18 +7,34 @@ use std::time::Duration;
 /// In-memory L1 cache for fast access to frequently used data
 pub struct MemoryCache {
     cache: Cache<String, Vec<u8>>,
+    enable_compression: bool,
+    compression_threshold_bytes: u64,
 }
 
 impl MemoryCache {
     /// Create a new in-memory cache with specified size and TTL
     pub fn new(max_size_mb: u64, ttl_seconds: u64) -> Self {
+        Self::new_with_compression(max_size_mb, ttl_seconds, false, 0)
+    }
+
+    /// Create a new in-memory cache with compression support
+    pub fn new_with_compression(
+        max_size_mb: u64,
+        ttl_seconds: u64,
+        enable_compression: bool,
+        compression_threshold_bytes: u64,
+    ) -> Self {
         let max_capacity = max_size_mb * 1024 * 1024; // Convert MB to bytes
         let cache = Cache::builder()
             .max_capacity(max_capacity)
             .time_to_live(Duration::from_secs(ttl_seconds))
             .build();
 
-        Self { cache }
+        Self {
+            cache,
+            enable_compression,
+            compression_threshold_bytes,
+        }
     }
 
     /// Get an entry from the cache
@@ -28,8 +44,11 @@ impl MemoryCache {
     {
         match self.cache.get(key).await {
             Some(data) => {
-                // Decompress if needed
-                let decompressed = if data.len() > 4 && &data[0..4] == b"CMP\0" {
+                // Decompress if needed (check for compression marker)
+                let decompressed = if self.enable_compression
+                    && data.len() > 4
+                    && &data[0..4] == b"CMP\0"
+                {
                     use flate2::read::GzDecoder;
                     use std::io::Read;
                     let mut decoder = GzDecoder::new(&data[4..]);
@@ -59,8 +78,10 @@ impl MemoryCache {
     {
         let serialized = serde_json::to_vec(value).map_err(ApplicationError::Json)?;
 
-        // Compress if larger than threshold
-        let data = if serialized.len() > 10240 {
+        // Compress if enabled and larger than threshold
+        let data = if self.enable_compression
+            && serialized.len() as u64 > self.compression_threshold_bytes
+        {
             use flate2::write::GzEncoder;
             use flate2::Compression;
             use std::io::Write;
