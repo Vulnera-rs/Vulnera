@@ -4,16 +4,15 @@
 //! the domain and infrastructure layers.
 
 pub mod auth;
+pub mod reporting;
 pub mod vulnerability;
 pub mod errors;
-pub mod services;
 
 #[cfg(test)]
 mod tests;
 
 pub use errors::*;
-pub use services::*;
-pub use services::{RepositoryAnalysisInput, RepositoryAnalysisService};
+pub use reporting::*;
 pub use vulnerability::*;
 
 use async_trait::async_trait;

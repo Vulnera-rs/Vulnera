@@ -7,13 +7,14 @@ use vulnera_rust::infrastructure::resilience::CircuitBreakerConfig;
 use vulnera_rust::{
     Config,
     application::{
-        CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
-        VersionResolutionServiceImpl,
         auth::use_cases::{
             LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
             ValidateTokenUseCase,
         },
+        reporting::ReportServiceImpl,
+        vulnerability::services::{PopularPackageServiceImpl, VersionResolutionServiceImpl},
     },
+    infrastructure::cache::CacheServiceImpl,
     infrastructure::{
         api_clients::{
             circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
@@ -192,10 +193,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create repository analysis service only if GitHub client is available
     let repository_analysis_service: Option<
-        Arc<dyn vulnera_rust::application::RepositoryAnalysisService>,
+        Arc<dyn vulnera_rust::application::vulnerability::services::RepositoryAnalysisService>,
     > = if let Some(client) = github_client {
         Some(Arc::new(
-            vulnera_rust::application::RepositoryAnalysisServiceImpl::new(
+            vulnera_rust::application::vulnerability::services::RepositoryAnalysisServiceImpl::new(
                 client,
                 vulnerability_repository.clone(),
                 parser_factory.clone(),
@@ -208,7 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create popular package service with config
     let config_arc = Arc::new(config.clone());
-    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+    let popular_package_service: Arc<
+        dyn vulnera_rust::application::vulnerability::services::PopularPackageService,
+    > = Arc::new(PopularPackageServiceImpl::new(
         vulnerability_repository.clone(),
         cache_service.clone(),
         config_arc,

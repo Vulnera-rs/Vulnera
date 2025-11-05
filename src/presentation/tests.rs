@@ -1,9 +1,12 @@
 use crate::{
     application::errors::VulnerabilityError,
     application::{
-        CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
-        VersionResolutionServiceImpl,
+        reporting::ReportServiceImpl,
+        vulnerability::services::{
+            PopularPackageServiceImpl, VersionResolutionServiceImpl,
+        },
     },
+    infrastructure::cache::CacheServiceImpl,
     domain::vulnerability::entities::Package,
     infrastructure::{
         api_clients::traits::{RawVulnerability, VulnerabilityApiClient},

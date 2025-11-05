@@ -119,22 +119,24 @@ pub struct AppState {
     // Vulnerability analysis use cases
     pub analyze_dependencies_use_case: Arc<
         crate::application::vulnerability::AnalyzeDependenciesUseCase<
-            crate::application::CacheServiceImpl,
+            crate::infrastructure::cache::CacheServiceImpl,
         >,
     >,
     pub get_vulnerability_details_use_case: Arc<
         crate::application::vulnerability::GetVulnerabilityDetailsUseCase<
-            crate::application::CacheServiceImpl,
+            crate::infrastructure::cache::CacheServiceImpl,
         >,
     >,
     pub list_vulnerabilities_use_case:
         Arc<crate::application::vulnerability::ListVulnerabilitiesUseCase>,
-    pub cache_service: Arc<crate::application::CacheServiceImpl>,
-    pub report_service: Arc<crate::application::ReportServiceImpl>,
+    pub cache_service: Arc<crate::infrastructure::cache::CacheServiceImpl>,
+    pub report_service: Arc<crate::application::reporting::ReportServiceImpl>,
     pub vulnerability_repository:
         Arc<dyn crate::domain::vulnerability::repositories::IVulnerabilityRepository>,
-    pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
-    pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>,
+    pub popular_package_service:
+        Arc<dyn crate::application::vulnerability::services::PopularPackageService>,
+    pub repository_analysis_service:
+        Option<Arc<dyn crate::application::vulnerability::services::RepositoryAnalysisService>>,
     pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
     pub config: Arc<crate::Config>,
     pub startup_time: std::time::Instant,
@@ -216,7 +218,7 @@ pub async fn analyze_repository(
 
     let effective_ref = request.r#ref.clone().or(derived_ref);
 
-    let input = crate::application::RepositoryAnalysisInput {
+    let input = crate::application::vulnerability::services::RepositoryAnalysisInput {
         owner: owner.clone(),
         repo: repo.clone(),
         requested_ref: effective_ref.clone(),
