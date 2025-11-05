@@ -57,6 +57,10 @@ uuid = { version = "1.18.0", features = ["v4", "serde"] }
 sha2 = "0.10.8"
 hex = "0.4.3"
 
+# Multi-level caching
+moka = { version = "0.12", features = ["future"] }
+flate2 = "1.0"
+
 # Authentication and security
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 bcrypt = "0.17.1"

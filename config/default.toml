@@ -18,9 +18,15 @@ hsts_include_subdomains = true
 [cache]
 directory = ".vulnera_cache"
 ttl_hours = 24
+l1_cache_size_mb = 100
+l1_cache_ttl_seconds = 300
+enable_cache_compression = true
+compression_threshold_bytes = 10240
 
 [analysis]
 max_concurrent_packages = 3
+max_concurrent_registry_queries = 5
+max_concurrent_api_calls = 10
 
 [auth]
 # JWT secret key (must be at least 16 characters, 32+ recommended for production)
@@ -35,6 +41,11 @@ api_key_ttl_days = 365                                              # 1 year, se
 # Override via VULNERA__DATABASE__URL environment variable
 url = "postgres://postgres:postgres@localhost/vulnera"
 max_connections = 10
+min_idle = 2
+connect_timeout_seconds = 30
+max_lifetime_seconds = 1800
+idle_timeout_seconds = 600
+enable_health_checks = true
 
 [apis.nvd]
 base_url = "https://services.nvd.nist.gov/rest/json"

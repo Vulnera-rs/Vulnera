@@ -499,23 +499,27 @@ impl AggregatingVulnerabilityRepository {
             Result<(Vec<RawVulnerability>, VulnerabilitySource), VulnerabilityError>,
         > = JoinSet::new();
 
+        // Use Arc to avoid cloning the package multiple times
+        let package_arc = Arc::new(package.clone());
+
         // Query OSV
         let osv_client = self.osv_client.clone();
-        let package_clone = package.clone();
+        let package_arc_osv = Arc::clone(&package_arc);
         join_set.spawn(async move {
-            match osv_client.query_vulnerabilities(&package_clone).await {
+            let package_id = package_arc_osv.identifier();
+            match osv_client.query_vulnerabilities(&*package_arc_osv).await {
                 Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::OSV)),
                 Err(e) => {
                     match e {
                         VulnerabilityError::Json(_) => {
                             debug!(
                                 "OSV JSON decode failed for {}: {}",
-                                package_clone.identifier(),
+                                package_id,
                                 e
                             );
                         }
                         _ => {
-                            warn!("OSV query failed for {}: {}", package_clone.identifier(), e);
+                            warn!("OSV query failed for {}: {}", package_id, e);
                         }
                     }
                     Ok((vec![], VulnerabilitySource::OSV))
@@ -525,12 +529,13 @@ impl AggregatingVulnerabilityRepository {
 
         // Query NVD
         let nvd_client = self.nvd_client.clone();
-        let package_clone = package.clone();
+        let package_arc_nvd = Arc::clone(&package_arc);
         join_set.spawn(async move {
-            match nvd_client.query_vulnerabilities(&package_clone).await {
+            let package_id = package_arc_nvd.identifier();
+            match nvd_client.query_vulnerabilities(&*package_arc_nvd).await {
                 Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::NVD)),
                 Err(e) => {
-                    warn!("NVD query failed for {}: {}", package_clone.identifier(), e);
+                    warn!("NVD query failed for {}: {}", package_id, e);
                     Ok((vec![], VulnerabilitySource::NVD))
                 }
             }
@@ -542,14 +547,15 @@ impl AggregatingVulnerabilityRepository {
             .unwrap_or(false)
         {
             let ghsa_client = self.ghsa_client.clone();
-            let package_clone = package.clone();
+            let package_arc_ghsa = Arc::clone(&package_arc);
             join_set.spawn(async move {
-                match ghsa_client.query_vulnerabilities(&package_clone).await {
+                let package_id = package_arc_ghsa.identifier();
+                match ghsa_client.query_vulnerabilities(&*package_arc_ghsa).await {
                     Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::GHSA)),
                     Err(e) => {
                         warn!(
                             "GHSA query failed for {}: {}",
-                            package_clone.identifier(),
+                            package_id,
                             e
                         );
                         Ok((vec![], VulnerabilitySource::GHSA))
@@ -563,8 +569,10 @@ impl AggregatingVulnerabilityRepository {
             );
         }
 
-        // Collect results
-        let mut all_vulnerabilities = Vec::new();
+        // Collect results - pre-allocate with estimated capacity
+        // Estimate: average 5-10 vulnerabilities per source
+        let estimated_capacity = 3 * 8; // 3 sources * ~8 vulnerabilities
+        let mut all_vulnerabilities = Vec::with_capacity(estimated_capacity);
         let mut successful_sources = 0;
         let mut total_raw_vulnerabilities = 0;
 
