@@ -56,3 +56,4 @@ pub trait IApiKeyRepository: Send + Sync {
     async fn delete(&self, key_id: &ApiKeyId) -> Result<(), AuthError>;
 }
 
+

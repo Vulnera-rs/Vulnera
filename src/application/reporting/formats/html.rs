@@ -15,3 +15,4 @@ pub fn generate_html_report(analysis: &AnalysisReport) -> Result<String, Applica
     // TODO: Implement actual HTML markup generation
     json::generate_json_report(analysis)
 }
+

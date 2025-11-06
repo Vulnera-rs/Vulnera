@@ -15,6 +15,7 @@ use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
 use crate::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource,
 };
+use regex::Regex;
 
 /// Aggregating repository that combines multiple vulnerability sources
 ///
@@ -114,6 +115,47 @@ impl AggregatingVulnerabilityRepository {
     /// - Invalid data is logged but doesn't fail the entire conversion
     /// - Unknown ecosystems are skipped with debug logging
     /// - Malformed versions are logged and excluded from affected ranges
+
+    /// Normalize Python version format to semver-compatible format
+    /// This is needed because OSV may return Python versions in their original format (e.g., "21.5b0")
+    /// which need to be converted to semver format (e.g., "21.5.0-beta.0") for parsing
+    fn normalize_python_version(version: &str) -> String {
+        let version = version.trim();
+
+        // Try to match Python pre-release patterns: X.YaN, X.YbN, X.YrcN, X.Y.ZaN, X.Y.ZbN, X.Y.ZrcN
+        if let Some(captures) = Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$")
+            .ok()
+            .and_then(|re| re.captures(version))
+        {
+            let major = captures.get(1).unwrap().as_str();
+            let minor = captures.get(2).unwrap().as_str();
+            let patch = captures.get(3).map(|m| m.as_str()).unwrap_or("0");
+            let pre_type = captures.get(4).unwrap().as_str();
+            let pre_num = captures.get(5).unwrap().as_str();
+
+            // Convert Python pre-release type to semver format
+            let semver_pre_type = match pre_type {
+                "a" => "alpha",
+                "b" => "beta",
+                "rc" => "rc",
+                _ => pre_type,
+            };
+
+            return format!(
+                "{}.{}.{}-{}.{}",
+                major, minor, patch, semver_pre_type, pre_num
+            );
+        }
+
+        // If no pre-release pattern matched, ensure we have at least major.minor.patch
+        let parts: Vec<&str> = version.split('.').collect();
+        match parts.len() {
+            1 => format!("{}.0.0", parts[0]),
+            2 => format!("{}.{}.0", parts[0], parts[1]),
+            _ => version.to_string(),
+        }
+    }
+
     fn convert_raw_vulnerability(
         &self,
         raw: RawVulnerability,
@@ -183,9 +225,22 @@ impl AggregatingVulnerabilityRepository {
                     if let (Some(introduced), Some(fixed)) =
                         (introduced_version.clone(), fixed_version.clone())
                     {
-                        if let (Ok(intro_ver), Ok(fix_ver)) =
-                            (Version::parse(&introduced), Version::parse(&fixed))
-                        {
+                        // Normalize Python versions to semver format before parsing
+                        let normalized_intro = if ecosystem == Ecosystem::PyPI {
+                            Self::normalize_python_version(&introduced)
+                        } else {
+                            introduced
+                        };
+                        let normalized_fixed = if ecosystem == Ecosystem::PyPI {
+                            Self::normalize_python_version(&fixed)
+                        } else {
+                            fixed
+                        };
+
+                        if let (Ok(intro_ver), Ok(fix_ver)) = (
+                            Version::parse(&normalized_intro),
+                            Version::parse(&normalized_fixed),
+                        ) {
                             // [introduced, fixed)
                             affected_version_ranges.push(VersionRange::new(
                                 Some(intro_ver),
@@ -197,7 +252,12 @@ impl AggregatingVulnerabilityRepository {
                     } else if introduced_version.is_none() && fixed_version.is_some() {
                         // No explicit introduced; treat as (< fixed)
                         if let Some(fx) = &fixed_version {
-                            if let Ok(fix_ver) = Version::parse(fx) {
+                            let normalized_fixed = if ecosystem == Ecosystem::PyPI {
+                                Self::normalize_python_version(fx)
+                            } else {
+                                fx.clone()
+                            };
+                            if let Ok(fix_ver) = Version::parse(&normalized_fixed) {
                                 affected_version_ranges.push(VersionRange::less_than(fix_ver));
                             }
                         }
@@ -209,9 +269,20 @@ impl AggregatingVulnerabilityRepository {
                         if let (Some(intro), Some(last)) =
                             (&introduced_version, &last_affected_version)
                         {
-                            if let (Ok(intro_ver), Ok(last_ver)) =
-                                (Version::parse(intro), Version::parse(last))
-                            {
+                            let normalized_intro = if ecosystem == Ecosystem::PyPI {
+                                Self::normalize_python_version(intro)
+                            } else {
+                                intro.clone()
+                            };
+                            let normalized_last = if ecosystem == Ecosystem::PyPI {
+                                Self::normalize_python_version(last)
+                            } else {
+                                last.clone()
+                            };
+                            if let (Ok(intro_ver), Ok(last_ver)) = (
+                                Version::parse(&normalized_intro),
+                                Version::parse(&normalized_last),
+                            ) {
                                 affected_version_ranges.push(VersionRange::new(
                                     Some(intro_ver),
                                     Some(last_ver),
@@ -226,7 +297,12 @@ impl AggregatingVulnerabilityRepository {
                     {
                         // (..=last_affected]
                         if let Some(last) = &last_affected_version {
-                            if let Ok(last_ver) = Version::parse(last) {
+                            let normalized_last = if ecosystem == Ecosystem::PyPI {
+                                Self::normalize_python_version(last)
+                            } else {
+                                last.clone()
+                            };
+                            if let Ok(last_ver) = Version::parse(&normalized_last) {
                                 affected_version_ranges.push(VersionRange::new(
                                     None,
                                     Some(last_ver),
@@ -237,7 +313,12 @@ impl AggregatingVulnerabilityRepository {
                         }
                     } else if let Some(introduced) = introduced_version {
                         // >= introduced
-                        if let Ok(intro_ver) = Version::parse(&introduced) {
+                        let normalized_intro = if ecosystem == Ecosystem::PyPI {
+                            Self::normalize_python_version(&introduced)
+                        } else {
+                            introduced
+                        };
+                        if let Ok(intro_ver) = Version::parse(&normalized_intro) {
                             affected_version_ranges.push(VersionRange::at_least(intro_ver));
                         }
                     }
@@ -248,7 +329,12 @@ impl AggregatingVulnerabilityRepository {
             if affected_version_ranges.is_empty() {
                 if let Some(versions) = &affected_data.versions {
                     for version_str in versions {
-                        if let Ok(version) = Version::parse(version_str) {
+                        let normalized_version = if ecosystem == Ecosystem::PyPI {
+                            Self::normalize_python_version(version_str)
+                        } else {
+                            version_str.clone()
+                        };
+                        if let Ok(version) = Version::parse(&normalized_version) {
                             affected_version_ranges.push(VersionRange::exact(version));
                         }
                     }
@@ -257,10 +343,19 @@ impl AggregatingVulnerabilityRepository {
 
             // Create affected package
             if !affected_version_ranges.is_empty() {
+                let ecosystem_clone = ecosystem.clone();
+
                 // Use the first fixed version if available, otherwise use a meaningful default
                 let default_version = fixed_versions
                     .first()
-                    .and_then(|v| Version::parse(v).ok())
+                    .and_then(|v| {
+                        let normalized = if ecosystem_clone == Ecosystem::PyPI {
+                            Self::normalize_python_version(v)
+                        } else {
+                            v.clone()
+                        };
+                        Version::parse(&normalized).ok()
+                    })
                     .unwrap_or_else(|| Version::parse("1.0.0").unwrap());
 
                 if let Ok(package) = Package::new(
@@ -273,7 +368,14 @@ impl AggregatingVulnerabilityRepository {
                         affected_version_ranges,
                         fixed_versions
                             .into_iter()
-                            .filter_map(|v| Version::parse(&v).ok())
+                            .filter_map(|v| {
+                                let normalized = if ecosystem_clone == Ecosystem::PyPI {
+                                    Self::normalize_python_version(&v)
+                                } else {
+                                    v
+                                };
+                                Version::parse(&normalized).ok()
+                            })
                             .collect(),
                     );
                     affected_packages.push(affected_package);
@@ -527,11 +629,7 @@ impl AggregatingVulnerabilityRepository {
                 Err(e) => {
                     match e {
                         VulnerabilityError::Json(_) => {
-                            debug!(
-                                "OSV JSON decode failed for {}: {}",
-                                package_id,
-                                e
-                            );
+                            debug!("OSV JSON decode failed for {}: {}", package_id, e);
                         }
                         _ => {
                             warn!("OSV query failed for {}: {}", package_id, e);
@@ -568,11 +666,7 @@ impl AggregatingVulnerabilityRepository {
                 match ghsa_client.query_vulnerabilities(&package_arc_ghsa).await {
                     Ok(raw_vulns) => Ok((raw_vulns, VulnerabilitySource::GHSA)),
                     Err(e) => {
-                        warn!(
-                            "GHSA query failed for {}: {}",
-                            package_id,
-                            e
-                        );
+                        warn!("GHSA query failed for {}: {}", package_id, e);
                         Ok((vec![], VulnerabilitySource::GHSA))
                     }
                 }

@@ -7,6 +7,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use regex::Regex;
 
 /// Parser for requirements.txt files
 pub struct RequirementsTxtParser;
@@ -102,9 +103,54 @@ impl RequirementsTxtParser {
         let version_spec = version_spec.trim();
 
         if version_spec.is_empty() {
-            Ok("0.0.0".to_string())
-        } else {
-            Ok(version_spec.to_string())
+            return Ok("0.0.0".to_string());
+        }
+
+        // Convert Python version formats to semver-compatible format
+        // Handle Python pre-release formats: 21.5b0 -> 21.5.0-beta.0, 1.0a1 -> 1.0.0-alpha.1, 2.0rc1 -> 2.0.0-rc.1
+        let normalized = self.normalize_python_version(version_spec)?;
+
+        Ok(normalized)
+    }
+
+    /// Normalize Python version format to semver-compatible format
+    fn normalize_python_version(&self, version: &str) -> Result<String, ParseError> {
+        // Check for Python pre-release formats: a (alpha), b (beta), rc (release candidate)
+        // Patterns: X.YaN, X.YbN, X.YrcN, X.Y.ZaN, X.Y.ZbN, X.Y.ZrcN
+        let version = version.trim();
+
+        // Try to match Python pre-release patterns
+        // Match patterns like: 21.5b0, 1.0a1, 2.0rc1, 1.2.3a4, etc.
+        if let Some(captures) = Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$")
+            .ok()
+            .and_then(|re| re.captures(version))
+        {
+            let major = captures.get(1).unwrap().as_str();
+            let minor = captures.get(2).unwrap().as_str();
+            let patch = captures.get(3).map(|m| m.as_str()).unwrap_or("0");
+            let pre_type = captures.get(4).unwrap().as_str();
+            let pre_num = captures.get(5).unwrap().as_str();
+
+            // Convert Python pre-release type to semver format
+            let semver_pre_type = match pre_type {
+                "a" => "alpha",
+                "b" => "beta",
+                "rc" => "rc",
+                _ => pre_type,
+            };
+
+            return Ok(format!(
+                "{}.{}.{}-{}.{}",
+                major, minor, patch, semver_pre_type, pre_num
+            ));
+        }
+
+        // If no pre-release pattern matched, ensure we have at least major.minor.patch
+        let parts: Vec<&str> = version.split('.').collect();
+        match parts.len() {
+            1 => Ok(format!("{}.0.0", parts[0])),
+            2 => Ok(format!("{}.{}.0", parts[0], parts[1])),
+            _ => Ok(version.to_string()),
         }
     }
 }
@@ -472,6 +518,24 @@ pytest>=6.0.0  # inline comment
     }
 
     #[tokio::test]
+    async fn test_requirements_txt_parser_with_pre_release_versions() {
+        let parser = RequirementsTxtParser::new();
+        let content = r#"
+black==21.5b0
+package1==1.0a1
+package2==2.0rc1
+package3==1.2.3a4
+        "#;
+
+        let packages = parser.parse_file(content).await.unwrap();
+        assert_eq!(packages.len(), 4);
+
+        let black_pkg = packages.iter().find(|p| p.name == "black").unwrap();
+        // Should parse as 21.5.0-beta.0
+        assert_eq!(black_pkg.version, Version::parse("21.5.0-beta.0").unwrap());
+    }
+
+    #[tokio::test]
     async fn test_pipfile_parser() {
         let parser = PipfileParser::new();
         let content = r#"
@@ -533,6 +597,34 @@ dev = [
             "2.25.1"
         );
         assert_eq!(parser.clean_version_spec("").unwrap(), "0.0.0");
+    }
+
+    #[test]
+    fn test_normalize_python_version() {
+        let parser = RequirementsTxtParser::new();
+
+        // Test Python pre-release formats
+        assert_eq!(
+            parser.normalize_python_version("21.5b0").unwrap(),
+            "21.5.0-beta.0"
+        );
+        assert_eq!(
+            parser.normalize_python_version("1.0a1").unwrap(),
+            "1.0.0-alpha.1"
+        );
+        assert_eq!(
+            parser.normalize_python_version("2.0rc1").unwrap(),
+            "2.0.0-rc.1"
+        );
+        assert_eq!(
+            parser.normalize_python_version("1.2.3a4").unwrap(),
+            "1.2.3-alpha.4"
+        );
+
+        // Test normal versions
+        assert_eq!(parser.normalize_python_version("2.25.1").unwrap(), "2.25.1");
+        assert_eq!(parser.normalize_python_version("1.2").unwrap(), "1.2.0");
+        assert_eq!(parser.normalize_python_version("1").unwrap(), "1.0.0");
     }
 
     #[test]
