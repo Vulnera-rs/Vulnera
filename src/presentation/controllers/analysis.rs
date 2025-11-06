@@ -9,7 +9,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::application::{CacheService, errors::ApplicationError};
-use crate::domain::{Ecosystem, VulnerabilityId};
+use crate::domain::vulnerability::value_objects::{Ecosystem, VulnerabilityId};
 use crate::presentation::auth::extractors::{Auth, HasRole};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, AnalysisResponse, ErrorResponse,
@@ -44,7 +44,7 @@ impl PaginationQuery {
         // Validate page number
         if page < 1 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "page".to_string(),
                     message: "Page number must be greater than 0".to_string(),
                 },
@@ -54,7 +54,7 @@ impl PaginationQuery {
         // Validate per_page limits
         if per_page < 1 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "per_page".to_string(),
                     message: "Items per page must be greater than 0".to_string(),
                 },
@@ -63,7 +63,7 @@ impl PaginationQuery {
 
         if per_page > 500 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "per_page".to_string(),
                     message: "Items per page cannot exceed 500".to_string(),
                 },
@@ -83,7 +83,7 @@ impl VulnerabilityListQuery {
         // Validate page number
         if page < 1 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "page".to_string(),
                     message: "Page number must be greater than 0".to_string(),
                 },
@@ -93,7 +93,7 @@ impl VulnerabilityListQuery {
         // Validate per_page limits
         if per_page < 1 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "per_page".to_string(),
                     message: "Items per page must be greater than 0".to_string(),
                 },
@@ -102,7 +102,7 @@ impl VulnerabilityListQuery {
 
         if per_page > 500 {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "per_page".to_string(),
                     message: "Items per page cannot exceed 500".to_string(),
                 },
@@ -116,12 +116,27 @@ impl VulnerabilityListQuery {
 /// Application state containing services and configuration
 #[derive(Clone)]
 pub struct AppState {
-    pub analysis_service: Arc<dyn crate::application::AnalysisService>,
-    pub cache_service: Arc<crate::application::CacheServiceImpl>,
-    pub report_service: Arc<crate::application::ReportServiceImpl>,
-    pub vulnerability_repository: Arc<dyn crate::infrastructure::VulnerabilityRepository>,
-    pub popular_package_service: Arc<dyn crate::application::PopularPackageService>,
-    pub repository_analysis_service: Option<Arc<dyn crate::application::RepositoryAnalysisService>>,
+    // Vulnerability analysis use cases
+    pub analyze_dependencies_use_case: Arc<
+        crate::application::vulnerability::AnalyzeDependenciesUseCase<
+            crate::infrastructure::cache::CacheServiceImpl,
+        >,
+    >,
+    pub get_vulnerability_details_use_case: Arc<
+        crate::application::vulnerability::GetVulnerabilityDetailsUseCase<
+            crate::infrastructure::cache::CacheServiceImpl,
+        >,
+    >,
+    pub list_vulnerabilities_use_case:
+        Arc<crate::application::vulnerability::ListVulnerabilitiesUseCase>,
+    pub cache_service: Arc<crate::infrastructure::cache::CacheServiceImpl>,
+    pub report_service: Arc<crate::application::reporting::ReportServiceImpl>,
+    pub vulnerability_repository:
+        Arc<dyn crate::domain::vulnerability::repositories::IVulnerabilityRepository>,
+    pub popular_package_service:
+        Arc<dyn crate::application::vulnerability::services::PopularPackageService>,
+    pub repository_analysis_service:
+        Option<Arc<dyn crate::application::vulnerability::services::RepositoryAnalysisService>>,
     pub version_resolution_service: Arc<dyn crate::application::VersionResolutionService>,
     pub config: Arc<crate::Config>,
     pub startup_time: std::time::Instant,
@@ -175,7 +190,7 @@ pub async fn analyze_repository(
             (parsed.owner, parsed.repo, parsed.r#ref)
         } else {
             return Err(ApplicationError::Domain(
-                crate::domain::DomainError::InvalidInput {
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                     field: "repository_url".into(),
                     message: "Invalid GitHub repository URL".into(),
                 },
@@ -183,23 +198,27 @@ pub async fn analyze_repository(
         }
     } else {
         let owner = request.owner.clone().ok_or_else(|| {
-            ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
-                field: "owner".into(),
-                message: "owner is required".into(),
-            })
+            ApplicationError::Domain(
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
+                    field: "owner".into(),
+                    message: "owner is required".into(),
+                },
+            )
         })?;
         let repo = request.repo.clone().ok_or_else(|| {
-            ApplicationError::Domain(crate::domain::DomainError::InvalidInput {
-                field: "repo".into(),
-                message: "repo is required".into(),
-            })
+            ApplicationError::Domain(
+                crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
+                    field: "repo".into(),
+                    message: "repo is required".into(),
+                },
+            )
         })?;
         (owner, repo, None)
     };
 
     let effective_ref = request.r#ref.clone().or(derived_ref);
 
-    let input = crate::application::RepositoryAnalysisInput {
+    let input = crate::application::vulnerability::services::RepositoryAnalysisInput {
         owner: owner.clone(),
         repo: repo.clone(),
         requested_ref: effective_ref.clone(),
@@ -323,7 +342,7 @@ pub async fn analyze_repository(
                 continue;
             }
             // Find vulnerabilities that affect this package
-            let affecting: Vec<crate::domain::Vulnerability> = result
+            let affecting: Vec<crate::domain::vulnerability::entities::Vulnerability> = result
                 .vulnerabilities
                 .iter()
                 .filter(|v| {
@@ -451,8 +470,8 @@ pub async fn analyze_dependencies(
 
     // Perform analysis
     let analysis_report = app_state
-        .analysis_service
-        .analyze_dependencies(
+        .analyze_dependencies_use_case
+        .execute(
             &request.file_content,
             ecosystem,
             request.filename.as_deref(),
@@ -525,7 +544,7 @@ pub async fn analyze_dependencies(
             continue;
         }
         // Only compute recommendations for packages with detected vulnerabilities
-        let affecting: Vec<crate::domain::Vulnerability> = analysis_report
+        let affecting: Vec<crate::domain::vulnerability::entities::Vulnerability> = analysis_report
             .vulnerabilities_for_package(pkg)
             .into_iter()
             .cloned()
@@ -623,11 +642,11 @@ pub async fn get_vulnerability(
     tracing::info!("Fetching vulnerability details for ID: {}", id);
 
     let vulnerability_id = VulnerabilityId::new(id).map_err(|e| {
-        ApplicationError::Domain(crate::domain::DomainError::InvalidVulnerabilityId { id: e })
+        ApplicationError::Domain(crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidVulnerabilityId { id: e })
     })?;
     let vulnerability = app_state
-        .analysis_service
-        .get_vulnerability_details(&vulnerability_id)
+        .get_vulnerability_details_use_case
+        .execute(&vulnerability_id)
         .await?;
 
     let vulnerability_dto = VulnerabilityDto {
@@ -698,7 +717,7 @@ pub async fn list_vulnerabilities(
             "critical" | "high" | "medium" | "low" => {}
             _ => {
                 return Err(ApplicationError::Domain(
-                    crate::domain::DomainError::InvalidInput {
+                    crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                         field: "severity".to_string(),
                         message:
                             "Invalid severity filter. Must be one of: critical, high, medium, low"
@@ -709,10 +728,10 @@ pub async fn list_vulnerabilities(
         }
     }
 
-    // Use the popular package service to get vulnerabilities efficiently
+    // Use the use case to get vulnerabilities efficiently
     let result = app_state
-        .popular_package_service
-        .list_vulnerabilities(
+        .list_vulnerabilities_use_case
+        .execute(
             page,
             per_page,
             pagination.ecosystem.as_deref(),
@@ -802,7 +821,7 @@ pub async fn refresh_vulnerability_cache(
     State(app_state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, ApplicationError> {
     // Require admin role for cache refresh
-    auth.require_admin().map_err(|e| {
+    auth.require_admin().map_err(|_e| {
         ApplicationError::Authentication(
             crate::domain::auth::errors::AuthError::InsufficientPermissions,
         )
@@ -852,7 +871,7 @@ pub async fn get_analysis_report(
     // Try to get cached analysis report
     if let Some(cached_report) = app_state
         .cache_service
-        .get::<crate::domain::AnalysisReport>(&cache_key)
+        .get::<crate::domain::vulnerability::entities::AnalysisReport>(&cache_key)
         .await?
     {
         tracing::info!("Found cached analysis report: {}", id);
@@ -991,7 +1010,7 @@ pub async fn get_popular_packages(
             "packagist" => Ecosystem::Packagist,
             _ => {
                 return Err(ApplicationError::Domain(
-                    crate::domain::DomainError::InvalidInput {
+                    crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                         field: "ecosystem".to_string(),
                         message: format!("Unsupported ecosystem: {}", ecosystem_str),
                     },
@@ -1003,10 +1022,10 @@ pub async fn get_popular_packages(
     // Calculate page from offset and limit
     let page = (offset / limit) + 1;
 
-    // Use the popular package service to get popular packages
+    // Use the use case to get popular packages
     let result = app_state
-        .popular_package_service
-        .list_vulnerabilities(
+        .list_vulnerabilities_use_case
+        .execute(
             page,
             limit,
             query.ecosystem.as_deref(),
