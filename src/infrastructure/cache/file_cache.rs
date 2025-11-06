@@ -1,6 +1,7 @@
 //! File-based cache implementation
 
-use crate::application::{ApplicationError, CacheService};
+use crate::application::errors::ApplicationError;
+use crate::application::vulnerability::services::CacheService;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,6 +20,7 @@ struct CacheEntry<T> {
     created_at: u64,
     expires_at: u64,
     access_count: u64,
+    compressed: bool,
 }
 
 /// Cache statistics for monitoring
@@ -34,9 +36,11 @@ pub struct CacheStats {
 /// File-based cache repository with TTL support and concurrent access safety
 pub struct FileCacheRepository {
     cache_dir: PathBuf,
-
-    #[allow(dead_code)]
-    default_ttl: Duration, // Future: configurable TTL support
+    default_ttl: Duration,
+    /// Enable compression for cache entries larger than threshold
+    enable_compression: bool,
+    /// Compression threshold in bytes
+    compression_threshold_bytes: u64,
     /// Mutex for file operations to prevent concurrent write conflicts
     file_locks: Arc<Mutex<std::collections::HashMap<String, Arc<Mutex<()>>>>>,
     stats: Arc<Mutex<CacheStats>>,
@@ -47,9 +51,21 @@ pub struct FileCacheRepository {
 impl FileCacheRepository {
     /// Create a new file-based cache repository
     pub fn new(cache_dir: PathBuf, default_ttl: Duration) -> Self {
+        Self::new_with_compression(cache_dir, default_ttl, false, 0)
+    }
+
+    /// Create a new file-based cache repository with compression support
+    pub fn new_with_compression(
+        cache_dir: PathBuf,
+        default_ttl: Duration,
+        enable_compression: bool,
+        compression_threshold_bytes: u64,
+    ) -> Self {
         Self {
             cache_dir,
             default_ttl,
+            enable_compression,
+            compression_threshold_bytes,
             file_locks: Arc::new(Mutex::new(std::collections::HashMap::new())),
             stats: Arc::new(Mutex::new(CacheStats::default())),
             cleanup_handle: None,
@@ -147,13 +163,33 @@ impl FileCacheRepository {
         let final_path = self.cache_path(key);
 
         // Serialize the entry
-        let content = serde_json::to_string_pretty(entry).map_err(|e| {
+        let serialized_data = serde_json::to_vec(entry).map_err(|e| {
             error!("Failed to serialize cache entry: {}", e);
             ApplicationError::Json(e)
         })?;
 
+        // Compress if entry is marked as compressed
+        let final_data = if entry.compressed {
+            use flate2::write::GzEncoder;
+            use flate2::Compression;
+            use std::io::Write;
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&serialized_data).map_err(|e| {
+                ApplicationError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+            })?;
+            let compressed = encoder.finish().map_err(|e| {
+                ApplicationError::Io(std::io::Error::new(std::io::ErrorKind::Other, e))
+            })?;
+            // Prepend compression marker
+            let mut result = b"CMP\0".to_vec();
+            result.extend_from_slice(&compressed);
+            result
+        } else {
+            serialized_data
+        };
+
         // Write to temporary file first
-        fs::write(&temp_path, content).await.map_err(|e| {
+        fs::write(&temp_path, final_data).await.map_err(|e| {
             error!("Failed to write temporary cache file: {}", e);
             ApplicationError::Io(e)
         })?;
@@ -271,12 +307,26 @@ impl FileCacheRepository {
     /// Check if a cache entry file is expired and clean it up if necessary
     /// Returns Ok(true) if the entry was cleaned up, Ok(false) if it's still valid
     async fn check_and_cleanup_entry(&self, path: &PathBuf) -> Result<bool, ApplicationError> {
-        let content = fs::read_to_string(path)
+        let content = fs::read(path)
             .await
             .map_err(ApplicationError::Io)?;
 
+        // Decompress if needed
+        let decompressed_content = if self.enable_compression && content.len() > 4 && &content[0..4] == b"CMP\0" {
+            use flate2::read::GzDecoder;
+            use std::io::Read;
+            let mut decoder = GzDecoder::new(&content[4..]);
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed).map_err(|e| {
+                ApplicationError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+            decompressed
+        } else {
+            content
+        };
+
         let entry: CacheEntry<serde_json::Value> =
-            serde_json::from_str(&content).map_err(ApplicationError::Json)?;
+            serde_json::from_slice(&decompressed_content).map_err(ApplicationError::Json)?;
 
         if Self::is_entry_expired(&entry) {
             fs::remove_file(path).await.map_err(ApplicationError::Io)?;
@@ -357,10 +407,24 @@ impl FileCacheRepository {
 
             total_checked += 1;
 
-            // Read and check if entry is expired
-            match fs::read_to_string(&path).await {
+            // Read and check if entry is expired (may be compressed)
+            match fs::read(&path).await {
                 Ok(content) => {
-                    match serde_json::from_str::<CacheEntry<serde_json::Value>>(&content) {
+                    // Detect and decompress if needed (check for compression marker)
+                    let decompressed_content = if content.len() > 4 && &content[0..4] == b"CMP\0" {
+                        use flate2::read::GzDecoder;
+                        use std::io::Read;
+                        let mut decoder = GzDecoder::new(&content[4..]);
+                        let mut decompressed = Vec::new();
+                        match decoder.read_to_end(&mut decompressed) {
+                            Ok(_) => decompressed,
+                            Err(_) => content, // If decompression fails, try as uncompressed
+                        }
+                    } else {
+                        content
+                    };
+
+                    match serde_json::from_slice::<CacheEntry<serde_json::Value>>(&decompressed_content) {
                         Ok(entry) => {
                             if Self::is_entry_expired(&entry) {
                                 if let Err(e) = fs::remove_file(&path).await {
@@ -440,10 +504,24 @@ impl FileCacheRepository {
                 continue;
             }
 
-            // Read and check if entry is expired
-            match fs::read_to_string(&path).await {
+            // Read and check if entry is expired (may be compressed)
+            match fs::read(&path).await {
                 Ok(content) => {
-                    match serde_json::from_str::<CacheEntry<serde_json::Value>>(&content) {
+                    // Detect and decompress if needed (check for compression marker)
+                    let decompressed_content = if content.len() > 4 && &content[0..4] == b"CMP\0" {
+                        use flate2::read::GzDecoder;
+                        use std::io::Read;
+                        let mut decoder = GzDecoder::new(&content[4..]);
+                        let mut decompressed = Vec::new();
+                        match decoder.read_to_end(&mut decompressed) {
+                            Ok(_) => decompressed,
+                            Err(_) => content, // If decompression fails, try as uncompressed
+                        }
+                    } else {
+                        content
+                    };
+
+                    match serde_json::from_slice::<CacheEntry<serde_json::Value>>(&decompressed_content) {
                         Ok(entry) => {
                             if Self::is_entry_expired(&entry) {
                                 if let Err(e) = fs::remove_file(&path).await {
@@ -572,13 +650,27 @@ impl CacheService for FileCacheRepository {
             return Ok(None);
         }
 
-        // Read and parse the cache entry
-        let content = fs::read_to_string(&path).await.map_err(|e| {
+        // Read cache file (may be compressed)
+        let content = fs::read(&path).await.map_err(|e| {
             error!("Failed to read cache file {:?}: {}", path, e);
             ApplicationError::Io(e)
         })?;
 
-        let entry: CacheEntry<serde_json::Value> = serde_json::from_str(&content).map_err(|e| {
+        // Decompress if needed
+        let decompressed_content = if self.enable_compression && content.len() > 4 && &content[0..4] == b"CMP\0" {
+            use flate2::read::GzDecoder;
+            use std::io::Read;
+            let mut decoder = GzDecoder::new(&content[4..]);
+            let mut decompressed = Vec::new();
+            decoder.read_to_end(&mut decompressed).map_err(|e| {
+                ApplicationError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+            decompressed
+        } else {
+            content
+        };
+
+        let entry: CacheEntry<serde_json::Value> = serde_json::from_slice(&decompressed_content).map_err(|e| {
             error!("Failed to parse cache entry: {}", e);
             ApplicationError::Json(e)
         })?;
@@ -618,8 +710,14 @@ impl CacheService for FileCacheRepository {
         let file_lock = self.get_file_lock(&cache_key).await;
         let _lock = file_lock.lock().await;
 
+        // Use provided TTL, or fall back to default_ttl if ttl is zero
+        let effective_ttl = if ttl.as_secs() == 0 {
+            self.default_ttl
+        } else {
+            ttl
+        };
         let now = Self::current_timestamp();
-        let expires_at = now + ttl.as_secs();
+        let expires_at = now + effective_ttl.as_secs();
 
         // Serialize value to JSON for storage
         let json_value = serde_json::to_value(value).map_err(|e| {
@@ -627,11 +725,18 @@ impl CacheService for FileCacheRepository {
             ApplicationError::Json(e)
         })?;
 
+        // Determine if this entry should be compressed
+        let should_compress = self.enable_compression
+            && serde_json::to_string(&json_value)
+                .map(|s| s.len() as u64 > self.compression_threshold_bytes)
+                .unwrap_or(false);
+
         let entry = CacheEntry {
             data: json_value,
             created_at: now,
             expires_at,
             access_count: 0,
+            compressed: should_compress,
         };
 
         // Perform atomic write

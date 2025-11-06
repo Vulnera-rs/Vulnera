@@ -2,7 +2,7 @@
 
 use super::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::{ApiError, VulnerabilityError};
-use crate::domain::Package;
+use crate::domain::vulnerability::entities::Package;
 use async_trait::async_trait;
 
 /// Client for the OSV (Open Source Vulnerability) API
@@ -21,16 +21,16 @@ impl OsvClient {
     }
 
     /// Convert domain ecosystem to OSV ecosystem enum
-    fn ecosystem_to_osv(ecosystem: &crate::domain::Ecosystem) -> osv::schema::Ecosystem {
+    fn ecosystem_to_osv(ecosystem: &crate::domain::vulnerability::value_objects::Ecosystem) -> osv::schema::Ecosystem {
         match ecosystem {
-            crate::domain::Ecosystem::Npm => osv::schema::Ecosystem::Npm,
-            crate::domain::Ecosystem::PyPI => osv::schema::Ecosystem::PyPI,
-            crate::domain::Ecosystem::Maven => osv::schema::Ecosystem::Maven(String::new()),
-            crate::domain::Ecosystem::Cargo => osv::schema::Ecosystem::CratesIO,
-            crate::domain::Ecosystem::Go => osv::schema::Ecosystem::Go,
-            crate::domain::Ecosystem::Packagist => osv::schema::Ecosystem::Packagist,
-            crate::domain::Ecosystem::RubyGems => osv::schema::Ecosystem::RubyGems,
-            crate::domain::Ecosystem::NuGet => osv::schema::Ecosystem::NuGet,
+            crate::domain::vulnerability::value_objects::Ecosystem::Npm => osv::schema::Ecosystem::Npm,
+            crate::domain::vulnerability::value_objects::Ecosystem::PyPI => osv::schema::Ecosystem::PyPI,
+            crate::domain::vulnerability::value_objects::Ecosystem::Maven => osv::schema::Ecosystem::Maven(String::new()),
+            crate::domain::vulnerability::value_objects::Ecosystem::Cargo => osv::schema::Ecosystem::CratesIO,
+            crate::domain::vulnerability::value_objects::Ecosystem::Go => osv::schema::Ecosystem::Go,
+            crate::domain::vulnerability::value_objects::Ecosystem::Packagist => osv::schema::Ecosystem::Packagist,
+            crate::domain::vulnerability::value_objects::Ecosystem::RubyGems => osv::schema::Ecosystem::RubyGems,
+            crate::domain::vulnerability::value_objects::Ecosystem::NuGet => osv::schema::Ecosystem::NuGet,
         }
     }
 

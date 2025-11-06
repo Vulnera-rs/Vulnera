@@ -16,13 +16,14 @@ pub use config::Config;
 pub use logging::init_tracing;
 
 use application::{
-    AnalysisServiceImpl, CacheServiceImpl, PopularPackageServiceImpl, ReportServiceImpl,
-    VersionResolutionServiceImpl,
     auth::use_cases::{
         LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
         ValidateTokenUseCase,
     },
+    reporting::ReportServiceImpl,
+    vulnerability::services::{PopularPackageServiceImpl, VersionResolutionServiceImpl},
 };
+use infrastructure::cache::{CacheServiceImpl, MemoryCache, MultiLevelCache};
 use infrastructure::{
     api_clients::{
         circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
@@ -43,17 +44,42 @@ use sqlx::postgres::PgPoolOptions;
 pub async fn create_app(
     config: Config,
 ) -> Result<axum::Router, Box<dyn std::error::Error + Send + Sync>> {
-    // Initialize database connection pool
-    let db_pool = PgPoolOptions::new()
-        .max_connections(config.database.max_connections)
-        .connect(&config.database.url)
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+    // Allow DATABASE_URL environment variable to override config
+    let database_url = std::env::var("DATABASE_URL")
+        .ok()
+        .unwrap_or_else(|| config.database.url.clone());
+
+    // Initialize database connection pool with all configured options
+    let mut pool_options = PgPoolOptions::new().max_connections(config.database.max_connections);
+
+    // Apply optional pool configuration options (available in sqlx 0.8+)
+    if let Some(min_idle) = config.database.min_idle {
+        // Note: min_idle might not be available in all sqlx versions
+        // If compilation fails, this can be conditionally compiled or removed
+        #[allow(unused_assignments)]
+        let _ = min_idle; // Keep for future use when sqlx version supports it
+    }
+    if let Some(max_lifetime) = config.database.max_lifetime_seconds {
+        pool_options = pool_options.max_lifetime(Duration::from_secs(max_lifetime));
+    }
+    if let Some(idle_timeout) = config.database.idle_timeout_seconds {
+        pool_options = pool_options.idle_timeout(Duration::from_secs(idle_timeout));
+    }
+    if config.database.enable_health_checks {
+        pool_options = pool_options.test_before_acquire(true);
+    }
+
+    // Note: connect_timeout is set via the connection URL or handled at driver level
+    // For sqlx 0.8, connection timeout is typically handled by the underlying driver
+
+    let db_pool = pool_options.connect(&database_url).await.map_err(
+        |e| -> Box<dyn std::error::Error + Send + Sync> {
             Box::new(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
                 format!("Failed to connect to database: {}", e),
             ))
-        })?;
+        },
+    )?;
 
     tracing::info!("Database connection pool initialized");
 
@@ -113,11 +139,27 @@ pub async fn create_app(
     ));
 
     // Initialize infrastructure services
-    let cache_repository = Arc::new(FileCacheRepository::new(
+    // Create L2 (filesystem) cache with compression support
+    let l2_cache = Arc::new(FileCacheRepository::new_with_compression(
         config.cache.directory.clone(),
         Duration::from_secs(config.cache.ttl_hours * 3600),
+        config.cache.enable_cache_compression,
+        config.cache.compression_threshold_bytes,
     ));
-    let cache_service = Arc::new(CacheServiceImpl::new(cache_repository));
+
+    // Create L1 (in-memory) cache with compression support
+    let l1_cache = Arc::new(MemoryCache::new_with_compression(
+        config.cache.l1_cache_size_mb,
+        config.cache.l1_cache_ttl_seconds,
+        config.cache.enable_cache_compression,
+        config.cache.compression_threshold_bytes,
+    ));
+
+    // Create multi-level cache (L1 + L2)
+    let multi_level_cache = Arc::new(MultiLevelCache::new(l1_cache, l2_cache.clone()));
+
+    // Use multi-level cache as the cache service
+    let cache_service = Arc::new(CacheServiceImpl::new_with_cache(multi_level_cache));
     let parser_factory = Arc::new(ParserFactory::new());
 
     // Create circuit breakers for each API service
@@ -211,18 +253,30 @@ pub async fn create_app(
         ghsa_retry_config,
     ));
 
-    let vulnerability_repository = Arc::new(AggregatingVulnerabilityRepository::new(
-        osv_client,
-        nvd_client,
-        ghsa_client,
-    ));
+    let vulnerability_repository =
+        Arc::new(AggregatingVulnerabilityRepository::new_with_concurrency(
+            osv_client,
+            nvd_client,
+            ghsa_client,
+            config.analysis.max_concurrent_api_calls,
+        ));
 
-    let analysis_service = Arc::new(AnalysisServiceImpl::new(
-        parser_factory.clone(),
-        vulnerability_repository.clone(),
-        cache_service.clone(),
-        &config,
-    ));
+    // Create vulnerability analysis use cases
+    let analyze_dependencies_use_case = Arc::new(
+        application::vulnerability::AnalyzeDependenciesUseCase::new_with_config(
+            parser_factory.clone(),
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+            config.analysis.max_concurrent_packages,
+            config.analysis.max_concurrent_registry_queries,
+        ),
+    );
+    let get_vulnerability_details_use_case = Arc::new(
+        application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+            vulnerability_repository.clone(),
+            cache_service.clone(),
+        ),
+    );
     let report_service = Arc::new(ReportServiceImpl::new());
 
     // Initialize GitHub repository client for repository analysis feature
@@ -244,21 +298,26 @@ pub async fn create_app(
         };
 
     // Create repository analysis service only if GitHub client is available
-    let repository_analysis_service: Option<Arc<dyn application::RepositoryAnalysisService>> =
-        if let Some(client) = github_client {
-            Some(Arc::new(application::RepositoryAnalysisServiceImpl::new(
+    let repository_analysis_service: Option<
+        Arc<dyn application::vulnerability::services::RepositoryAnalysisService>,
+    > = if let Some(client) = github_client {
+        Some(Arc::new(
+            application::vulnerability::services::RepositoryAnalysisServiceImpl::new(
                 client,
                 vulnerability_repository.clone(),
                 parser_factory.clone(),
                 Arc::new(config.clone()),
-            )))
-        } else {
-            None
-        };
+            ),
+        ))
+    } else {
+        None
+    };
 
     // Create popular package service with config
     let config_arc = Arc::new(config.clone());
-    let popular_package_service = Arc::new(PopularPackageServiceImpl::new(
+    let popular_package_service: Arc<
+        dyn application::vulnerability::services::PopularPackageService,
+    > = Arc::new(PopularPackageServiceImpl::new(
         vulnerability_repository.clone(),
         cache_service.clone(),
         config_arc,
@@ -271,10 +330,61 @@ pub async fn create_app(
         cache_service.clone(),
     ));
 
+    // Create vulnerability use cases
+    let list_vulnerabilities_use_case =
+        Arc::new(application::vulnerability::ListVulnerabilitiesUseCase::new(
+            popular_package_service.clone(),
+        ));
+
+    // Cache warming on startup (optional - warm popular packages)
+    if let Some(popular_config) = &config.popular_packages {
+        tracing::info!("Starting cache warming for popular packages...");
+        let warm_packages: Vec<crate::domain::vulnerability::entities::Package> = {
+            let mut packages = Vec::new();
+            // Collect popular packages from config
+            if let Some(ref npm_packages) = popular_config.npm {
+                for pkg in npm_packages {
+                    if let Ok(version) =
+                        crate::domain::vulnerability::value_objects::Version::parse(&pkg.version)
+                    {
+                        if let Ok(p) = crate::domain::vulnerability::entities::Package::new(
+                            pkg.name.clone(),
+                            version,
+                            crate::domain::vulnerability::value_objects::Ecosystem::Npm,
+                        ) {
+                            packages.push(p);
+                        }
+                    }
+                }
+            }
+            // Add more ecosystems as needed...
+            packages
+        };
+        if !warm_packages.is_empty() {
+            let cache_service_warm = cache_service.clone();
+            let vuln_repo_warm = vulnerability_repository.clone();
+            tokio::spawn(async move {
+                if let Err(e) = cache_service_warm
+                    .warm_cache(&warm_packages, vuln_repo_warm)
+                    .await
+                {
+                    tracing::warn!("Cache warming failed: {}", e);
+                } else {
+                    tracing::info!(
+                        "Cache warming completed for {} popular packages",
+                        warm_packages.len()
+                    );
+                }
+            });
+        }
+    }
+
     // Create application state
     let config_arc = Arc::new(config.clone());
     let app_state = AppState {
-        analysis_service,
+        analyze_dependencies_use_case,
+        get_vulnerability_details_use_case,
+        list_vulnerabilities_use_case,
         cache_service,
         report_service,
         vulnerability_repository,

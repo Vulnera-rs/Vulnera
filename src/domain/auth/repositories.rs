@@ -55,3 +55,5 @@ pub trait IApiKeyRepository: Send + Sync {
     /// Delete an API key permanently
     async fn delete(&self, key_id: &ApiKeyId) -> Result<(), AuthError>;
 }
+
+

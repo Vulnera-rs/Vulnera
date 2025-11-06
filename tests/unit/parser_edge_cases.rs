@@ -2,7 +2,7 @@
 //! Tests malformed files, edge cases, and error conditions
 
 use std::collections::HashMap;
-use vulnera_rust::domain::value_objects::{Ecosystem, Version};
+use vulnera_rust::domain::vulnerability::value_objects::{Ecosystem, Version};
 use vulnera_rust::infrastructure::parsers::traits::{PackageFileParser, ParserFactory};
 
 // Test data generators
