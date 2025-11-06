@@ -280,16 +280,48 @@ pub async fn create_app(
     let report_service = Arc::new(ReportServiceImpl::new());
 
     // Initialize GitHub repository client for repository analysis feature
+    let github_token = if config.apis.github.reuse_ghsa_token {
+        // Try GitHub token first, then fall back to GHSA token
+        let github_token_opt = config.apis.github.token.clone().filter(|t| !t.is_empty());
+
+        let token =
+            github_token_opt.or_else(|| config.apis.ghsa.token.clone().filter(|t| !t.is_empty()));
+
+        if token.is_some() {
+            if config
+                .apis
+                .github
+                .token
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+            {
+                tracing::info!("GitHub client will reuse GHSA token for repository analysis");
+            } else {
+                tracing::info!("GitHub client using explicitly configured GitHub token");
+            }
+        } else {
+            tracing::warn!("No GitHub or GHSA token found - repository analysis will be disabled");
+        }
+
+        token
+    } else {
+        config.apis.github.token.clone().filter(|t| !t.is_empty())
+    };
+
     let github_client: Option<Arc<GitHubRepositoryClient>> =
         match GitHubRepositoryClient::from_token(
-            config.apis.github.token.clone(),
+            github_token,
             Some(config.apis.github.base_url.clone()),
             config.apis.github.timeout_seconds,
             config.apis.github.reuse_ghsa_token,
         )
         .await
         {
-            Ok(client) => Some(Arc::new(client)),
+            Ok(client) => {
+                tracing::info!("GitHub repository client initialized successfully");
+                Some(Arc::new(client))
+            }
             Err(e) => {
                 tracing::warn!(error=?e, "Failed to initialize GitHubRepositoryClient, repository analysis will be disabled");
                 // Gracefully disable repository analysis feature when client initialization fails
