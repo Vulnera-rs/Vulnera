@@ -39,3 +39,4 @@ pub struct PackageSummary {
     pub vulnerabilities: Vec<VulnerabilityId>,
 }
 
+

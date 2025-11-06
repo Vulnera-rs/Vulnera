@@ -7,3 +7,4 @@ use crate::domain::vulnerability::entities::AnalysisReport;
 pub fn generate_json_report(analysis: &AnalysisReport) -> Result<String, ApplicationError> {
     serde_json::to_string_pretty(analysis).map_err(ApplicationError::Json)
 }
+
