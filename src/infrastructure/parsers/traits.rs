@@ -1,7 +1,10 @@
 //! Traits for package file parsers
 
 use crate::application::errors::ParseError;
-use crate::domain::{Ecosystem, Package};
+use crate::domain::vulnerability::{
+    entities::Package,
+    value_objects::Ecosystem,
+};
 use async_trait::async_trait;
 
 /// Trait for parsing dependency files

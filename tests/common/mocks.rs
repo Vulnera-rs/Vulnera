@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use vulnera_rust::application::errors::VulnerabilityError;
-use vulnera_rust::domain::entities::{Package, Vulnerability};
+use vulnera_rust::domain::vulnerability::entities::{Package, Vulnerability};
 use vulnera_rust::infrastructure::api_clients::traits::VulnerabilityApiClient;
 use vulnera_rust::infrastructure::parsers::traits::PackageFileParser;
 use vulnera_rust::infrastructure::repository_source::{FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceError};
@@ -84,7 +84,7 @@ impl VulnerabilityRepository for MockVulnerabilityRepository {
 
     async fn get_vulnerability_by_id(
         &self,
-        id: &vulnera_rust::domain::value_objects::VulnerabilityId,
+        id: &vulnera_rust::domain::vulnerability::value_objects::VulnerabilityId,
     ) -> Result<Option<Vulnerability>, VulnerabilityError> {
         if self.should_fail {
             return Err(self.failure_type.clone().unwrap_or_else(|| VulnerabilityError::RateLimit {
@@ -281,7 +281,7 @@ impl VulnerabilityApiClient for MockApiClient {
 /// Mock package file parser for testing
 #[derive(Debug, Clone)]
 pub struct MockPackageFileParser {
-    ecosystem: vulnera_rust::domain::value_objects::Ecosystem,
+    ecosystem: vulnera_rust::domain::vulnerability::value_objects::Ecosystem,
     result: Result<Vec<Package>, vulnera_rust::infrastructure::parsers::traits::ParsingError>,
 }
 
@@ -296,7 +296,7 @@ impl MockPackageFileParser {
 
     /// Create a mock that returns an error
     pub fn error(
-        ecosystem: vulnera_rust::domain::value_objects::Ecosystem,
+        ecosystem: vulnera_rust::domain::vulnerability::value_objects::Ecosystem,
         error: vulnera_rust::infrastructure::parsers::traits::ParsingError,
     ) -> Self {
         Self {

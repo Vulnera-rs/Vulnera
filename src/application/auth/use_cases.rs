@@ -53,7 +53,7 @@ impl LoginUseCase {
             .user_repository
             .find_by_email(&email)
             .await?
-            .ok_or_else(|| AuthError::InvalidCredentials)?;
+            .ok_or(AuthError::InvalidCredentials)?;
 
         // Verify password
         let is_valid = self
@@ -138,14 +138,14 @@ impl RegisterUserUseCase {
 
         // Generate tokens
         let access_token = self.jwt_service.generate_access_token(
-            user.user_id.clone(),
+            user.user_id,
             user.email.clone(),
             user.roles.clone(),
         )?;
 
         let refresh_token = self
             .jwt_service
-            .generate_refresh_token(user.user_id.clone())?;
+            .generate_refresh_token(user.user_id)?;
 
         Ok(RegisterResult {
             user_id: user.user_id,
@@ -292,7 +292,7 @@ impl ValidateApiKeyUseCase {
             .api_key_repository
             .find_by_hash(&key_hash)
             .await?
-            .ok_or_else(|| AuthError::ApiKeyInvalid)?;
+            .ok_or(AuthError::ApiKeyInvalid)?;
 
         // Check if revoked
         if api_key_entity.is_revoked() {
@@ -354,7 +354,7 @@ impl RevokeApiKeyUseCase {
             .api_key_repository
             .find_by_id(&key_id)
             .await?
-            .ok_or_else(|| AuthError::ApiKeyNotFound)?;
+            .ok_or(AuthError::ApiKeyNotFound)?;
 
         if api_key.user_id != self.user_id {
             return Err(AuthError::ApiKeyNotFound);

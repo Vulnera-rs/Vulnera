@@ -1,7 +1,7 @@
 //! Traits for vulnerability API clients
 
 use crate::application::errors::VulnerabilityError;
-use crate::domain::Package;
+use crate::domain::vulnerability::entities::Package;
 use async_trait::async_trait;
 
 /// Raw vulnerability data from external APIs

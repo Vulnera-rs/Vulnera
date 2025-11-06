@@ -4,7 +4,10 @@ use pest::iterators::{Pair, Pairs};
 use pest_derive::Parser;
 
 use crate::application::errors::ParseError;
-use crate::domain::{Ecosystem, Package, Version};
+use crate::domain::vulnerability::{
+    entities::Package,
+    value_objects::{Ecosystem, Version},
+};
 
 use super::traits::PackageFileParser;
 

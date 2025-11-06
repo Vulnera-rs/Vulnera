@@ -2,7 +2,10 @@
 
 use super::traits::PackageFileParser;
 use crate::application::errors::ParseError;
-use crate::domain::{Ecosystem, Package, Version};
+use crate::domain::vulnerability::{
+    entities::Package,
+    value_objects::{Ecosystem, Version},
+};
 use async_trait::async_trait;
 
 /// Parser for go.mod files

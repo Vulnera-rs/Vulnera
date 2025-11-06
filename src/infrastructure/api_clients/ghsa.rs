@@ -2,7 +2,7 @@
 
 use super::traits::{RawVulnerability, VulnerabilityApiClient};
 use crate::application::errors::{ApiError, VulnerabilityError};
-use crate::domain::Package;
+use crate::domain::vulnerability::entities::Package;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -204,16 +204,18 @@ impl GhsaClient {
     }
 
     /// Convert domain ecosystem to GHSA ecosystem string
-    fn ecosystem_to_ghsa_string(ecosystem: &crate::domain::Ecosystem) -> &'static str {
+    fn ecosystem_to_ghsa_string(
+        ecosystem: &crate::domain::vulnerability::value_objects::Ecosystem,
+    ) -> &'static str {
         match ecosystem {
-            crate::domain::Ecosystem::Npm => "NPM",
-            crate::domain::Ecosystem::PyPI => "PIP",
-            crate::domain::Ecosystem::Maven => "MAVEN",
-            crate::domain::Ecosystem::Cargo => "RUST",
-            crate::domain::Ecosystem::Go => "GO",
-            crate::domain::Ecosystem::Packagist => "COMPOSER",
-            crate::domain::Ecosystem::RubyGems => "RUBYGEMS",
-            crate::domain::Ecosystem::NuGet => "NUGET",
+            crate::domain::vulnerability::value_objects::Ecosystem::Npm => "NPM",
+            crate::domain::vulnerability::value_objects::Ecosystem::PyPI => "PIP",
+            crate::domain::vulnerability::value_objects::Ecosystem::Maven => "MAVEN",
+            crate::domain::vulnerability::value_objects::Ecosystem::Cargo => "RUST",
+            crate::domain::vulnerability::value_objects::Ecosystem::Go => "GO",
+            crate::domain::vulnerability::value_objects::Ecosystem::Packagist => "COMPOSER",
+            crate::domain::vulnerability::value_objects::Ecosystem::RubyGems => "RUBYGEMS",
+            crate::domain::vulnerability::value_objects::Ecosystem::NuGet => "NUGET",
         }
     }
 
@@ -865,7 +867,7 @@ impl VulnerabilityApiClient for GhsaClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Ecosystem, Version};
+    use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
     use mockito::Server;
     use serde_json::json;
 

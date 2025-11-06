@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::timeout;
+use uuid::Uuid;
 use vulnera_rust::{Config, create_app};
 
 mod fixtures {
@@ -101,8 +102,54 @@ async fn create_test_server() -> TestServer {
     let mut config = Config::default();
     config.cache.directory = temp_dir.path().to_path_buf();
     config.server.enable_docs = true;
+    config.server.request_timeout_seconds = 120;
 
     create_test_server_with_config(config).await
+}
+
+/// Helper to get an authentication token for testing
+/// Registers a test user, logs in, and returns the access token
+async fn get_test_auth_token(server: &TestServer) -> String {
+    // Use a unique email for each test to avoid conflicts
+    let email = format!("test_{}@example.com", Uuid::new_v4());
+    let password = "TestPassword123!";
+
+    // Register user
+    let register_response = server
+        .post("/api/v1/auth/register")
+        .json(&json!({
+            "email": email,
+            "password": password
+        }))
+        .await;
+
+    // If registration fails (user might already exist), try to login
+    let login_response = if register_response.status_code() == StatusCode::OK {
+        // User registered successfully, now login
+        server
+            .post("/api/v1/auth/login")
+            .json(&json!({
+                "email": email,
+                "password": password
+            }))
+            .await
+    } else {
+        // Try login with existing credentials
+        server
+            .post("/api/v1/auth/login")
+            .json(&json!({
+                "email": email,
+                "password": password
+            }))
+            .await
+    };
+
+    assert_eq!(login_response.status_code(), StatusCode::OK);
+    let login_body: Value = login_response.json();
+    login_body["access_token"]
+        .as_str()
+        .expect("Expected access_token in response")
+        .to_string()
 }
 
 /// Test server startup and health endpoints
@@ -157,9 +204,11 @@ async fn test_configuration_loading() {
 #[tokio::test]
 async fn test_npm_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_PACKAGE_JSON,
             "ecosystem": "npm",
@@ -187,9 +236,11 @@ async fn test_npm_analysis_comprehensive() {
 #[tokio::test]
 async fn test_cargo_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_CARGO_TOML,
             "ecosystem": "cargo",
@@ -218,9 +269,11 @@ async fn test_cargo_analysis_comprehensive() {
 #[tokio::test]
 async fn test_python_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_REQUIREMENTS_TXT,
             "ecosystem": "pypi",
@@ -247,9 +300,11 @@ async fn test_python_analysis_comprehensive() {
 #[tokio::test]
 async fn test_maven_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_POM_XML,
             "ecosystem": "maven",
@@ -276,9 +331,11 @@ async fn test_maven_analysis_comprehensive() {
 #[tokio::test]
 async fn test_go_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_GO_MOD,
             "ecosystem": "go",
@@ -307,9 +364,11 @@ async fn test_go_analysis_comprehensive() {
 #[tokio::test]
 async fn test_php_analysis_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_COMPOSER_JSON,
             "ecosystem": "packagist",
@@ -337,10 +396,12 @@ async fn test_php_analysis_comprehensive() {
 #[tokio::test]
 async fn test_vulnerability_details_endpoint() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // First, get vulnerabilities from an analysis
     let analysis_response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": fixtures::SAMPLE_PACKAGE_JSON,
             "ecosystem": "npm",
@@ -358,6 +419,7 @@ async fn test_vulnerability_details_endpoint() {
 
         let details_response = server
             .get(&format!("/api/v1/vulnerabilities/{}", vuln_id))
+            .add_header("Authorization", format!("Bearer {}", token))
             .await;
 
         // Accept both OK (found) and NOT_FOUND (not found in mock data)
@@ -383,10 +445,12 @@ async fn test_vulnerability_details_endpoint() {
 #[tokio::test]
 async fn test_popular_packages_endpoint() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // Test with npm ecosystem
     let response = server
         .get("/api/v1/popular?ecosystem=npm&limit=10&offset=0")
+        .add_header("Authorization", format!("Bearer {}", token))
         .await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -404,6 +468,7 @@ async fn test_popular_packages_endpoint() {
     for ecosystem in ecosystems {
         let eco_response = server
             .get(&format!("/api/v1/popular?ecosystem={}&limit=5", ecosystem))
+            .add_header("Authorization", format!("Bearer {}", token))
             .await;
 
         assert_eq!(eco_response.status_code(), StatusCode::OK);
@@ -414,9 +479,11 @@ async fn test_popular_packages_endpoint() {
 #[tokio::test]
 async fn test_repository_analysis_endpoint() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let response = server
         .post("/api/v1/analyze/repository")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "owner": "expressjs",
             "repo": "express",
@@ -451,10 +518,12 @@ async fn test_repository_analysis_endpoint() {
 #[tokio::test]
 async fn test_error_handling_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // Test invalid JSON
     let invalid_json_response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": "{invalid json",
             "ecosystem": "npm",
@@ -470,6 +539,7 @@ async fn test_error_handling_comprehensive() {
     // Test missing required fields
     let missing_fields_response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": "some content"
             // Missing ecosystem and filename
@@ -484,6 +554,7 @@ async fn test_error_handling_comprehensive() {
     // Test unsupported ecosystem
     let unsupported_ecosystem_response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": "some content",
             "ecosystem": "unsupported",
@@ -499,6 +570,7 @@ async fn test_error_handling_comprehensive() {
     // Test vulnerability not found
     let not_found_response = server
         .get("/api/v1/vulnerabilities/INVALID-ID-FORMAT")
+        .add_header("Authorization", format!("Bearer {}", token))
         .await;
 
     assert!(matches!(
@@ -511,10 +583,12 @@ async fn test_error_handling_comprehensive() {
 #[tokio::test]
 async fn test_cors_and_middleware() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // Test actual request - CORS headers should be present in response
     let cors_response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": "{}",
             "ecosystem": "npm",
@@ -569,6 +643,7 @@ async fn test_openapi_documentation() {
 #[tokio::test]
 async fn test_concurrent_requests_performance() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let sample_requests = [
         json!({
@@ -592,7 +667,11 @@ async fn test_concurrent_requests_performance() {
 
     // Send requests sequentially (axum-test may not support true concurrency)
     for (i, request_body) in sample_requests.iter().enumerate() {
-        let response = server.post("/api/v1/analyze").json(request_body).await;
+        let response = server
+            .post("/api/v1/analyze")
+            .add_header("Authorization", format!("Bearer {}", token))
+            .json(request_body)
+            .await;
         assert_eq!(
             response.status_code(),
             StatusCode::OK,
@@ -604,13 +683,15 @@ async fn test_concurrent_requests_performance() {
     let total_duration = start_time.elapsed();
 
     println!("Sequential requests completed in {:?}", total_duration);
-    assert!(total_duration.as_secs() < 60); // Should complete within reasonable time
+    // Allow more time for sequential requests (3 requests with external API calls)
+    assert!(total_duration.as_secs() < 120); // Should complete within reasonable time
 }
 
 /// Test caching behavior
 #[tokio::test]
 async fn test_caching_behavior() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let request_body = json!({
         "file_content": fixtures::SAMPLE_PACKAGE_JSON,
@@ -620,14 +701,22 @@ async fn test_caching_behavior() {
 
     // First request - should populate cache
     let first_start = std::time::Instant::now();
-    let first_response = server.post("/api/v1/analyze").json(&request_body).await;
+    let first_response = server
+        .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
+        .json(&request_body)
+        .await;
     let first_duration = first_start.elapsed();
 
     assert_eq!(first_response.status_code(), StatusCode::OK);
 
     // Second identical request - should use cache and be faster
     let second_start = std::time::Instant::now();
-    let second_response = server.post("/api/v1/analyze").json(&request_body).await;
+    let second_response = server
+        .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
+        .json(&request_body)
+        .await;
     let second_duration = second_start.elapsed();
 
     assert_eq!(second_response.status_code(), StatusCode::OK);
@@ -713,6 +802,7 @@ async fn test_external_api_availability() {
 #[tokio::test]
 async fn test_memory_usage() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // Create a large request to test memory handling
     let large_package_json = {
@@ -732,6 +822,7 @@ async fn test_memory_usage() {
 
     let response = server
         .post("/api/v1/analyze")
+        .add_header("Authorization", format!("Bearer {}", token))
         .json(&json!({
             "file_content": large_package_json.to_string(),
             "ecosystem": "npm",
@@ -780,6 +871,7 @@ async fn test_graceful_shutdown() {
 #[tokio::test]
 async fn test_security_measures() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     // Test with potentially malicious input
     let malicious_inputs = vec![
@@ -796,6 +888,7 @@ async fn test_security_measures() {
     for malicious_input in malicious_inputs {
         let response = server
             .post("/api/v1/analyze")
+            .add_header("Authorization", format!("Bearer {}", token))
             .json(&json!({
                 "file_content": malicious_input,
                 "ecosystem": "npm",
@@ -830,6 +923,7 @@ async fn test_security_measures() {
 #[tokio::test]
 async fn test_all_ecosystems_comprehensive() {
     let server = create_test_server().await;
+    let token = get_test_auth_token(&server).await;
 
     let test_cases = vec![
         ("npm", "package.json", fixtures::SAMPLE_PACKAGE_JSON),
@@ -847,6 +941,7 @@ async fn test_all_ecosystems_comprehensive() {
     for (ecosystem, filename, content) in test_cases {
         let response = server
             .post("/api/v1/analyze")
+            .add_header("Authorization", format!("Bearer {}", token))
             .json(&json!({
                 "file_content": content,
                 "ecosystem": ecosystem,
