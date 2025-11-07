@@ -1,18 +1,13 @@
 //! Application Layer - Use cases and application services
 //!
-//! This module orchestrates the business logic and coordinates between
-//! the domain and infrastructure layers.
-
-pub mod auth;
-pub mod reporting;
 pub mod vulnerability;
-pub mod errors;
+
+pub use vulnera_core::application::{ApplicationError, CacheError, ParseError, VulnerabilityError};
+pub use vulnera_core::application::{auth, errors, reporting};
 
 #[cfg(test)]
 mod tests;
 
-pub use errors::*;
-pub use reporting::*;
 pub use vulnerability::*;
 
 use async_trait::async_trait;
@@ -76,7 +71,8 @@ pub struct VersionRecommendation {
     /// Newest safe version available (may equal nearest)
     pub most_up_to_date_safe: Option<crate::domain::vulnerability::value_objects::Version>,
     /// Next safe version within the current major (minor bump or patch), if available
-    pub next_safe_minor_within_current_major: Option<crate::domain::vulnerability::value_objects::Version>,
+    pub next_safe_minor_within_current_major:
+        Option<crate::domain::vulnerability::value_objects::Version>,
     /// Classification of the nearest upgrade impact (major/minor/patch/unknown)
     pub nearest_impact: Option<UpgradeImpact>,
     /// Classification of the most up-to-date upgrade impact (major/minor/patch/unknown)
