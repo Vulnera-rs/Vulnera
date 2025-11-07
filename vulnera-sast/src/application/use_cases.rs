@@ -35,7 +35,7 @@ impl ScanProjectUseCase {
     pub fn with_config(config: &SastConfig) -> Self {
         let scanner = DirectoryScanner::new(config.max_scan_depth)
             .with_exclude_patterns(config.exclude_patterns.clone());
-        
+
         let rule_repository = if let Some(ref rule_file_path) = config.rule_file_path {
             RuleRepository::with_file_and_defaults(rule_file_path)
         } else {
@@ -57,7 +57,7 @@ impl ScanProjectUseCase {
             error!(error = %e, "Failed to scan directory");
             ScanError::Io(e)
         })?;
-        
+
         let file_count = files.len();
         info!(file_count, "Found files to scan");
 
@@ -66,7 +66,7 @@ impl ScanProjectUseCase {
 
         for file in files {
             debug!(file = %file.path.display(), language = ?file.language, "Scanning file");
-            
+
             let content = match std::fs::read_to_string(&file.path) {
                 Ok(content) => content,
                 Err(e) => {
@@ -74,7 +74,7 @@ impl ScanProjectUseCase {
                     continue;
                 }
             };
-            
+
             let mut parser = match self.parser_factory.create_parser(&file.language) {
                 Ok(parser) => parser,
                 Err(e) => {
@@ -99,7 +99,10 @@ impl ScanProjectUseCase {
             self.traverse_and_match(&ast, &rules, &file.path, &mut all_findings);
         }
 
-        info!(finding_count = all_findings.len(), files_scanned, "SAST scan completed");
+        info!(
+            finding_count = all_findings.len(),
+            files_scanned, "SAST scan completed"
+        );
         Ok(ScanResult {
             findings: all_findings,
             files_scanned,
@@ -122,10 +125,10 @@ impl ScanProjectUseCase {
                     line = node.start_point.0 + 1,
                     "Rule matched"
                 );
-                
+
                 // Calculate confidence based on pattern specificity and context
                 let confidence = calculate_confidence(&rule.pattern, node);
-                
+
                 let finding = SastFinding {
                     id: format!("{}-{}-{}", rule.id, file_path.display(), node.start_point.0),
                     rule_id: rule.id.clone(),

@@ -56,7 +56,8 @@ impl AnalysisModule for SastModule {
             .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
 
         // Convert SAST findings to orchestrator findings
-        let findings: Vec<Finding> = scan_result.findings
+        let findings: Vec<Finding> = scan_result
+            .findings
             .into_iter()
             .map(|f| Finding {
                 id: f.id,
@@ -107,4 +108,3 @@ impl Default for SastModule {
         Self::new()
     }
 }
-

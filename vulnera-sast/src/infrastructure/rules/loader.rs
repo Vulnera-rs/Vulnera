@@ -1,8 +1,8 @@
 //! Rule loader for loading rules from configuration files
 
+use crate::domain::entities::{Rule, RulePattern};
 use std::path::Path;
 use tracing::{debug, error, warn};
-use crate::domain::entities::{Rule, RulePattern};
 
 /// Trait for loading rules from various sources
 pub trait RuleLoader: Send + Sync {
@@ -38,8 +38,10 @@ impl FileRuleLoader {
 impl RuleLoader for FileRuleLoader {
     fn load_rules(&self) -> Result<Vec<Rule>, RuleLoadError> {
         let content = std::fs::read_to_string(&self.file_path)?;
-        
-        let rules = if self.file_path.extension()
+
+        let rules = if self
+            .file_path
+            .extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.eq_ignore_ascii_case("json"))
             .unwrap_or(false)
@@ -86,12 +88,11 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
     if rule.languages.is_empty() {
         return Err("Rule must specify at least one language".to_string());
     }
-    
+
     // Validate pattern based on type
     match &rule.pattern {
         RulePattern::Regex(pattern) => {
-            regex::Regex::new(pattern)
-                .map_err(|e| format!("Invalid regex pattern: {}", e))?;
+            regex::Regex::new(pattern).map_err(|e| format!("Invalid regex pattern: {}", e))?;
         }
         RulePattern::FunctionCall(name) => {
             if name.is_empty() {
@@ -107,7 +108,6 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
             // Custom patterns are not validated
         }
     }
-    
+
     Ok(())
 }
-

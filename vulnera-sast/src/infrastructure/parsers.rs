@@ -1,7 +1,7 @@
 //! AST parsers for different languages
 
-use tracing::{debug, error, instrument, warn};
 use crate::domain::value_objects::Language;
+use tracing::{debug, error, instrument, warn};
 
 /// AST node (simplified representation)
 #[derive(Debug, Clone)]
@@ -40,9 +40,8 @@ impl PythonParser {
         let mut parser = tree_sitter::Parser::new();
         // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
         // Using unsafe because LanguageFn is a raw function pointer
-        let language_fn: tree_sitter::Language = unsafe {
-            std::mem::transmute(tree_sitter_python::LANGUAGE)
-        };
+        let language_fn: tree_sitter::Language =
+            unsafe { std::mem::transmute(tree_sitter_python::LANGUAGE) };
         parser.set_language(&language_fn).map_err(|e| {
             error!(error = %e, "Failed to load Python grammar");
             ParseError::ParseFailed(format!("Failed to load Python grammar: {}", e))
@@ -66,7 +65,10 @@ impl Parser for PythonParser {
         })?;
 
         let root_node = tree.root_node();
-        debug!(node_count = root_node.child_count(), "Python AST parsed successfully");
+        debug!(
+            node_count = root_node.child_count(),
+            "Python AST parsed successfully"
+        );
         Ok(convert_tree_sitter_node(root_node, source))
     }
 }
@@ -81,9 +83,8 @@ impl JavaScriptParser {
         let mut parser = tree_sitter::Parser::new();
         // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
         // Using unsafe because LanguageFn is a raw function pointer
-        let language_fn: tree_sitter::Language = unsafe {
-            std::mem::transmute(tree_sitter_javascript::LANGUAGE)
-        };
+        let language_fn: tree_sitter::Language =
+            unsafe { std::mem::transmute(tree_sitter_javascript::LANGUAGE) };
         parser.set_language(&language_fn).map_err(|e| {
             error!(error = %e, "Failed to load JavaScript grammar");
             ParseError::ParseFailed(format!("Failed to load JavaScript grammar: {}", e))
@@ -107,7 +108,10 @@ impl Parser for JavaScriptParser {
         })?;
 
         let root_node = tree.root_node();
-        debug!(node_count = root_node.child_count(), "JavaScript AST parsed successfully");
+        debug!(
+            node_count = root_node.child_count(),
+            "JavaScript AST parsed successfully"
+        );
         Ok(convert_tree_sitter_node(root_node, source))
     }
 }

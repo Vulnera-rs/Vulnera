@@ -14,15 +14,12 @@ use utoipa_swagger_ui::SwaggerUi;
 use vulnera_core::Config;
 
 use crate::presentation::{
-    auth::{
-        controller::{
-            AuthAppState, create_api_key, list_api_keys, login, refresh_token, register,
-            revoke_api_key,
-        },
+    auth::controller::{
+        AuthAppState, create_api_key, list_api_keys, login, refresh_token, register, revoke_api_key,
     },
     controllers::{
+        OrchestratorState, analyze,
         health::{health_check, metrics},
-        analyze, OrchestratorState,
     },
     middleware::{
         RateLimiterState, ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
@@ -251,4 +248,3 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .layer(service_builder)
         .with_state(orchestrator_state)
 }
-

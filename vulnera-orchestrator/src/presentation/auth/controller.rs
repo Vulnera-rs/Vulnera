@@ -376,5 +376,3 @@ pub async fn revoke_api_key(
 
     Ok(StatusCode::NO_CONTENT)
 }
-
-

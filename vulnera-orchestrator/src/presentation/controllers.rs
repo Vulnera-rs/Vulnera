@@ -28,12 +28,12 @@ pub struct OrchestratorState {
     pub create_job_use_case: Arc<CreateAnalysisJobUseCase>,
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
-    
+
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
     pub report_service: Arc<ReportServiceImpl>,
     pub vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
-    
+
     // Auth-related state
     pub db_pool: Arc<sqlx::PgPool>,
     pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
@@ -46,10 +46,10 @@ pub struct OrchestratorState {
     pub validate_token_use_case: Arc<ValidateTokenUseCase>,
     pub refresh_token_use_case: Arc<RefreshTokenUseCase>,
     pub validate_api_key_use_case: Arc<ValidateApiKeyUseCase>,
-    
+
     // Auth state (for extractors)
     pub auth_state: AuthState,
-    
+
     // Config and metadata
     pub config: Arc<vulnera_core::Config>,
     pub startup_time: Instant,

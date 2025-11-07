@@ -109,4 +109,3 @@ pub struct ModuleResultMetadata {
     /// Additional module-specific information
     pub additional_info: std::collections::HashMap<String, String>,
 }
-
