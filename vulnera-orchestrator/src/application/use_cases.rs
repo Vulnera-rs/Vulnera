@@ -2,7 +2,11 @@
 
 use std::sync::Arc;
 
-use vulnera_core::domain::module::{FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult};
+use tokio::task::JoinSet;
+use tracing::{debug, error, info, instrument, warn};
+use vulnera_core::domain::module::{
+    FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult,
+};
 
 use crate::domain::entities::{AggregatedReport, AnalysisJob, ReportSummary};
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
@@ -58,16 +62,28 @@ impl ExecuteAnalysisJobUseCase {
         Self { module_registry }
     }
 
+    #[instrument(skip(self, job, source_uri), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
     pub async fn execute(
         &self,
         job: &mut AnalysisJob,
         source_uri: String,
     ) -> Result<Vec<ModuleResult>, ModuleExecutionError> {
+        let start_time = std::time::Instant::now();
         job.status = JobStatus::Running;
         job.started_at = Some(chrono::Utc::now());
 
-        let mut results = Vec::new();
+        info!(
+            job_id = %job.job_id,
+            module_count = job.modules_to_run.len(),
+            "Starting parallel execution of analysis modules"
+        );
 
+        // Create JoinSet for parallel execution
+        // We always return Ok from spawned tasks (errors are converted to ModuleResult with error field)
+        let mut join_set: JoinSet<(vulnera_core::domain::module::ModuleType, ModuleResult)> =
+            JoinSet::new();
+
+        // Spawn all module execution tasks concurrently
         for module_type in &job.modules_to_run {
             if let Some(module) = self.module_registry.get_module(module_type) {
                 let config = ModuleConfig {
@@ -76,28 +92,138 @@ impl ExecuteAnalysisJobUseCase {
                     source_uri: source_uri.clone(),
                     config: std::collections::HashMap::new(),
                 };
+                let module_type_clone = module_type.clone();
+                let module_arc = Arc::clone(&module);
 
-                match module.execute(&config).await {
-                    Ok(result) => results.push(result),
-                    Err(e) => {
-                        tracing::error!(
-                            module = ?module_type,
-                            error = %e,
-                            "Module execution failed"
-                        );
-                        results.push(ModuleResult {
-                            job_id: job.job_id,
-                            module_type: module_type.clone(),
-                            findings: vec![],
-                            metadata: Default::default(),
-                            error: Some(e.to_string()),
-                        });
+                debug!(
+                    job_id = %job.job_id,
+                    module = ?module_type_clone,
+                    "Spawning module execution task"
+                );
+
+                join_set.spawn(async move {
+                    let module_start = std::time::Instant::now();
+                    let result = module_arc.execute(&config).await;
+                    let module_duration = module_start.elapsed();
+
+                    match &result {
+                        Ok(_) => {
+                            debug!(
+                                module = ?module_type_clone,
+                                duration_ms = module_duration.as_millis(),
+                                "Module execution completed successfully"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                module = ?module_type_clone,
+                                duration_ms = module_duration.as_millis(),
+                                error = %e,
+                                "Module execution failed"
+                            );
+                        }
                     }
-                }
+
+                    // Convert error to ModuleResult with error field set
+                    // Always return a ModuleResult (either success or error)
+                    match result {
+                        Ok(r) => (module_type_clone, r),
+                        Err(e) => {
+                            // Create error result
+                            let error_result = ModuleResult {
+                                job_id: config.job_id,
+                                module_type: module_type_clone.clone(),
+                                findings: vec![],
+                                metadata: Default::default(),
+                                error: Some(e.to_string()),
+                            };
+                            (module_type_clone, error_result)
+                        }
+                    }
+                });
             } else {
-                tracing::warn!(module = ?module_type, "Module not found in registry");
+                warn!(
+                    job_id = %job.job_id,
+                    module = ?module_type,
+                    "Module not found in registry"
+                );
             }
         }
+
+        // Collect results as they complete (in completion order)
+        let mut results = Vec::new();
+        let mut completed_count = 0;
+        let total_modules = join_set.len();
+
+        while let Some(res) = join_set.join_next().await {
+            completed_count += 1;
+            match res {
+                Ok((module_type, result)) => {
+                    if result.error.is_none() {
+                        info!(
+                            job_id = %job.job_id,
+                            module = ?module_type,
+                            completed = completed_count,
+                            total = total_modules,
+                            "Module completed successfully"
+                        );
+                    } else {
+                        warn!(
+                            job_id = %job.job_id,
+                            module = ?module_type,
+                            completed = completed_count,
+                            total = total_modules,
+                            error = result.error.as_deref().unwrap_or("unknown"),
+                            "Module completed with error"
+                        );
+                    }
+                    results.push(result);
+                }
+                Err(e) => {
+                    // Task panicked - this is a critical error
+                    error!(
+                        job_id = %job.job_id,
+                        completed = completed_count,
+                        total = total_modules,
+                        error = %e,
+                        "Module execution task panicked"
+                    );
+                    // We can't create a proper ModuleResult here without knowing which module panicked
+                    // This should be extremely rare - log it and continue with other modules
+                }
+            }
+        }
+
+        // Handle modules that weren't found in registry
+        // We need to create error results for them
+        let executed_module_types: std::collections::HashSet<_> =
+            results.iter().map(|r| r.module_type.clone()).collect();
+
+        for module_type in &job.modules_to_run {
+            if !executed_module_types.contains(module_type) {
+                warn!(
+                    job_id = %job.job_id,
+                    module = ?module_type,
+                    "Creating error result for module not found in registry"
+                );
+                results.push(ModuleResult {
+                    job_id: job.job_id,
+                    module_type: module_type.clone(),
+                    findings: vec![],
+                    metadata: Default::default(),
+                    error: Some("Module not found in registry".to_string()),
+                });
+            }
+        }
+
+        let total_duration = start_time.elapsed();
+        info!(
+            job_id = %job.job_id,
+            total_modules = total_modules,
+            completed_modules = results.len(),
+            duration_ms = total_duration.as_millis(),
+            "All modules completed"
+        );
 
         job.status = JobStatus::Completed;
         job.completed_at = Some(chrono::Utc::now());
