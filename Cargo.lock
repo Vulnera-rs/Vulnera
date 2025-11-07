@@ -4061,7 +4061,6 @@ dependencies = [
  "tracing",
  "uuid",
  "vulnera-core",
- "vulnera-orchestrator",
 ]
 
 [[package]]
@@ -4073,6 +4072,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sqlx",
  "thiserror 2.0.17",
  "tokio",
  "tokio-test",
@@ -4092,6 +4092,7 @@ version = "0.2.0"
 dependencies = [
  "axum",
  "dotenvy",
+ "sqlx",
  "tokio",
  "tower",
  "tower-http",
@@ -4116,12 +4117,12 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tokio-test",
+ "toml",
  "tracing",
  "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-python",
  "vulnera-core",
- "vulnera-orchestrator",
  "walkdir",
 ]
 

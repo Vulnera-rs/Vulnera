@@ -1,5 +1,6 @@
 //! AST parsers for different languages
 
+use tracing::{debug, error, instrument, warn};
 use crate::domain::value_objects::Language;
 
 /// AST node (simplified representation)
@@ -37,11 +38,17 @@ pub struct PythonParser {
 impl PythonParser {
     pub fn new() -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_python::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
+        // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
+        // Using unsafe because LanguageFn is a raw function pointer
+        let language_fn: tree_sitter::Language = unsafe {
+            std::mem::transmute(tree_sitter_python::LANGUAGE)
+        };
+        parser.set_language(&language_fn).map_err(|e| {
+            error!(error = %e, "Failed to load Python grammar");
             ParseError::ParseFailed(format!("Failed to load Python grammar: {}", e))
         })?;
 
+        debug!("Python parser initialized");
         Ok(Self { parser })
     }
 }
@@ -51,13 +58,15 @@ impl Parser for PythonParser {
         Language::Python
     }
 
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self
-            .parser
-            .parse(source, None)
-            .ok_or_else(|| ParseError::ParseFailed("Failed to parse Python code".to_string()))?;
+        let tree = self.parser.parse(source, None).ok_or_else(|| {
+            warn!("Failed to parse Python code");
+            ParseError::ParseFailed("Failed to parse Python code".to_string())
+        })?;
 
         let root_node = tree.root_node();
+        debug!(node_count = root_node.child_count(), "Python AST parsed successfully");
         Ok(convert_tree_sitter_node(root_node, source))
     }
 }
@@ -70,11 +79,17 @@ pub struct JavaScriptParser {
 impl JavaScriptParser {
     pub fn new() -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_javascript::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
+        // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
+        // Using unsafe because LanguageFn is a raw function pointer
+        let language_fn: tree_sitter::Language = unsafe {
+            std::mem::transmute(tree_sitter_javascript::LANGUAGE)
+        };
+        parser.set_language(&language_fn).map_err(|e| {
+            error!(error = %e, "Failed to load JavaScript grammar");
             ParseError::ParseFailed(format!("Failed to load JavaScript grammar: {}", e))
         })?;
 
+        debug!("JavaScript parser initialized");
         Ok(Self { parser })
     }
 }
@@ -84,12 +99,15 @@ impl Parser for JavaScriptParser {
         Language::JavaScript
     }
 
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
         let tree = self.parser.parse(source, None).ok_or_else(|| {
+            warn!("Failed to parse JavaScript code");
             ParseError::ParseFailed("Failed to parse JavaScript code".to_string())
         })?;
 
         let root_node = tree.root_node();
+        debug!(node_count = root_node.child_count(), "JavaScript AST parsed successfully");
         Ok(convert_tree_sitter_node(root_node, source))
     }
 }
@@ -108,11 +126,15 @@ impl Parser for RustParser {
         Language::Rust
     }
 
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
         // Use syn to parse Rust code
-        let _syntax_tree = syn::parse_file(source)
-            .map_err(|e| ParseError::ParseFailed(format!("Failed to parse Rust code: {}", e)))?;
+        let _syntax_tree = syn::parse_file(source).map_err(|e| {
+            warn!(error = %e, "Failed to parse Rust code");
+            ParseError::ParseFailed(format!("Failed to parse Rust code: {}", e))
+        })?;
 
+        debug!("Rust AST parsed successfully");
         // Convert syn AST to our simplified AST representation
         // This is a simplified conversion - in production, you'd want more detail
         Ok(AstNode {

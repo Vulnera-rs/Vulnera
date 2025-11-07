@@ -10,7 +10,6 @@ categories.workspace = true
 
 [dependencies]
 vulnera-core = { path = "../vulnera-core" }
-vulnera-orchestrator = { path = "../vulnera-orchestrator" }
 
 # Async runtime
 tokio = { workspace = true }
@@ -33,5 +32,4 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4.4"
-
+tokio-test = { workspace = true }

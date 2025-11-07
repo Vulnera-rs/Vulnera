@@ -1,6 +1,8 @@
 //! SARIF report format implementation
 
-use crate::domain::entities::{AggregatedReport, Finding, FindingSeverity};
+use vulnera_core::domain::module::{Finding, FindingSeverity};
+
+use crate::domain::entities::AggregatedReport;
 use serde_json::{Value, json};
 
 /// Generate SARIF report from aggregated analysis results
@@ -82,3 +84,5 @@ fn convert_finding_to_sarif_result(finding: &Finding) -> Value {
 
     result
 }
+
+

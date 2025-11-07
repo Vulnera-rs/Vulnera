@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use crate::domain::entities::{AggregatedReport, AnalysisJob, ModuleResult, ReportSummary};
-use crate::domain::module::{ModuleConfig, ModuleExecutionError};
+use vulnera_core::domain::module::{FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult};
+
+use crate::domain::entities::{AggregatedReport, AnalysisJob, ReportSummary};
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
@@ -148,11 +149,11 @@ impl AggregateResultsUseCase {
 
         for finding in &deduplicated {
             match finding.severity {
-                crate::domain::entities::FindingSeverity::Critical => summary.critical += 1,
-                crate::domain::entities::FindingSeverity::High => summary.high += 1,
-                crate::domain::entities::FindingSeverity::Medium => summary.medium += 1,
-                crate::domain::entities::FindingSeverity::Low => summary.low += 1,
-                crate::domain::entities::FindingSeverity::Info => summary.info += 1,
+                FindingSeverity::Critical => summary.critical += 1,
+                FindingSeverity::High => summary.high += 1,
+                FindingSeverity::Medium => summary.medium += 1,
+                FindingSeverity::Low => summary.low += 1,
+                FindingSeverity::Info => summary.info += 1,
             }
         }
 

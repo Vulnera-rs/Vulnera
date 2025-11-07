@@ -7,12 +7,10 @@ use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 
-use vulnera_orchestrator::domain::entities::{
-    Finding, FindingConfidence, FindingSeverity, FindingType, Location, ModuleResult,
-    ModuleResultMetadata,
+use vulnera_core::domain::module::{
+    AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
+    ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
 };
-use vulnera_orchestrator::domain::module::{AnalysisModule, ModuleConfig, ModuleExecutionError};
-use vulnera_orchestrator::domain::value_objects::ModuleType;
 
 use crate::use_cases::AnalyzeDependenciesUseCase;
 

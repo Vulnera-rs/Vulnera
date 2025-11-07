@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::domain::auth::value_objects::UserRole;
+use vulnera_core::domain::auth::value_objects::UserRole;
 
 /// Login request DTO
 #[derive(Debug, Deserialize, ToSchema)]
@@ -117,8 +117,5 @@ pub struct ApiKeyListResponse {
     /// List of API keys
     pub api_keys: Vec<ApiKeyListItem>,
 }
-
-
-
 
 

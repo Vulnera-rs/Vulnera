@@ -1,15 +1,17 @@
 //! Route definitions and server setup
 
-use crate::Config;
 use axum::{
     Router, middleware,
     routing::{get, post},
 };
+use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+
+use vulnera_core::Config;
 
 use crate::presentation::{
     auth::{
@@ -17,14 +19,10 @@ use crate::presentation::{
             AuthAppState, create_api_key, list_api_keys, login, refresh_token, register,
             revoke_api_key,
         },
-        extractors::AuthState,
     },
     controllers::{
-        analysis::{
-            AppState, analyze_dependencies, get_analysis_report, get_popular_packages,
-            get_vulnerability, list_vulnerabilities, refresh_vulnerability_cache,
-        },
         health::{health_check, metrics},
+        analyze, OrchestratorState,
     },
     middleware::{
         RateLimiterState, ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
@@ -37,19 +35,12 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use std::sync::Arc;
 
 /// OpenAPI documentation
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        crate::presentation::controllers::analysis::analyze_dependencies,
-    crate::presentation::controllers::analysis::analyze_repository,
-        crate::presentation::controllers::analysis::get_vulnerability,
-        crate::presentation::controllers::analysis::list_vulnerabilities,
-        crate::presentation::controllers::analysis::refresh_vulnerability_cache,
-        crate::presentation::controllers::analysis::get_analysis_report,
-        crate::presentation::controllers::analysis::get_popular_packages,
+        crate::presentation::controllers::analyze,
         crate::presentation::controllers::health::health_check,
         crate::presentation::controllers::health::metrics,
         crate::presentation::auth::controller::login,
@@ -62,23 +53,9 @@ use std::sync::Arc;
     components(
         schemas(
             AnalysisRequest,
-            AnalysisResponse,
-            VulnerabilityDto,
-            VulnerabilityListResponse,
-            AffectedPackageDto,
-            AnalysisMetadataDto,
-            SeverityBreakdownDto,
-            PaginationDto,
+            FinalReportResponse,
             ErrorResponse,
             HealthResponse,
-            VersionRecommendationDto,
-            RepositoryAnalysisRequest,
-            RepositoryAnalysisResponse,
-            RepositoryFileResultDto,
-            RepositoryPackageDto,
-            RepositoryAnalysisMetadataDto,
-            RepositoryConfigCapsDto,
-            RepositoryDescriptorDto,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::TokenResponse,
@@ -87,12 +64,11 @@ use std::sync::Arc;
             crate::presentation::auth::models::ApiKeyResponse,
             crate::presentation::auth::models::ApiKeyListResponse,
             crate::presentation::auth::models::ApiKeyListItem,
-            crate::domain::auth::value_objects::UserRole
+            vulnera_core::domain::auth::value_objects::UserRole
         )
     ),
     tags(
-    (name = "analysis", description = "Vulnerability analysis endpoints for dependency files and repositories"),
-        (name = "vulnerabilities", description = "Vulnerability information and lookup endpoints"),
+        (name = "analysis", description = "Vulnerability analysis endpoints using job-based orchestration"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
         (name = "auth", description = "Authentication and authorization endpoints")
     ),
@@ -107,7 +83,6 @@ use std::sync::Arc;
     ),
     servers(
         (url = "http://localhost:3000", description = "Local development server"),
-
         (url = "VULNERA__SERVER__HOST", description = "Production server")
     ),
     external_docs(
@@ -119,36 +94,24 @@ pub struct ApiDoc;
 
 /// Middleware to inject AuthState into request extensions
 async fn inject_auth_state_middleware(
-    State(app_state): State<AppState>,
+    State(orchestrator_state): State<OrchestratorState>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    // Create AuthState from AppState and inject into extensions
-    let auth_state = AuthState {
-        validate_token: app_state.validate_token_use_case.clone(),
-        validate_api_key: app_state.validate_api_key_use_case.clone(),
-        user_repository: app_state.user_repository.clone(),
-        api_key_repository: app_state.api_key_repository.clone(),
-        api_key_generator: app_state.api_key_generator.clone(),
-    };
+    // Create AuthState from OrchestratorState and inject into extensions
+    let auth_state = orchestrator_state.auth_state.clone();
     request.extensions_mut().insert(auth_state);
     next.run(request).await
 }
 
 /// Create the application router with comprehensive middleware stack
-pub fn create_router(app_state: AppState, config: &Config) -> Router {
+pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>) -> Router {
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
-        login_use_case: app_state.login_use_case.clone(),
-        register_use_case: app_state.register_use_case.clone(),
-        refresh_token_use_case: app_state.refresh_token_use_case.clone(),
-        auth_state: AuthState {
-            validate_token: app_state.validate_token_use_case.clone(),
-            validate_api_key: app_state.validate_api_key_use_case.clone(),
-            user_repository: app_state.user_repository.clone(),
-            api_key_repository: app_state.api_key_repository.clone(),
-            api_key_generator: app_state.api_key_generator.clone(),
-        },
+        login_use_case: orchestrator_state.login_use_case.clone(),
+        register_use_case: orchestrator_state.register_use_case.clone(),
+        refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
+        auth_state: orchestrator_state.auth_state.clone(),
         token_ttl_hours: config.auth.token_ttl_hours,
     };
 
@@ -164,20 +127,9 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         )
         .with_state(auth_app_state);
 
+    // Orchestrator job-based analysis route
     let api_routes = Router::new()
-        .route("/analyze", post(analyze_dependencies))
-        .route(
-            "/analyze/repository",
-            post(crate::presentation::controllers::analysis::analyze_repository),
-        )
-        .route("/vulnerabilities", get(list_vulnerabilities))
-        .route(
-            "/vulnerabilities/refresh-cache",
-            post(refresh_vulnerability_cache),
-        )
-        .route("/vulnerabilities/{id}", get(get_vulnerability))
-        .route("/reports/{id}", get(get_analysis_report))
-        .route("/popular", get(get_popular_packages))
+        .route("/analyze/job", post(analyze))
         .merge(auth_routes);
 
     let health_routes = Router::new()
@@ -269,7 +221,7 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
         .layer(middleware::from_fn(ghsa_token_middleware))
         // Inject auth state into request extensions
         .layer(middleware::from_fn_with_state(
-            app_state.clone(),
+            orchestrator_state.clone(),
             inject_auth_state_middleware,
         ))
         // Custom logging middleware
@@ -297,5 +249,6 @@ pub fn create_router(app_state: AppState, config: &Config) -> Router {
     router
         // Serve documentation resources
         .layer(service_builder)
-        .with_state(app_state)
+        .with_state(orchestrator_state)
 }
+

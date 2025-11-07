@@ -26,30 +26,7 @@ pub enum AnalysisDepth {
     FastScan,
 }
 
-/// Module type identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ModuleType {
-    /// Dependency analyzer module
-    DependencyAnalyzer,
-    /// SAST module
-    SAST,
-    /// Secret detection module
-    SecretDetection,
-    /// License compliance module
-    LicenseCompliance,
-    /// SBOM generation module
-    SBOM,
-    /// DAST module
-    DAST,
-    /// API security module
-    ApiSecurity,
-    /// Fuzz testing module
-    FuzzTesting,
-    /// IaC/Container security module
-    IaC,
-    /// CSPM module
-    CSPM,
-}
+// ModuleType is now imported from vulnera_core::domain::module
 
 /// Job status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -63,3 +40,5 @@ pub enum JobStatus {
     /// Job failed
     Failed,
 }
+
+

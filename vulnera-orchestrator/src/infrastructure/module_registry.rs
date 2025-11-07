@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::module::AnalysisModule;
-use crate::domain::value_objects::ModuleType;
+use vulnera_core::domain::module::{AnalysisModule, ModuleType};
 
 /// Registry for analysis modules
 pub struct ModuleRegistry {
@@ -39,3 +38,5 @@ impl Default for ModuleRegistry {
         Self::new()
     }
 }
+
+
