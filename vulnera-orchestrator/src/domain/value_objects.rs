@@ -40,5 +40,3 @@ pub enum JobStatus {
     /// Job failed
     Failed,
 }
-
-

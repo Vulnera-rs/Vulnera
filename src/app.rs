@@ -23,9 +23,7 @@ use vulnera_core::application::auth::use_cases::{
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
-    api_clients::{
-        circuit_breaker_wrapper::CircuitBreakerApiClient, osv::OsvClient,
-    },
+    api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, osv::OsvClient},
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::{CacheServiceImpl, FileCacheRepository, MemoryCache, MultiLevelCache},
     parsers::ParserFactory,
@@ -119,7 +117,6 @@ pub async fn create_app(
 
     // Initialize report service
     let report_service = Arc::new(ReportServiceImpl::new());
-
 
     // Create dependency analyzer module
     let deps_module = Arc::new(DependencyAnalyzerModule::new(
@@ -222,4 +219,3 @@ pub async fn create_app(
 
     Ok(router)
 }
-

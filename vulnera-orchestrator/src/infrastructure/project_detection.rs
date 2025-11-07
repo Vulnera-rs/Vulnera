@@ -50,7 +50,8 @@ impl ProjectDetector for FileSystemProjectDetector {
                                 languages.insert("javascript".to_string());
                                 dependency_files.push(file_path);
                             }
-                            "requirements.txt" | "Pipfile" | "pyproject.toml" | "poetry.lock" => {
+                            "requirements.txt" | "Pipfile" | "pyproject.toml" | "poetry.lock"
+                            | "uv.lock" => {
                                 languages.insert("python".to_string());
                                 dependency_files.push(file_path);
                             }
@@ -126,5 +127,3 @@ impl ProjectDetector for FileSystemProjectDetector {
         }
     }
 }
-
-

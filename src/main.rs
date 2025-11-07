@@ -1,7 +1,6 @@
 //! Vulnera Rust - Main application entry point
 
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::{net::TcpListener, signal};
 
 use vulnera_rust::{Config, create_app, init_tracing};

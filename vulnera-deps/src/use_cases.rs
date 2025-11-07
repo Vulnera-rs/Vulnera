@@ -284,7 +284,14 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         // Fall back to ecosystem-based parsing by trying common filenames for the ecosystem
         let common_filenames = match ecosystem {
             Ecosystem::Npm => vec!["package.json", "package-lock.json", "yarn.lock"],
-            Ecosystem::PyPI => vec!["requirements.txt", "Pipfile", "pyproject.toml"],
+            Ecosystem::PyPI => vec![
+                "uv.lock",
+                "poetry.lock",
+                "Pipfile.lock",
+                "requirements.txt",
+                "Pipfile",
+                "pyproject.toml",
+            ],
             Ecosystem::Maven => vec!["pom.xml"],
             Ecosystem::Cargo => vec!["Cargo.toml", "Cargo.lock"],
             Ecosystem::Go => vec!["go.mod", "go.sum"],

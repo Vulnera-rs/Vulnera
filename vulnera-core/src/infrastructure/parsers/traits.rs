@@ -33,28 +33,102 @@ pub struct ParserFactory {
 impl ParserFactory {
     /// Create a new parser factory with all available parsers
     pub fn new() -> Self {
-        let parsers: Vec<Box<dyn PackageFileParser>> = vec![
-            Box::new(crate::infrastructure::parsers::npm::NpmParser::new()),
-            Box::new(crate::infrastructure::parsers::npm::PackageLockParser::new()),
-            Box::new(crate::infrastructure::parsers::yarn_pest::YarnPestParser::new()),
-            Box::new(crate::infrastructure::parsers::npm::YarnLockParser::new()),
-            Box::new(crate::infrastructure::parsers::python::RequirementsTxtParser::new()),
-            Box::new(crate::infrastructure::parsers::python::PipfileParser::new()),
-            Box::new(crate::infrastructure::parsers::python::PyProjectTomlParser::new()),
-            Box::new(crate::infrastructure::parsers::java::MavenParser::new()),
-            // Pest-based Gradle parser
-            Box::new(crate::infrastructure::parsers::gradle_pest::GradlePestParser::new()),
-            Box::new(crate::infrastructure::parsers::rust::CargoParser::new()),
-            Box::new(crate::infrastructure::parsers::rust::CargoLockParser::new()),
-            Box::new(crate::infrastructure::parsers::go::GoModParser::new()),
-            Box::new(crate::infrastructure::parsers::go::GoSumParser::new()),
-            Box::new(crate::infrastructure::parsers::php::ComposerParser::new()),
-            Box::new(crate::infrastructure::parsers::php::ComposerLockParser::new()),
-            Box::new(crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new()),
-            Box::new(crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new()),
-            Box::new(crate::infrastructure::parsers::ruby::GemfileLockParser::new()),
-            Box::new(crate::infrastructure::parsers::ruby::GemfileParser::new()),
-        ];
+        let mut parsers: Vec<Box<dyn PackageFileParser>> = Vec::new();
+
+        // Tree-sitter parsers (higher priority for better error recovery)
+        // JSON parsers
+        if let Ok(parser) =
+            crate::infrastructure::parsers::tree_sitter::TreeSitterJsonPackageParser::new(
+                crate::domain::vulnerability::value_objects::Ecosystem::Npm,
+                "package.json".to_string(),
+                25, // High priority
+            )
+        {
+            parsers.push(Box::new(parser));
+        }
+        // TOML parsers - disabled due to tree-sitter version mismatch (0.20 vs 0.25)
+        // The existing CargoParser using toml crate is more robust
+        // if let Ok(parser) = crate::infrastructure::parsers::tree_sitter::TreeSitterTomlPackageParser::new(
+        //     crate::domain::vulnerability::value_objects::Ecosystem::Cargo,
+        //     "Cargo.toml".to_string(),
+        //     25,
+        // ) {
+        //     parsers.push(Box::new(parser));
+        // }
+        // Go parsers
+        if let Ok(parser) =
+            crate::infrastructure::parsers::tree_sitter::TreeSitterGoPackageParser::new(
+                crate::domain::vulnerability::value_objects::Ecosystem::Go,
+                "go.mod".to_string(),
+                25,
+            )
+        {
+            parsers.push(Box::new(parser));
+        }
+        // Note: XML parsing uses the existing MavenParser (quick-xml based) which is more robust
+
+        // Fallback parsers (original implementations)
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::npm::NpmParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::npm::PackageLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::yarn_pest::YarnPestParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::npm::YarnLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::python::RequirementsTxtParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::python::PipfileParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::python::PyProjectTomlParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::python_uv::UvLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::java::MavenParser::new(),
+        ));
+        // Pest-based Gradle parser
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::gradle_pest::GradlePestParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::rust::CargoParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::rust::CargoLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::go::GoModParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::go::GoSumParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::php::ComposerParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::php::ComposerLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::ruby::GemfileLockParser::new(),
+        ));
+        parsers.push(Box::new(
+            crate::infrastructure::parsers::ruby::GemfileParser::new(),
+        ));
 
         // Build index for fast lookups of common exact filename matches
         let mut parser_index = std::collections::HashMap::new();
@@ -65,6 +139,7 @@ impl ParserFactory {
             "requirements.txt",
             "Pipfile",
             "pyproject.toml",
+            "uv.lock",
             "pom.xml",
             "build.gradle",
             "build.gradle.kts",

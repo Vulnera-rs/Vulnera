@@ -74,18 +74,21 @@ impl RuleRepository {
     /// Create a rule repository with both file rules and default rules
     pub fn with_file_and_defaults<P: AsRef<std::path::Path>>(file_path: P) -> Self {
         let mut rules = get_default_rules();
-        
+
         let loader = FileRuleLoader::new(file_path);
         match loader.load_rules() {
             Ok(file_rules) => {
-                debug!(file_rule_count = file_rules.len(), "Loaded additional rules from file");
+                debug!(
+                    file_rule_count = file_rules.len(),
+                    "Loaded additional rules from file"
+                );
                 rules.extend(file_rules);
             }
             Err(e) => {
                 tracing::warn!(error = %e, "Failed to load rules from file, using defaults only");
             }
         }
-        
+
         Self::with_rules(rules)
     }
 
@@ -106,4 +109,3 @@ impl Default for RuleRepository {
         Self::new()
     }
 }
-

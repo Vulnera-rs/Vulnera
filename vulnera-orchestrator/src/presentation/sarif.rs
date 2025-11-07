@@ -84,5 +84,3 @@ fn convert_finding_to_sarif_result(finding: &Finding) -> Value {
 
     result
 }
-
-

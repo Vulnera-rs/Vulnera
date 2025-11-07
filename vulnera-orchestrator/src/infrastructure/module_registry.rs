@@ -38,5 +38,3 @@ impl Default for ModuleRegistry {
         Self::new()
     }
 }
-
-
