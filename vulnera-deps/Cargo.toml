@@ -22,6 +22,16 @@ tracing = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true, features = ["v4", "serde"] }
+
+# Time handling
+chrono = { workspace = true }
+
 [dev-dependencies]
 tokio-test = "0.4.4"
 

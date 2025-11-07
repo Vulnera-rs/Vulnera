@@ -2,9 +2,7 @@ use crate::{
     application::errors::VulnerabilityError,
     application::{
         reporting::ReportServiceImpl,
-        vulnerability::services::{
-            PopularPackageServiceImpl, VersionResolutionServiceImpl,
-        },
+        PopularPackageServiceImpl, VersionResolutionServiceImpl,
     },
     infrastructure::cache::CacheServiceImpl,
     domain::vulnerability::entities::Package,
@@ -62,7 +60,7 @@ async fn dummy_state() -> AppState {
     let config = crate::config::Config::default();
     // Create vulnerability analysis use cases
     let analyze_dependencies_use_case = Arc::new(
-        crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+        vulnera_deps::AnalyzeDependenciesUseCase::new(
             parser_factory.clone(),
             vuln_repo.clone(),
             cache_service.clone(),
@@ -70,7 +68,7 @@ async fn dummy_state() -> AppState {
         ),
     );
     let get_vulnerability_details_use_case = Arc::new(
-        crate::application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+        vulnera_deps::GetVulnerabilityDetailsUseCase::new(
             vuln_repo.clone(),
             cache_service.clone(),
         ),
@@ -85,7 +83,7 @@ async fn dummy_state() -> AppState {
         config_arc.clone(),
     ));
     let list_vulnerabilities_use_case = Arc::new(
-        crate::application::vulnerability::ListVulnerabilitiesUseCase::new(
+        vulnera_deps::ListVulnerabilitiesUseCase::new(
             popular_package_service.clone(),
         ),
     );

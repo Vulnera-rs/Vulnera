@@ -7,12 +7,12 @@ use std::time::Duration;
 use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
-use crate::application::errors::ApplicationError;
-use crate::application::vulnerability::services::CacheService;
-use crate::config::Config;
-use crate::domain::vulnerability::entities::{Package, Vulnerability};
-use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
-use crate::domain::vulnerability::value_objects::Ecosystem;
+use vulnera_core::Config;
+use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::application::vulnerability::services::CacheService;
+use vulnera_core::domain::vulnerability::entities::{Package, Vulnerability};
+use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
+use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
 
 /// Service for managing popular package vulnerabilities with efficient caching
 #[async_trait]
@@ -159,7 +159,7 @@ impl<C: CacheService> PopularPackageServiceImpl<C> {
             // Spawn tasks for current chunk
             for (ecosystem, name, version) in chunk {
                 if let Ok(version_obj) =
-                    crate::domain::vulnerability::value_objects::Version::parse(version)
+                    vulnera_core::domain::vulnerability::value_objects::Version::parse(version)
                 {
                     let ecosystem_clone = ecosystem.clone();
                     if let Ok(package) = Package::new(name.clone(), version_obj, ecosystem_clone) {
@@ -278,10 +278,14 @@ impl<C: CacheService> PopularPackageService for PopularPackageServiceImpl<C> {
         // Apply severity filter if specified
         if let Some(severity_filter) = severity_filter {
             let filter_severity = match severity_filter.to_lowercase().as_str() {
-                "critical" => Some(crate::domain::vulnerability::value_objects::Severity::Critical),
-                "high" => Some(crate::domain::vulnerability::value_objects::Severity::High),
-                "medium" => Some(crate::domain::vulnerability::value_objects::Severity::Medium),
-                "low" => Some(crate::domain::vulnerability::value_objects::Severity::Low),
+                "critical" => {
+                    Some(vulnera_core::domain::vulnerability::value_objects::Severity::Critical)
+                }
+                "high" => Some(vulnera_core::domain::vulnerability::value_objects::Severity::High),
+                "medium" => {
+                    Some(vulnera_core::domain::vulnerability::value_objects::Severity::Medium)
+                }
+                "low" => Some(vulnera_core::domain::vulnerability::value_objects::Severity::Low),
                 _ => None,
             };
 
@@ -334,8 +338,3 @@ impl<C: CacheService> PopularPackageService for PopularPackageServiceImpl<C> {
         Ok(())
     }
 }
-
-
-
-
-
