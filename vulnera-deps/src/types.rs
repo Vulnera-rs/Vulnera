@@ -64,3 +64,4 @@ pub trait VersionResolutionService: Send + Sync {
         vulnerabilities: &[vulnera_core::domain::vulnerability::entities::Vulnerability],
     ) -> Result<VersionRecommendation, vulnera_core::application::errors::ApplicationError>;
 }
+

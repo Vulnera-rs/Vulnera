@@ -7,9 +7,11 @@ use axum::{
 };
 use std::sync::Arc;
 
-use crate::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
-use crate::application::errors::ApplicationError;
-use crate::domain::auth::value_objects::{Email, UserId, UserRole};
+use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
+use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::domain::auth::value_objects::{Email, UserId, UserRole};
+
+use crate::presentation::middleware::application_error_to_response;
 
 /// Authenticated user information from JWT token
 #[derive(Debug, Clone)]
@@ -24,7 +26,7 @@ pub struct AuthUser {
 pub struct ApiKeyAuth {
     pub user_id: UserId,
     pub email: Email,
-    pub api_key_id: crate::domain::auth::value_objects::ApiKeyId,
+    pub api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId,
 }
 
 /// Authentication method used
@@ -48,9 +50,9 @@ pub struct Auth {
 pub struct AuthState {
     pub validate_token: Arc<ValidateTokenUseCase>,
     pub validate_api_key: Arc<ValidateApiKeyUseCase>,
-    pub user_repository: Arc<dyn crate::domain::auth::repositories::IUserRepository>,
-    pub api_key_repository: Arc<dyn crate::domain::auth::repositories::IApiKeyRepository>,
-    pub api_key_generator: Arc<crate::infrastructure::auth::ApiKeyGenerator>,
+    pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
+    pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
+    pub api_key_generator: Arc<vulnera_core::infrastructure::auth::ApiKeyGenerator>,
 }
 
 impl<S> FromRequestParts<S> for AuthUser
@@ -79,7 +81,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    crate::domain::auth::errors::AuthError::InvalidToken,
+                    vulnera_core::domain::auth::errors::AuthError::InvalidToken,
                 ),
             })?;
 
@@ -89,7 +91,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    crate::domain::auth::errors::AuthError::InvalidToken,
+                    vulnera_core::domain::auth::errors::AuthError::InvalidToken,
                 ),
             })?;
 
@@ -146,7 +148,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    crate::domain::auth::errors::AuthError::ApiKeyInvalid,
+                    vulnera_core::domain::auth::errors::AuthError::ApiKeyInvalid,
                 ),
             })?;
 
@@ -172,7 +174,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    crate::domain::auth::errors::AuthError::UserIdNotFound {
+                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
                         user_id: user_id.as_str(),
                     },
                 ),
@@ -183,7 +185,7 @@ where
         Ok(ApiKeyAuth {
             user_id,
             email: user.email,
-            api_key_id: crate::domain::auth::value_objects::ApiKeyId::generate(), // Placeholder
+            api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId::generate(), // Placeholder
         })
     }
 }
@@ -245,7 +247,7 @@ where
                             .ok_or_else(|| AuthErrorResponse {
                                 status: StatusCode::UNAUTHORIZED,
                                 error: ApplicationError::Authentication(
-                                    crate::domain::auth::errors::AuthError::UserIdNotFound {
+                                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
                                         user_id: user_id.as_str(),
                                     },
                                 ),
@@ -280,7 +282,7 @@ where
                         .ok_or_else(|| AuthErrorResponse {
                             status: StatusCode::UNAUTHORIZED,
                             error: ApplicationError::Authentication(
-                                crate::domain::auth::errors::AuthError::UserIdNotFound {
+                                vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
                                     user_id: user_id.as_str(),
                                 },
                             ),
@@ -306,7 +308,7 @@ where
         Err(AuthErrorResponse {
             status: StatusCode::UNAUTHORIZED,
             error: ApplicationError::Authentication(
-                crate::domain::auth::errors::AuthError::InvalidToken,
+                vulnera_core::domain::auth::errors::AuthError::InvalidToken,
             ),
         })
     }
@@ -321,32 +323,7 @@ pub struct AuthErrorResponse {
 
 impl IntoResponse for AuthErrorResponse {
     fn into_response(self) -> Response {
-        let status = self.status;
-        let error_response = crate::presentation::models::ErrorResponse {
-            code: match self.error {
-                ApplicationError::Authentication(ref auth_err) => match auth_err {
-                    crate::domain::auth::errors::AuthError::InvalidToken => "INVALID_TOKEN",
-                    crate::domain::auth::errors::AuthError::TokenExpired => "TOKEN_EXPIRED",
-                    crate::domain::auth::errors::AuthError::InvalidCredentials => {
-                        "INVALID_CREDENTIALS"
-                    }
-                    crate::domain::auth::errors::AuthError::ApiKeyInvalid => "API_KEY_INVALID",
-                    crate::domain::auth::errors::AuthError::ApiKeyExpired => "API_KEY_EXPIRED",
-                    crate::domain::auth::errors::AuthError::InsufficientPermissions => {
-                        "INSUFFICIENT_PERMISSIONS"
-                    }
-                    _ => "AUTHENTICATION_ERROR",
-                },
-                _ => "AUTHENTICATION_ERROR",
-            }
-            .to_string(),
-            message: format!("{}", self.error),
-            details: None,
-            request_id: uuid::Uuid::new_v4(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        (status, axum::Json(error_response)).into_response()
+        application_error_to_response(self.error)
     }
 }
 
@@ -364,7 +341,7 @@ pub trait HasRole {
             return Err(AuthErrorResponse {
                 status: StatusCode::FORBIDDEN,
                 error: ApplicationError::Authentication(
-                    crate::domain::auth::errors::AuthError::InsufficientPermissions,
+                    vulnera_core::domain::auth::errors::AuthError::InsufficientPermissions,
                 ),
             });
         }
@@ -419,3 +396,5 @@ where
         }
     }
 }
+
+

@@ -1,36 +1,7 @@
-//! Security detection rules
+//! Default hardcoded security rules
 
 use crate::domain::entities::{Rule, RulePattern, Severity};
 use crate::domain::value_objects::Language;
-use crate::infrastructure::parsers::AstNode;
-
-/// Rule engine for matching security patterns
-pub trait RuleEngine: Send + Sync {
-    fn match_rule(&self, rule: &Rule, node: &AstNode) -> bool;
-}
-
-/// Simple rule engine implementation
-pub struct SimpleRuleEngine;
-
-impl RuleEngine for SimpleRuleEngine {
-    fn match_rule(&self, rule: &Rule, node: &AstNode) -> bool {
-        match &rule.pattern {
-            RulePattern::AstNodeType(pattern) => node.node_type == *pattern,
-            RulePattern::FunctionCall(func_name) => {
-                // Check if node is a function call with matching name
-                node.node_type == "call" && node.source.contains(func_name)
-            }
-            RulePattern::Regex(pattern) => {
-                if let Ok(re) = regex::Regex::new(pattern) {
-                    re.is_match(&node.source)
-                } else {
-                    false
-                }
-            }
-            RulePattern::Custom(_) => false, // Custom patterns not implemented yet
-        }
-    }
-}
 
 /// SQL injection rule
 pub fn sql_injection_rule() -> Rule {
@@ -92,37 +63,15 @@ pub fn null_pointer_rule() -> Rule {
     }
 }
 
-/// Rule repository
-pub struct RuleRepository {
-    rules: Vec<Rule>,
+/// Get all default rules
+pub fn get_default_rules() -> Vec<Rule> {
+    vec![
+        sql_injection_rule(),
+        command_injection_rule(),
+        unsafe_deserialization_rule(),
+        unsafe_function_call_rule(),
+        null_pointer_rule(),
+    ]
 }
 
-impl RuleRepository {
-    pub fn new() -> Self {
-        let mut rules = Vec::new();
-        rules.push(sql_injection_rule());
-        rules.push(command_injection_rule());
-        rules.push(unsafe_deserialization_rule());
-        rules.push(unsafe_function_call_rule());
-        rules.push(null_pointer_rule());
 
-        Self { rules }
-    }
-
-    pub fn get_rules_for_language(&self, language: &Language) -> Vec<&Rule> {
-        self.rules
-            .iter()
-            .filter(|rule| rule.languages.contains(language))
-            .collect()
-    }
-
-    pub fn get_all_rules(&self) -> &[Rule] {
-        &self.rules
-    }
-}
-
-impl Default for RuleRepository {
-    fn default() -> Self {
-        Self::new()
-    }
-}
