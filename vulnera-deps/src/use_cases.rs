@@ -15,6 +15,8 @@ use vulnera_core::domain::vulnerability::{
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_core::infrastructure::registries::{CratesIoRegistryClient, PackageRegistryClient};
 
+use crate::services::{PopularPackageService, PopularPackageVulnerabilityResult};
+
 /// Use case for analyzing dependencies from a file
 pub struct AnalyzeDependenciesUseCase<C: CacheService> {
     parser_factory: Arc<ParserFactory>,
@@ -495,5 +497,32 @@ impl<C: CacheService + 'static> GetVulnerabilityDetailsUseCase<C> {
         }
 
         Ok(vulnerability)
+    }
+}
+
+/// Use case for listing vulnerabilities with pagination and filtering
+pub struct ListVulnerabilitiesUseCase {
+    popular_package_service: Arc<dyn PopularPackageService>,
+}
+
+impl ListVulnerabilitiesUseCase {
+    /// Create a new use case instance
+    pub fn new(popular_package_service: Arc<dyn PopularPackageService>) -> Self {
+        Self {
+            popular_package_service,
+        }
+    }
+
+    /// Execute the use case to list vulnerabilities
+    pub async fn execute(
+        &self,
+        page: u32,
+        per_page: u32,
+        ecosystem_filter: Option<&str>,
+        severity_filter: Option<&str>,
+    ) -> Result<PopularPackageVulnerabilityResult, ApplicationError> {
+        self.popular_package_service
+            .list_vulnerabilities(page, per_page, ecosystem_filter, severity_filter)
+            .await
     }
 }

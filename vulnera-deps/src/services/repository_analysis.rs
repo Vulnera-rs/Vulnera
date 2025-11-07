@@ -6,13 +6,13 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::application::errors::ApplicationError;
-use crate::config::Config;
-use crate::domain::vulnerability::entities::{Package, Vulnerability};
-use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
-use crate::domain::vulnerability::value_objects::Ecosystem;
-use crate::infrastructure::ParserFactory;
-use crate::infrastructure::repository_source::RepositorySourceClient;
+use vulnera_core::Config;
+use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::domain::vulnerability::entities::{Package, Vulnerability};
+use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
+use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
+use vulnera_core::infrastructure::parsers::ParserFactory;
+use vulnera_core::infrastructure::repository_source::RepositorySourceClient;
 
 /// Input for analyzing a repository (already validated & parsed from request/URL)
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ pub struct RepositoryAnalysisInternalResult {
     pub commit_sha: String,
     pub files: Vec<RepositoryFileResultInternal>,
     pub vulnerabilities: Vec<Vulnerability>,
-    pub severity_breakdown: crate::domain::vulnerability::entities::SeverityBreakdown,
+    pub severity_breakdown: vulnera_core::domain::vulnerability::entities::SeverityBreakdown,
     pub total_files_scanned: u32,
     pub analyzed_files: u32,
     pub skipped_files: u32,
@@ -119,21 +119,21 @@ where
             )
             .await
             .map_err(|e| match e {
-                crate::infrastructure::repository_source::RepositorySourceError::NotFound(_)
-                | crate::infrastructure::repository_source::RepositorySourceError::AccessDenied(
+                vulnera_core::infrastructure::repository_source::RepositorySourceError::NotFound(_)
+                | vulnera_core::infrastructure::repository_source::RepositorySourceError::AccessDenied(
                     _,
                 ) => ApplicationError::NotFound {
                     resource: "repository".to_string(),
                     id: format!("{}/{}", &input.owner, &input.repo),
                 },
-                crate::infrastructure::repository_source::RepositorySourceError::RateLimited {
+                vulnera_core::infrastructure::repository_source::RepositorySourceError::RateLimited {
                     message,
                     ..
                 } => ApplicationError::RateLimited { message },
-                crate::infrastructure::repository_source::RepositorySourceError::Validation(
+                vulnera_core::infrastructure::repository_source::RepositorySourceError::Validation(
                     msg,
                 ) => ApplicationError::Domain(
-                    crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
+                    vulnera_core::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                         field: "ref".into(),
                         message: msg,
                     },
@@ -191,22 +191,22 @@ where
                 )
                 .await
                 .map_err(|e| match e {
-                    crate::infrastructure::repository_source::RepositorySourceError::RateLimited {
+                    vulnera_core::infrastructure::repository_source::RepositorySourceError::RateLimited {
                         ..
                     } => ApplicationError::RateLimited {
                         message: e.to_string(),
                     },
-                    crate::infrastructure::repository_source::RepositorySourceError::NotFound(_)
-                    | crate::infrastructure::repository_source::RepositorySourceError::AccessDenied(
+                    vulnera_core::infrastructure::repository_source::RepositorySourceError::NotFound(_)
+                    | vulnera_core::infrastructure::repository_source::RepositorySourceError::AccessDenied(
                         _,
                     ) => ApplicationError::NotFound {
                         resource: "file contents".into(),
                         id: format!("{}/{}", &input.owner, &input.repo),
                     },
-                    crate::infrastructure::repository_source::RepositorySourceError::Validation(
+                    vulnera_core::infrastructure::repository_source::RepositorySourceError::Validation(
                         msg,
                     ) => ApplicationError::Domain(
-                        crate::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
+                        vulnera_core::domain::vulnerability::errors::VulnerabilityDomainError::InvalidInput {
                             field: "ref".into(),
                             message: msg,
                         },
@@ -292,7 +292,7 @@ where
         let mut seen = HashSet::new();
         all_vulns.retain(|v| seen.insert(v.id.as_str().to_string()));
         let severity_breakdown =
-            crate::domain::vulnerability::entities::SeverityBreakdown::from_vulnerabilities(
+            vulnera_core::domain::vulnerability::entities::SeverityBreakdown::from_vulnerabilities(
                 &all_vulns,
             );
 
@@ -318,8 +318,3 @@ where
         Ok(internal)
     }
 }
-
-
-
-
-
