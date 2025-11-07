@@ -1,0 +1,27 @@
+[package]
+name = "vulnera-deps"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vulnera-core = { path = "../vulnera-core" }
+vulnera-orchestrator = { path = "../vulnera-orchestrator" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+

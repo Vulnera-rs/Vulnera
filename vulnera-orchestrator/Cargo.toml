@@ -1,0 +1,48 @@
+[package]
+name = "vulnera-orchestrator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vulnera-core = { path = "../vulnera-core" }
+
+# Web framework
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# OpenAPI documentation
+utoipa = { workspace = true }
+utoipa-swagger-ui = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# Directory traversal
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4.4"
+
