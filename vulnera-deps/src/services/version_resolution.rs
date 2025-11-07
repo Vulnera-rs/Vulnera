@@ -7,11 +7,13 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::application::errors::ApplicationError;
-use crate::application::vulnerability::services::cache::CacheService;
-use crate::application::{VersionRecommendation, compute_upgrade_impact};
-use crate::domain::vulnerability::entities::Vulnerability;
-use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
+use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::application::vulnerability::services::CacheService;
+use vulnera_core::domain::vulnerability::entities::Vulnerability;
+use vulnera_core::domain::vulnerability::value_objects::{Ecosystem, Version};
+use vulnera_core::infrastructure::registries::PackageRegistryClient;
+
+use crate::types::{VersionRecommendation, VersionResolutionService, compute_upgrade_impact};
 
 /// Concrete implementation of VersionResolutionService using a registry client
 ///
@@ -53,10 +55,10 @@ use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
 /// - Memory-efficient streaming for large version lists
 pub struct VersionResolutionServiceImpl<R>
 where
-    R: crate::infrastructure::registries::PackageRegistryClient,
+    R: PackageRegistryClient,
 {
     registry: Arc<R>,
-    cache_service: Option<Arc<crate::infrastructure::cache::CacheServiceImpl>>,
+    cache_service: Option<Arc<vulnera_core::infrastructure::cache::CacheServiceImpl>>,
     registry_versions_ttl: Duration,
     /// When true, exclude prerelease versions from recommendations
     exclude_prereleases: bool,
@@ -64,7 +66,7 @@ where
 
 impl<R> VersionResolutionServiceImpl<R>
 where
-    R: crate::infrastructure::registries::PackageRegistryClient,
+    R: PackageRegistryClient,
 {
     pub fn new(registry: Arc<R>) -> Self {
         // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
@@ -90,7 +92,7 @@ where
 
     pub fn new_with_cache(
         registry: Arc<R>,
-        cache_service: Arc<crate::infrastructure::cache::CacheServiceImpl>,
+        cache_service: Arc<vulnera_core::infrastructure::cache::CacheServiceImpl>,
     ) -> Self {
         // TTL follows backend cache config: VULNERA__CACHE__TTL_HOURS (default 24)
         let ttl_hours = std::env::var("VULNERA__CACHE__TTL_HOURS")
@@ -120,9 +122,9 @@ where
 }
 
 #[async_trait]
-impl<R> crate::application::VersionResolutionService for VersionResolutionServiceImpl<R>
+impl<R> VersionResolutionService for VersionResolutionServiceImpl<R>
 where
-    R: crate::infrastructure::registries::PackageRegistryClient + 'static,
+    R: PackageRegistryClient + 'static,
 {
     #[tracing::instrument(skip(self, name, current, vulnerabilities))]
     async fn recommend(
@@ -134,11 +136,12 @@ where
     ) -> Result<VersionRecommendation, ApplicationError> {
         // Fetch available versions from registry with optional cache
         let versions_res = if let Some(cache) = &self.cache_service {
-            let cache_key = crate::infrastructure::cache::CacheServiceImpl::registry_versions_key(
-                &ecosystem, name,
-            );
+            let cache_key =
+                vulnera_core::infrastructure::cache::CacheServiceImpl::registry_versions_key(
+                    &ecosystem, name,
+                );
             match cache
-                .get::<Vec<crate::infrastructure::registries::VersionInfo>>(&cache_key)
+                .get::<Vec<vulnera_core::infrastructure::registries::VersionInfo>>(&cache_key)
                 .await
             {
                 Ok(Some(cached)) => {
@@ -147,13 +150,12 @@ where
                 }
                 _ => {
                     tracing::debug!(%name, ecosystem=?ecosystem, "registry versions cache miss; querying registry");
-                    let res =
-                        crate::infrastructure::registries::PackageRegistryClient::list_versions(
-                            &*self.registry,
-                            ecosystem.clone(),
-                            name,
-                        )
-                        .await;
+                    let res = PackageRegistryClient::list_versions(
+                        &*self.registry,
+                        ecosystem.clone(),
+                        name,
+                    )
+                    .await;
                     if let Ok(ref versions) = res {
                         // Cache using backend-configured TTL (VULNERA__CACHE__TTL_HOURS)
                         let ttl = self.registry_versions_ttl;
@@ -165,12 +167,7 @@ where
                 }
             }
         } else {
-            crate::infrastructure::registries::PackageRegistryClient::list_versions(
-                &*self.registry,
-                ecosystem.clone(),
-                name,
-            )
-            .await
+            PackageRegistryClient::list_versions(&*self.registry, ecosystem.clone(), name).await
         };
 
         // Helper: vulnerability predicate using merged OSV + GHSA model
@@ -178,7 +175,7 @@ where
             vulnerabilities.iter().any(|vv| {
                 vv.affected_packages.iter().any(|ap| {
                     // Build a package for matching name/ecosystem, with candidate version
-                    if let Ok(pkg) = crate::domain::vulnerability::entities::Package::new(
+                    if let Ok(pkg) = vulnera_core::domain::vulnerability::entities::Package::new(
                         name.to_string(),
                         v.clone(),
                         ecosystem.clone(),
@@ -266,9 +263,9 @@ where
 
         // Build safe sets - pre-allocate with estimated capacity
         let estimated_safe_capacity = (versions.len() * 7) / 10; // 70% estimate
-        let mut safe_all: Vec<&crate::infrastructure::registries::VersionInfo> =
+        let mut safe_all: Vec<&vulnera_core::infrastructure::registries::VersionInfo> =
             Vec::with_capacity(estimated_safe_capacity);
-        let mut safe_stable: Vec<&crate::infrastructure::registries::VersionInfo> =
+        let mut safe_stable: Vec<&vulnera_core::infrastructure::registries::VersionInfo> =
             Vec::with_capacity(estimated_safe_capacity);
         for vi in &versions {
             if !is_vulnerable(&vi.version) {

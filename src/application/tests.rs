@@ -1,11 +1,11 @@
 // Repository analysis service tests
 
-use super::vulnerability::services::{
+use vulnera_deps::{
     RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl,
 };
-use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
-use crate::infrastructure::parsers::ParserFactory;
-use crate::infrastructure::repository_source::{
+use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
+use vulnera_core::infrastructure::parsers::ParserFactory;
+use vulnera_core::infrastructure::repository_source::{
     FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceError,
 };
 use async_trait::async_trait;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::application::{ApplicationError, VersionResolutionService, VulnerabilityError};
-use crate::application::vulnerability::services::CacheService;
+use vulnera_core::application::vulnerability::services::CacheService;
 use crate::application::reporting::{ReportService, ReportServiceImpl};
 use crate::infrastructure::cache::CacheServiceImpl;
 use crate::domain::vulnerability::{
@@ -441,7 +441,7 @@ async fn test_analysis_service_successful_analysis() {
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -478,7 +478,7 @@ async fn test_analysis_service_get_vulnerability_details() {
     );
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln.clone()]));
 
-    let use_case = crate::application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+    let use_case = vulnera_deps::GetVulnerabilityDetailsUseCase::new(
         vuln_repo,
         cache_service,
     );
@@ -502,7 +502,7 @@ async fn test_analysis_service_vulnerability_not_found() {
     let cache_service = Arc::new(CacheServiceImpl::new(cache_repo));
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let use_case = crate::application::vulnerability::GetVulnerabilityDetailsUseCase::new(
+    let use_case = vulnera_deps::GetVulnerabilityDetailsUseCase::new(
         vuln_repo,
         cache_service,
     );
@@ -532,7 +532,7 @@ async fn test_analysis_service_repository_failure() {
     let vuln_repo = Arc::new(MockVulnerabilityRepository::with_failure());
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -563,7 +563,7 @@ async fn test_analysis_service_invalid_file_format() {
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -602,7 +602,7 @@ async fn test_analysis_service_caching_behavior() {
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![test_vuln]));
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service.clone(),
@@ -682,7 +682,7 @@ async fn test_analysis_service_with_custom_concurrency() {
     let parser_factory = Arc::new(ParserFactory::new());
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(vec![]));
 
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -715,7 +715,7 @@ async fn test_concurrent_package_processing() {
     ];
     let vuln_repo = Arc::new(MockVulnerabilityRepository::new(mock_vulns));
 
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -784,7 +784,7 @@ async fn test_analysis_service_config_from_env() {
         }
     };
 
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         vuln_repo,
         cache_service,
@@ -842,7 +842,7 @@ async fn test_analyze_dependencies_use_case() {
     let parser_factory = Arc::new(ParserFactory::new());
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         repo,
         cache,
@@ -874,7 +874,7 @@ async fn test_get_vulnerability_details_use_case() {
     let cache = Arc::new(CacheServiceImpl::new(cache_repo));
 
     let use_case =
-        crate::application::vulnerability::GetVulnerabilityDetailsUseCase::new(repo, cache);
+        vulnera_deps::GetVulnerabilityDetailsUseCase::new(repo, cache);
 
     let result = use_case.execute(&vuln_id).await;
 
@@ -896,7 +896,7 @@ async fn test_analyze_dependencies_use_case_error_handling() {
     let parser_factory = Arc::new(ParserFactory::new());
 
     let config = crate::config::Config::default();
-    let use_case = crate::application::vulnerability::AnalyzeDependenciesUseCase::new(
+    let use_case = vulnera_deps::AnalyzeDependenciesUseCase::new(
         parser_factory,
         repo,
         cache,
@@ -999,7 +999,7 @@ async fn test_version_resolution_normal_path() {
     .unwrap();
 
     let registry = Arc::new(MockRegistry { versions });
-    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
+    let svc = vulnera_deps::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(
@@ -1075,7 +1075,7 @@ async fn test_version_resolution_fallback_when_registry_unavailable() {
     .unwrap();
 
     let registry = Arc::new(FailingRegistry);
-    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
+    let svc = vulnera_deps::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(ecosystem.clone(), name, Some(current), &[vuln])
@@ -1166,7 +1166,7 @@ async fn test_version_resolution_ghsa_influence() {
     .unwrap();
 
     let registry = Arc::new(MockRegistryGhsa { versions });
-    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
+    let svc = vulnera_deps::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(ecosystem, name, Some(current), &[vuln_ghsa])
@@ -1248,7 +1248,7 @@ async fn test_version_resolution_nuget_four_segment() {
     .unwrap();
 
     let registry = Arc::new(MockNuGetRegistry { versions });
-    let svc = crate::application::vulnerability::services::VersionResolutionServiceImpl::new(registry);
+    let svc = vulnera_deps::VersionResolutionServiceImpl::new(registry);
 
     let rec = svc
         .recommend(
@@ -1328,7 +1328,7 @@ async fn test_version_resolution_pypi_prerelease_nuance() {
     .unwrap();
 
     let registry = Arc::new(MockPyPiRegistry { versions });
-    let mut svc = crate::application::VersionResolutionServiceImpl::new(registry);
+    let mut svc = vulnera_deps::VersionResolutionServiceImpl::new(registry);
     // Exclude prereleases via runtime setter to avoid global env impact
     svc.set_exclude_prereleases(true);
 
