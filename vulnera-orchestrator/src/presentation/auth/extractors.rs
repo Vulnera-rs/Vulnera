@@ -384,7 +384,7 @@ where
         // Try to extract Auth, but don't fail if it's missing
         // We need to check if AuthState is available first
         let auth_state_available = parts.extensions.get::<AuthState>().is_some();
-        
+
         if !auth_state_available {
             return Ok(OptionalAuth(None));
         }
@@ -396,5 +396,3 @@ where
         }
     }
 }
-
-

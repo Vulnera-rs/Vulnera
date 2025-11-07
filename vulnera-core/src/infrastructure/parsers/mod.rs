@@ -7,13 +7,12 @@ pub mod npm;
 pub mod nuget;
 pub mod php;
 pub mod python;
+pub mod python_uv;
 pub mod ruby;
 pub mod rust;
 pub mod traits;
+pub mod tree_sitter;
 pub mod yarn_pest;
-
-#[cfg(test)]
-mod comprehensive_tests;
 
 pub use go::*;
 pub use gradle_pest::*;
@@ -22,6 +21,7 @@ pub use npm::*;
 pub use nuget::*;
 pub use php::*;
 pub use python::*;
+pub use python_uv::*;
 pub use ruby::*;
 pub use rust::*;
 pub use traits::*;

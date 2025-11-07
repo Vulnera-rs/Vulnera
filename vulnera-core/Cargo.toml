@@ -74,6 +74,13 @@ octocrab = { workspace = true }
 base64 = { workspace = true }
 percent-encoding = { workspace = true }
 
+# Tree-sitter parsers
+tree-sitter = { workspace = true }
+tree-sitter-json = { workspace = true }
+tree-sitter-go = { workspace = true }
+# Note: TOML parsing uses existing toml crate based CargoParser (avoids version conflicts)
+# Note: XML parsing uses existing quick-xml based MavenParser
+
 [dev-dependencies]
 tempfile = { workspace = true }
 mockito = { workspace = true }

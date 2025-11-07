@@ -1,10 +1,14 @@
 //! Vulnera Dependency Analyzer - Dependency vulnerability analysis module
 
+pub mod application;
+pub mod domain;
 pub mod module;
 pub mod services;
 pub mod types;
 pub mod use_cases;
 
+pub use application::*;
+pub use domain::*;
 pub use module::*;
 pub use services::*;
 pub use types::*;

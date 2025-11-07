@@ -363,4 +363,3 @@ impl RevokeApiKeyUseCase {
         self.api_key_repository.revoke(&key_id).await
     }
 }
-

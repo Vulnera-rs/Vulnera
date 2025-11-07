@@ -25,4 +25,3 @@ pub trait AnalysisModule: Send + Sync {
     /// * `Err(ModuleExecutionError)` - Error during module execution
     async fn execute(&self, config: &ModuleConfig) -> Result<ModuleResult, ModuleExecutionError>;
 }
-

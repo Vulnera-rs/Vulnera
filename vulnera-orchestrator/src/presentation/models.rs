@@ -490,4 +490,3 @@ pub struct RepositoryDescriptorDto {
     #[schema(example = "https://github.com/rust-lang/cargo")]
     pub source_url: Option<String>,
 }
-

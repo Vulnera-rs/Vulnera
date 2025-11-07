@@ -10,6 +10,8 @@
  - Infrastructure: Concrete registry clients implement the trait below
 */
 
+pub mod batch_client;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
