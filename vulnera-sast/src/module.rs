@@ -4,12 +4,11 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
 
-use vulnera_orchestrator::domain::entities::{
-    Finding, FindingConfidence, FindingSeverity, FindingType, Location, ModuleResult,
-    ModuleResultMetadata,
+use vulnera_core::config::SastConfig;
+use vulnera_core::domain::module::{
+    AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
+    ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
 };
-use vulnera_orchestrator::domain::module::{AnalysisModule, ModuleConfig, ModuleExecutionError};
-use vulnera_orchestrator::domain::value_objects::ModuleType;
 
 use crate::application::use_cases::ScanProjectUseCase;
 use crate::domain::entities::Severity as SastSeverity;
@@ -21,8 +20,12 @@ pub struct SastModule {
 
 impl SastModule {
     pub fn new() -> Self {
+        Self::with_config(&SastConfig::default())
+    }
+
+    pub fn with_config(config: &SastConfig) -> Self {
         Self {
-            use_case: Arc::new(ScanProjectUseCase::new()),
+            use_case: Arc::new(ScanProjectUseCase::with_config(config)),
         }
     }
 }
@@ -46,14 +49,14 @@ impl AnalysisModule for SastModule {
         }
 
         // Execute scan
-        let sast_findings = self
+        let scan_result = self
             .use_case
             .execute(source_path)
             .await
             .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
 
         // Convert SAST findings to orchestrator findings
-        let findings: Vec<Finding> = sast_findings
+        let findings: Vec<Finding> = scan_result.findings
             .into_iter()
             .map(|f| Finding {
                 id: f.id,
@@ -90,7 +93,7 @@ impl AnalysisModule for SastModule {
             module_type: ModuleType::SAST,
             findings,
             metadata: ModuleResultMetadata {
-                files_scanned: 0, // TODO: track this
+                files_scanned: scan_result.files_scanned,
                 duration_ms: duration.as_millis() as u64,
                 additional_info: std::collections::HashMap::new(),
             },
@@ -104,3 +107,4 @@ impl Default for SastModule {
         Self::new()
     }
 }
+

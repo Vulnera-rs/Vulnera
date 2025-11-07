@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use super::value_objects::{AnalysisDepth, JobStatus, ModuleType, SourceType};
+use vulnera_core::domain::module::{Finding, ModuleResult};
+
+use super::value_objects::{AnalysisDepth, JobStatus, SourceType};
 
 /// Represents a project to analyze
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,7 +35,7 @@ pub struct AnalysisJob {
     pub job_id: Uuid,
     pub project_id: String,
     pub status: JobStatus,
-    pub modules_to_run: Vec<ModuleType>,
+    pub modules_to_run: Vec<vulnera_core::domain::module::ModuleType>,
     pub analysis_depth: AnalysisDepth,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -44,7 +46,7 @@ pub struct AnalysisJob {
 impl AnalysisJob {
     pub fn new(
         project_id: String,
-        modules_to_run: Vec<ModuleType>,
+        modules_to_run: Vec<vulnera_core::domain::module::ModuleType>,
         analysis_depth: AnalysisDepth,
     ) -> Self {
         Self {
@@ -59,74 +61,6 @@ impl AnalysisJob {
             error: None,
         }
     }
-}
-
-/// Result from a single analysis module
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModuleResult {
-    pub job_id: Uuid,
-    pub module_type: ModuleType,
-    pub findings: Vec<Finding>,
-    pub metadata: ModuleResultMetadata,
-    pub error: Option<String>,
-}
-
-/// Finding from a module (unified format)
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Finding {
-    pub id: String,
-    pub r#type: FindingType,
-    pub rule_id: Option<String>,
-    pub location: Location,
-    pub severity: FindingSeverity,
-    pub confidence: FindingConfidence,
-    pub description: String,
-    pub recommendation: Option<String>,
-}
-
-/// Finding type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-pub enum FindingType {
-    Vulnerability,
-    Secret,
-    LicenseViolation,
-    Misconfiguration,
-}
-
-/// Finding severity
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
-pub enum FindingSeverity {
-    Critical,
-    High,
-    Medium,
-    Low,
-    Info,
-}
-
-/// Finding confidence level
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
-pub enum FindingConfidence {
-    High,
-    Medium,
-    Low,
-}
-
-/// Location of a finding
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct Location {
-    pub path: String,
-    pub line: Option<u32>,
-    pub column: Option<u32>,
-    pub end_line: Option<u32>,
-    pub end_column: Option<u32>,
-}
-
-/// Module result metadata
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ModuleResultMetadata {
-    pub files_scanned: usize,
-    pub duration_ms: u64,
-    pub additional_info: std::collections::HashMap<String, String>,
 }
 
 /// Aggregated report from all modules

@@ -41,6 +41,9 @@ dotenvy = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# Database
+sqlx = { workspace = true }
+
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
@@ -79,6 +82,13 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 # Error handling
 anyhow = "1.0"
 thiserror = "2.0"
+
+# Dev dependencies (also available for regular dependencies if needed)
+tempfile = "3.23.0"
+axum-test = "18.1"
+mockito = "1.7.0"
+tokio-test = "0.4.4"
+serial_test = "3.2.0"
 
 # Configuration
 config = "0.15"
@@ -144,9 +154,6 @@ mockito = "1.7.0"
 tokio-test = "0.4.4"
 futures = "0.3.31"
 serial_test = "3.2.0"
-
-[workspace.build-dependencies]
-vergen = { version = "8.3", features = ["build", "git", "gitcl"] }
 
 [workspace.lints.clippy]
 type_complexity = "allow"

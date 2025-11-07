@@ -2,9 +2,11 @@
 
 use async_trait::async_trait;
 
+use vulnera_core::domain::module::ModuleType;
+
 use crate::domain::entities::Project;
 use crate::domain::services::ModuleSelector;
-use crate::domain::value_objects::{AnalysisDepth, ModuleType};
+use crate::domain::value_objects::AnalysisDepth;
 
 /// Simple rule-based module selector
 pub struct RuleBasedModuleSelector;

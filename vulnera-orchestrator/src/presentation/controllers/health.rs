@@ -3,7 +3,7 @@
 use axum::{extract::State, http::StatusCode, response::Json};
 use chrono::Utc;
 
-use crate::presentation::controllers::AppState;
+use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::HealthResponse;
 
 /// Basic health check endpoint for liveness probe
@@ -15,7 +15,7 @@ use crate::presentation::models::HealthResponse;
         (status = 200, description = "Service is healthy", body = HealthResponse)
     )
 )]
-pub async fn health_check(State(_app_state): State<AppState>) -> Json<HealthResponse> {
+pub async fn health_check(State(_app_state): State<OrchestratorState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "healthy".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -33,7 +33,7 @@ pub async fn health_check(State(_app_state): State<AppState>) -> Json<HealthResp
         (status = 200, description = "Prometheus metrics", content_type = "text/plain")
     )
 )]
-pub async fn metrics(State(app_state): State<AppState>) -> Result<String, StatusCode> {
+pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<String, StatusCode> {
     let mut metrics = String::new();
 
     // Add basic service metrics
@@ -87,3 +87,5 @@ pub async fn metrics(State(app_state): State<AppState>) -> Result<String, Status
 
     Ok(metrics)
 }
+
+

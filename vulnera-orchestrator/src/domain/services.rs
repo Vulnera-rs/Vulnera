@@ -2,8 +2,10 @@
 
 use async_trait::async_trait;
 
+use vulnera_core::domain::module::ModuleType;
+
 use super::entities::Project;
-use super::value_objects::{AnalysisDepth, ModuleType, SourceType};
+use super::value_objects::{AnalysisDepth, SourceType};
 
 /// Service for detecting project characteristics
 #[async_trait]

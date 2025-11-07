@@ -15,89 +15,87 @@ use std::{
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::application::errors::ApplicationError;
-use crate::config::{RateLimitConfig, RateLimitStrategy};
+use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::config::{RateLimitConfig, RateLimitStrategy};
+
 use crate::presentation::models::ErrorResponse;
 
-/// Error handling middleware with environment-aware error sanitization
-/// Configuration is accessed through Axum's FromRequest when needed in handlers
-impl IntoResponse for ApplicationError {
-    fn into_response(self) -> Response {
-        // Default to sanitizing errors; handlers can access AppState to get actual config
-        // This is a fallback for errors that occur outside handler context
-        let sanitize_errors = std::env::var("ENV").unwrap_or_default() == "production";
+/// Convert ApplicationError to HTTP response
+pub fn application_error_to_response(error: ApplicationError) -> Response {
+    // Default to sanitizing errors; handlers can access AppState to get actual config
+    // This is a fallback for errors that occur outside handler context
+    let sanitize_errors = std::env::var("ENV").unwrap_or_default() == "production";
 
-        let (status, code, message) = match self {
-            ApplicationError::Domain(_) => (
-                StatusCode::BAD_REQUEST,
-                "DOMAIN_ERROR",
-                "Invalid input provided",
-            ),
-            ApplicationError::RateLimited { .. } => (
-                StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMITED",
-                "Upstream rate limit exceeded. Please retry later.",
-            ),
-            ApplicationError::Parse(_) => (
-                StatusCode::BAD_REQUEST,
-                "PARSE_ERROR",
-                "Failed to parse dependency file",
-            ),
-            ApplicationError::InvalidEcosystem { .. } => (
-                StatusCode::BAD_REQUEST,
-                "INVALID_ECOSYSTEM",
-                "Unsupported ecosystem specified",
-            ),
-            ApplicationError::UnsupportedFormat { .. } => (
-                StatusCode::BAD_REQUEST,
-                "UNSUPPORTED_FORMAT",
-                "File format not supported",
-            ),
-            ApplicationError::Configuration { .. } => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "CONFIGURATION_ERROR",
-                if sanitize_errors {
-                    "Service temporarily unavailable"
-                } else {
-                    "Service configuration error"
-                },
-            ),
-            ApplicationError::NotFound { .. } => {
-                (StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
-            }
-            _ => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "INTERNAL_ERROR",
-                if sanitize_errors {
-                    "An internal error occurred"
-                } else {
-                    "Internal server error"
-                },
-            ),
-        };
-
-        // Log the concrete error with selected status and code
-        tracing::error!(
-            error = %self,
-            http_status = %status,
-            error_code = code,
-            "Application error mapped to HTTP response"
-        );
-
-        let error_response = ErrorResponse {
-            code: code.to_string(),
-            message: message.to_string(),
-            details: if sanitize_errors {
-                None // Don't expose internal details in production
+    let (status, code, message) = match error {
+        ApplicationError::Domain(_) => (
+            StatusCode::BAD_REQUEST,
+            "DOMAIN_ERROR",
+            "Invalid input provided",
+        ),
+        ApplicationError::RateLimited { .. } => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "RATE_LIMITED",
+            "Upstream rate limit exceeded. Please retry later.",
+        ),
+        ApplicationError::Parse(_) => (
+            StatusCode::BAD_REQUEST,
+            "PARSE_ERROR",
+            "Failed to parse dependency file",
+        ),
+        ApplicationError::InvalidEcosystem { .. } => (
+            StatusCode::BAD_REQUEST,
+            "INVALID_ECOSYSTEM",
+            "Unsupported ecosystem specified",
+        ),
+        ApplicationError::UnsupportedFormat { .. } => (
+            StatusCode::BAD_REQUEST,
+            "UNSUPPORTED_FORMAT",
+            "File format not supported",
+        ),
+        ApplicationError::Configuration { .. } => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "CONFIGURATION_ERROR",
+            if sanitize_errors {
+                "Service temporarily unavailable"
             } else {
-                Some(serde_json::json!({ "error": self.to_string() }))
+                "Service configuration error"
             },
-            request_id: Uuid::new_v4(),
-            timestamp: Utc::now(),
-        };
+        ),
+        ApplicationError::NotFound { .. } => {
+            (StatusCode::NOT_FOUND, "NOT_FOUND", "Resource not found")
+        }
+        _ => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "INTERNAL_ERROR",
+            if sanitize_errors {
+                "An internal error occurred"
+            } else {
+                "Internal server error"
+            },
+        ),
+    };
 
-        (status, Json(error_response)).into_response()
-    }
+    // Log the concrete error with selected status and code
+    tracing::error!(
+        error = %error,
+        http_status = %status,
+        error_code = code,
+        "Application error mapped to HTTP response"
+    );
+
+    let error_response = ErrorResponse {
+        code: code.to_string(),
+        message: message.to_string(),
+        details: if sanitize_errors {
+            None // Don't expose internal details in production
+        } else {
+            Some(serde_json::json!({ "error": error.to_string() }))
+        },
+        request_id: Uuid::new_v4(),
+        timestamp: Utc::now(),
+    };
+
+    (status, Json(error_response)).into_response()
 }
 
 /// Security headers middleware
@@ -252,7 +250,7 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
 
     if let Some(token) = ghsa_token {
         // Scope the token for the lifetime of this request using task-local storage
-        crate::infrastructure::api_clients::ghsa::with_request_ghsa_token(token, async {
+        vulnera_core::infrastructure::api_clients::ghsa::with_request_ghsa_token(token, async {
             next.run(request).await
         })
         .await

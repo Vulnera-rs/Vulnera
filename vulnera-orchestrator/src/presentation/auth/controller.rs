@@ -9,14 +9,15 @@ use chrono::{Duration, Utc};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::application::auth::use_cases::{
+use vulnera_core::application::auth::use_cases::{
     GenerateApiKeyUseCase, ListApiKeysUseCase, LoginUseCase, RefreshTokenUseCase,
     RegisterUserUseCase, RevokeApiKeyUseCase,
 };
-use crate::domain::auth::{
+use vulnera_core::domain::auth::{
     errors::AuthError,
     value_objects::{ApiKeyId, Email},
 };
+
 use crate::presentation::auth::extractors::{Auth, AuthState};
 use crate::presentation::auth::models::*;
 use crate::presentation::models::ErrorResponse;
@@ -375,3 +376,5 @@ pub async fn revoke_api_key(
 
     Ok(StatusCode::NO_CONTENT)
 }
+
+

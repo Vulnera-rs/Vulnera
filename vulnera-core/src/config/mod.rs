@@ -94,6 +94,7 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub recommendations: RecommendationsConfig,
     pub analysis: AnalysisConfig,
+    pub sast: SastConfig,
     pub auth: AuthConfig,
     pub database: DatabaseConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
@@ -412,6 +413,41 @@ impl Default for AnalysisConfig {
     }
 }
 
+/// SAST (Static Application Security Testing) configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SastConfig {
+    /// Maximum depth for directory scanning
+    pub max_scan_depth: usize,
+    /// Patterns to exclude from scanning (directory or file names)
+    pub exclude_patterns: Vec<String>,
+    /// Optional path to rule configuration file (TOML or JSON)
+    pub rule_file_path: Option<PathBuf>,
+    /// Whether to enable logging for SAST operations
+    pub enable_logging: bool,
+}
+
+impl Default for SastConfig {
+    fn default() -> Self {
+        Self {
+            max_scan_depth: 10,
+            exclude_patterns: vec![
+                "node_modules".to_string(),
+                ".git".to_string(),
+                "target".to_string(),
+                "__pycache__".to_string(),
+                ".venv".to_string(),
+                "venv".to_string(),
+                ".pytest_cache".to_string(),
+                "dist".to_string(),
+                "build".to_string(),
+            ],
+            rule_file_path: None,
+            enable_logging: true,
+        }
+    }
+}
+
 /// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -540,6 +576,7 @@ impl Default for Config {
                 max_concurrent_registry_queries: 5,
                 max_concurrent_api_calls: 10,
             },
+            sast: SastConfig::default(),
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),
             popular_packages: None,

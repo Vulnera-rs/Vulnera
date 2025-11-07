@@ -4,6 +4,7 @@
 //! that represent the business logic of vulnerability analysis.
 
 pub mod auth;
+pub mod module;
 pub mod vulnerability;
 
 // Re-export common types from both modules
@@ -11,5 +12,7 @@ pub mod vulnerability;
 // Use explicit paths like `domain::auth::entities::User` or `domain::vulnerability::entities::Package` to avoid ambiguity
 #[allow(ambiguous_glob_reexports)]
 pub use auth::*;
+#[allow(ambiguous_glob_reexports)]
+pub use module::*;
 #[allow(ambiguous_glob_reexports)]
 pub use vulnerability::*;

@@ -10,6 +10,7 @@ categories.workspace = true
 
 [dependencies]
 vulnera-core = { path = "../vulnera-core" }
+sqlx = { workspace = true }
 
 # Web framework
 axum = { workspace = true }
@@ -44,5 +45,4 @@ uuid = { workspace = true }
 walkdir = { workspace = true }
 
 [dev-dependencies]
-tokio-test = "0.4.4"
-
+tokio-test = { workspace = true }
