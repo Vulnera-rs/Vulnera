@@ -95,6 +95,7 @@ pub struct Config {
     pub recommendations: RecommendationsConfig,
     pub analysis: AnalysisConfig,
     pub sast: SastConfig,
+    pub secret_detection: SecretDetectionConfig,
     pub auth: AuthConfig,
     pub database: DatabaseConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
@@ -448,6 +449,59 @@ impl Default for SastConfig {
     }
 }
 
+/// Secret Detection configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SecretDetectionConfig {
+    /// Maximum depth for directory scanning
+    pub max_scan_depth: usize,
+    /// Patterns to exclude from scanning (directory or file names)
+    pub exclude_patterns: Vec<String>,
+    /// Optional path to rule configuration file (TOML or JSON)
+    pub rule_file_path: Option<PathBuf>,
+    /// Entropy threshold for Base64 strings (default: 4.5)
+    pub base64_entropy_threshold: f64,
+    /// Entropy threshold for hex strings (default: 3.0)
+    pub hex_entropy_threshold: f64,
+    /// Whether to enable entropy-based detection
+    pub enable_entropy_detection: bool,
+    /// Maximum file size to scan in bytes (default: 10MB)
+    pub max_file_size_bytes: u64,
+    /// Whether to enable secret verification (future feature)
+    pub enable_verification: bool,
+    /// Whether to enable logging for secret detection operations
+    pub enable_logging: bool,
+}
+
+impl Default for SecretDetectionConfig {
+    fn default() -> Self {
+        Self {
+            max_scan_depth: 10,
+            exclude_patterns: vec![
+                "node_modules".to_string(),
+                ".git".to_string(),
+                "target".to_string(),
+                "__pycache__".to_string(),
+                ".venv".to_string(),
+                "venv".to_string(),
+                ".pytest_cache".to_string(),
+                "dist".to_string(),
+                "build".to_string(),
+                "*.lock".to_string(),
+                "*.min.js".to_string(),
+                "*.min.css".to_string(),
+            ],
+            rule_file_path: None,
+            base64_entropy_threshold: 4.5,
+            hex_entropy_threshold: 3.0,
+            enable_entropy_detection: true,
+            max_file_size_bytes: 10 * 1024 * 1024, // 10MB
+            enable_verification: false,
+            enable_logging: true,
+        }
+    }
+}
+
 /// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -577,6 +631,7 @@ impl Default for Config {
                 max_concurrent_api_calls: 10,
             },
             sast: SastConfig::default(),
+            secret_detection: SecretDetectionConfig::default(),
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),
             popular_packages: None,
@@ -590,6 +645,7 @@ impl Validate for Config {
         self.cache.validate()?;
         self.apis.validate()?;
         self.analysis.validate()?;
+        validation::Validate::validate(&self.secret_detection)?;
         validation::Validate::validate(&self.auth)?;
         validation::Validate::validate(&self.database)?;
         Ok(())

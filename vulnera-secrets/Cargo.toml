@@ -1,0 +1,37 @@
+[package]
+name = "vulnera-secrets"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vulnera-core = { path = "../vulnera-core" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Secret detection dependencies
+walkdir = { workspace = true }
+regex = { workspace = true }
+once_cell = "1.20"
+base64 = { workspace = true }
+hex = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }

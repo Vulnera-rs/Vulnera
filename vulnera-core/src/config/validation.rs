@@ -2,7 +2,7 @@
 
 use crate::config::{
     AnalysisConfig, ApiConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig,
-    NvdConfig, ServerConfig,
+    NvdConfig, SecretDetectionConfig, ServerConfig,
 };
 use std::path::Path;
 
@@ -31,6 +31,9 @@ pub enum ValidationError {
 
     #[error("Database configuration error: {message}")]
     Database { message: String },
+
+    #[error("Secret detection configuration error: {message}")]
+    SecretDetection { message: String },
 }
 
 impl ValidationError {
@@ -66,6 +69,12 @@ impl ValidationError {
 
     pub fn database(message: impl Into<String>) -> Self {
         Self::Database {
+            message: message.into(),
+        }
+    }
+
+    pub fn secret_detection(message: impl Into<String>) -> Self {
+        Self::SecretDetection {
             message: message.into(),
         }
     }
@@ -299,6 +308,39 @@ impl Validate for DatabaseConfig {
         if self.max_connections == 0 {
             return Err(ValidationError::database(
                 "Max connections must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for SecretDetectionConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate max_scan_depth > 0
+        if self.max_scan_depth == 0 {
+            return Err(ValidationError::secret_detection(
+                "max_scan_depth must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate entropy thresholds are reasonable (0.0 to 8.0)
+        if self.base64_entropy_threshold < 0.0 || self.base64_entropy_threshold > 8.0 {
+            return Err(ValidationError::secret_detection(
+                "base64_entropy_threshold must be between 0.0 and 8.0".to_string(),
+            ));
+        }
+
+        if self.hex_entropy_threshold < 0.0 || self.hex_entropy_threshold > 8.0 {
+            return Err(ValidationError::secret_detection(
+                "hex_entropy_threshold must be between 0.0 and 8.0".to_string(),
+            ));
+        }
+
+        // Validate max_file_size_bytes > 0
+        if self.max_file_size_bytes == 0 {
+            return Err(ValidationError::secret_detection(
+                "max_file_size_bytes must be greater than 0".to_string(),
             ));
         }
 
