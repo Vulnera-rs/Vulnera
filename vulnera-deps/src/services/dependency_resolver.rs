@@ -11,7 +11,10 @@ use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_core::infrastructure::registries::PackageRegistryClient;
 
-use crate::domain::{DependencyGraph, PackageId, PackageMetadata, PackageNode};
+use crate::domain::{
+    DependencyEdge, DependencyGraph, PackageId, PackageMetadata, PackageNode,
+    version_constraint::VersionConstraint,
+};
 
 /// Service for resolving dependencies and building dependency graphs
 #[async_trait]
@@ -68,13 +71,48 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
 
     async fn resolve_transitive(
         &self,
-        _package: &Package,
-        _registry: Arc<dyn PackageRegistryClient>,
+        package: &Package,
+        registry: Arc<dyn PackageRegistryClient>,
     ) -> Result<Vec<Package>, ApplicationError> {
-        // TODO: Implement transitive dependency resolution
-        // This would query the registry for the package's dependencies
-        // and recursively resolve them
-        Ok(Vec::new())
+        // Note: Most package registries don't expose dependency information directly
+        // through their APIs. To properly resolve transitive dependencies, we would need to:
+        // 1. Fetch the package manifest/metadata for the specific version
+        // 2. Parse dependencies from the manifest (package.json, Cargo.toml, etc.)
+        // 3. Recursively resolve those dependencies
+        //
+        // This is ecosystem-specific and complex. For now, we return an empty vector.
+        // In practice, transitive dependencies are best resolved from lockfiles
+        // (package-lock.json, Cargo.lock, etc.) which contain the complete resolved tree.
+        //
+        // Future enhancement: Implement ecosystem-specific manifest fetching and parsing
+        // for registries that support it (e.g., npm registry API, crates.io API)
+
+        tracing::debug!(
+            "Transitive dependency resolution requested for {}:{} (not yet implemented - use lockfiles for complete dependency trees)",
+            package.name,
+            package.version
+        );
+
+        // Attempt to verify the package exists in the registry
+        // This at least validates that the package is available
+        match registry
+            .list_versions(package.ecosystem.clone(), &package.name)
+            .await
+        {
+            Ok(_versions) => {
+                // Package exists, but we can't get dependencies without fetching manifests
+                Ok(Vec::new())
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to verify package {} in registry: {}",
+                    package.name,
+                    e
+                );
+                // Return empty rather than error, as this is a best-effort operation
+                Ok(Vec::new())
+            }
+        }
     }
 }
 
@@ -117,7 +155,21 @@ pub async fn build_graph_from_lockfile(
     }
 
     // TODO: Extract dependency relationships from lockfile structure
-    // This requires parser-specific logic to understand the lockfile format
+    // This requires parser-specific logic to understand the lockfile format.
+    // Different lockfile formats have different structures:
+    // - package-lock.json: dependencies are nested under each package
+    // - yarn.lock: dependencies are listed with "^" references
+    // - Cargo.lock: dependencies are listed in [[package]] sections with dependencies array
+    // - go.sum: doesn't contain dependency relationships, only checksums
+    //
+    // To implement this properly, we would need to:
+    // 1. Enhance parsers to return dependency relationships along with packages
+    // 2. Or parse the lockfile structure directly here (ecosystem-specific)
+    // 3. Create DependencyEdge objects for each relationship
+    // 4. Add edges to the graph using graph.add_edge()
+    //
+    // For now, the graph contains all packages as nodes but no edges.
+    // This is still useful for package enumeration, but doesn't show the dependency tree.
 
     Ok(graph)
 }
@@ -127,7 +179,7 @@ pub async fn build_graph_from_lockfile(
 pub async fn build_graph_from_manifest(
     manifest_content: &str,
     filename: &str,
-    parser_factory: &ParserFactory,
+    parser_factory: Arc<ParserFactory>,
     registry: Option<Arc<dyn PackageRegistryClient>>,
 ) -> Result<DependencyGraph, ApplicationError> {
     let parser = parser_factory.create_parser(filename).ok_or_else(|| {
@@ -142,6 +194,7 @@ pub async fn build_graph_from_manifest(
         .map_err(ApplicationError::Parse)?;
 
     let mut graph = DependencyGraph::new();
+    let packages_clone = packages.clone();
 
     // Add direct dependencies as nodes
     for package in packages {
@@ -150,11 +203,45 @@ pub async fn build_graph_from_manifest(
 
         let node = PackageNode::new(package.clone()).with_metadata(metadata);
         graph.add_node(node);
+    }
 
-        // If registry is available, resolve transitive dependencies
-        if registry.is_some() {
-            // TODO: Resolve transitive dependencies
-            // This would query the registry for each package's dependencies
+    // If registry is available, resolve transitive dependencies
+    if let Some(registry) = &registry {
+        // Resolve transitive dependencies for each direct dependency
+        // Note: This is a best-effort operation as most registries don't expose
+        // dependency information directly. Lockfiles are preferred for complete trees.
+        let resolver = DependencyResolverServiceImpl::new(parser_factory.clone());
+        for package in &packages_clone {
+            match resolver.resolve_transitive(package, registry.clone()).await {
+                Ok(transitive_deps) => {
+                    for dep in transitive_deps {
+                        let mut metadata = PackageMetadata::default();
+                        metadata.is_direct = false; // These are transitive
+
+                        let dep_node = PackageNode::new(dep).with_metadata(metadata);
+                        graph.add_node(dep_node.clone());
+
+                        // Create edge from the direct dependency to its transitive dependency
+                        let from_id = PackageId::from_package(package);
+                        let to_id = dep_node.id.clone();
+                        let edge = DependencyEdge::new(
+                            from_id,
+                            to_id,
+                            VersionConstraint::Any, // We don't know the exact constraint
+                            true,                   // This is a transitive dependency
+                        );
+                        graph.add_edge(edge);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(
+                        "Failed to resolve transitive dependencies for {}: {}",
+                        package.name,
+                        e
+                    );
+                    // Continue with other packages
+                }
+            }
         }
     }
 

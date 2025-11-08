@@ -27,8 +27,13 @@ use vulnera_core::infrastructure::{
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::{CacheServiceImpl, FileCacheRepository, MemoryCache, MultiLevelCache},
     parsers::ParserFactory,
+    registries::MultiplexRegistryClient,
     repositories::AggregatingVulnerabilityRepository,
     resilience::{CircuitBreaker, CircuitBreakerConfig},
+};
+use vulnera_deps::{
+    AnalyzeDependenciesUseCase, services::version_resolution::VersionResolutionServiceImpl,
+    types::VersionResolutionService,
 };
 
 /// Create the application router
@@ -118,6 +123,23 @@ pub async fn create_app(
     // Initialize report service
     let report_service = Arc::new(ReportServiceImpl::new());
 
+    // Initialize registry client and version resolution service
+    let registry_client = Arc::new(MultiplexRegistryClient::new());
+    let version_resolution_service: Arc<dyn VersionResolutionService> =
+        Arc::new(VersionResolutionServiceImpl::new_with_cache(
+            registry_client.clone(),
+            cache_service.clone(),
+        ));
+
+    // Create dependency analysis use case
+    let dependency_analysis_use_case = Arc::new(AnalyzeDependenciesUseCase::new_with_config(
+        parser_factory.clone(),
+        vulnerability_repository.clone(),
+        cache_service.clone(),
+        config.analysis.max_concurrent_packages,
+        config.analysis.max_concurrent_registry_queries,
+    ));
+
     // Create dependency analyzer module
     let deps_module = Arc::new(DependencyAnalyzerModule::new(
         parser_factory.clone(),
@@ -198,6 +220,8 @@ pub async fn create_app(
         cache_service,
         report_service,
         vulnerability_repository,
+        dependency_analysis_use_case,
+        version_resolution_service,
         db_pool,
         user_repository,
         api_key_repository,

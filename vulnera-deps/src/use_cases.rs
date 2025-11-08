@@ -15,7 +15,15 @@ use vulnera_core::domain::vulnerability::{
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_core::infrastructure::registries::{CratesIoRegistryClient, PackageRegistryClient};
 
-use crate::services::{PopularPackageService, PopularPackageVulnerabilityResult};
+use crate::application::analysis_context::{AnalysisContext, detect_workspace};
+use crate::domain::{DependencyGraph, PackageId};
+use crate::services::resolution_algorithms::{BacktrackingResolver, LexicographicOptimizer};
+use crate::services::{
+    PopularPackageService, PopularPackageVulnerabilityResult,
+    dependency_resolver::{DependencyResolverService, DependencyResolverServiceImpl},
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Use case for analyzing dependencies from a file
 pub struct AnalyzeDependenciesUseCase<C: CacheService> {
@@ -24,6 +32,8 @@ pub struct AnalyzeDependenciesUseCase<C: CacheService> {
     cache_service: Arc<C>,
     max_concurrent_requests: usize,
     max_concurrent_registry_queries: usize,
+    dependency_resolver: Arc<dyn DependencyResolverService>,
+    analysis_context: Option<Arc<AnalysisContext>>,
 }
 
 impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
@@ -34,12 +44,16 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         cache_service: Arc<C>,
         max_concurrent_requests: usize,
     ) -> Self {
+        let dependency_resolver =
+            Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
         Self {
             parser_factory,
             vulnerability_repository,
             cache_service,
             max_concurrent_requests,
             max_concurrent_registry_queries: 5, // Default value
+            dependency_resolver,
+            analysis_context: None,
         }
     }
 
@@ -51,27 +65,113 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         max_concurrent_requests: usize,
         max_concurrent_registry_queries: usize,
     ) -> Self {
+        let dependency_resolver =
+            Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
         Self {
             parser_factory,
             vulnerability_repository,
             cache_service,
             max_concurrent_requests,
             max_concurrent_registry_queries,
+            dependency_resolver,
+            analysis_context: None,
+        }
+    }
+
+    /// Create a new use case instance with analysis context
+    pub fn new_with_context(
+        parser_factory: Arc<ParserFactory>,
+        vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
+        cache_service: Arc<C>,
+        max_concurrent_requests: usize,
+        max_concurrent_registry_queries: usize,
+        project_root: Option<PathBuf>,
+    ) -> Self {
+        let dependency_resolver =
+            Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
+        let analysis_context = project_root.map(|root| Arc::new(AnalysisContext::new(root)));
+        Self {
+            parser_factory,
+            vulnerability_repository,
+            cache_service,
+            max_concurrent_requests,
+            max_concurrent_registry_queries,
+            dependency_resolver,
+            analysis_context,
         }
     }
 
     /// Execute the use case to analyze dependencies
+    /// Returns both the analysis report and the dependency graph
     pub async fn execute(
         &self,
         file_content: &str,
         ecosystem: Ecosystem,
         filename: Option<&str>,
-    ) -> Result<AnalysisReport, ApplicationError> {
+    ) -> Result<(AnalysisReport, DependencyGraph), ApplicationError> {
         let start_time = Instant::now();
         info!(
             "Starting dependency analysis for ecosystem: {:?}",
             ecosystem
         );
+
+        // Use analysis context for workspace detection and caching if available
+        let file_path = filename.map(PathBuf::from);
+        if let (Some(ctx), Some(path)) = (&self.analysis_context, &file_path) {
+            // Check if file should be ignored
+            if ctx.should_ignore(path) {
+                info!("File {} is ignored by analysis context", path.display());
+                let empty_graph = DependencyGraph::new();
+                return Ok((
+                    AnalysisReport::new(
+                        vec![],
+                        vec![],
+                        start_time.elapsed(),
+                        vec!["File ignored".to_string()],
+                    ),
+                    empty_graph,
+                ));
+            }
+
+            // Check if file needs re-analysis (cache check)
+            if !ctx.needs_analysis(path) {
+                debug!(
+                    "File {} is up-to-date in cache, attempting to retrieve cached results",
+                    path.display()
+                );
+
+                // Try to retrieve cached results
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                file_content.hash(&mut hasher);
+                let content_hash = hasher.finish();
+                let cache_key = format!("analysis_result:{}:{}", path.display(), content_hash);
+
+                // Try to get cached report and graph
+                if let Ok(Some(cached_result)) = self
+                    .cache_service
+                    .get::<(AnalysisReport, DependencyGraph)>(&cache_key)
+                    .await
+                {
+                    info!("Retrieved cached analysis results for {}", path.display());
+                    return Ok(cached_result);
+                } else {
+                    debug!(
+                        "No cached results found for {}, proceeding with analysis",
+                        path.display()
+                    );
+                }
+            }
+
+            // Detect workspace if not already detected
+            if ctx.workspace.is_none() {
+                if let Some(workspace) = detect_workspace(&ctx.project_root) {
+                    // Note: We can't mutate ctx here, but we could update it in a future version
+                    debug!("Detected workspace: {:?}", workspace);
+                }
+            }
+        }
 
         // Precompute Cargo resolution flag before moving ecosystem
         let do_cargo_resolution = matches!(ecosystem, Ecosystem::Cargo)
@@ -79,8 +179,35 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
 
         // Parse the dependency file
         let mut packages = self
-            .parse_dependencies(file_content, ecosystem, filename)
+            .parse_dependencies(file_content, ecosystem.clone(), filename)
             .await?;
+
+        if packages.is_empty() {
+            warn!("No packages found in dependency file");
+            let analysis_duration = start_time.elapsed();
+            let empty_graph = DependencyGraph::new();
+            return Ok((
+                AnalysisReport::new(
+                    packages,
+                    vec![],
+                    analysis_duration,
+                    vec!["No packages found".to_string()],
+                ),
+                empty_graph,
+            ));
+        }
+
+        // Build dependency graph using DependencyResolverService
+        let dependency_graph = self
+            .dependency_resolver
+            .build_graph(packages.clone(), ecosystem.clone())
+            .await?;
+
+        debug!(
+            "Built dependency graph: {} packages, {} dependencies",
+            dependency_graph.package_count(),
+            dependency_graph.dependency_count()
+        );
 
         // Resolve Cargo.toml minor/major specs to latest available version from crates.io (caret semantics)
         // Use parallel processing for better performance
@@ -158,16 +285,17 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                                         && vi.version >= lower
                                         && vi.version < upper
                                 });
-                                vers.sort_by(|a, b| a.version.cmp(&b.version));
+                                // Use LexicographicOptimizer to select best version
+                                // (prefers patch > minor > major upgrades)
+                                let candidate_versions: Vec<_> =
+                                    vers.iter().map(|vi| vi.version.clone()).collect();
+                                let selected = LexicographicOptimizer::select_version(
+                                    Some(&lower),
+                                    &candidate_versions,
+                                );
                                 Ok((
                                     idx,
-                                    vers.last().map(|best| {
-                                        if best.version > lower {
-                                            best.version.clone()
-                                        } else {
-                                            lower
-                                        }
-                                    }),
+                                    selected.and_then(|v| if v > lower { Some(v) } else { None }),
                                 ))
                             }
                             Err(e) => {
@@ -209,18 +337,11 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             }
         }
 
-        if packages.is_empty() {
-            warn!("No packages found in dependency file");
-            let analysis_duration = start_time.elapsed();
-            return Ok(AnalysisReport::new(
-                packages,
-                vec![],
-                analysis_duration,
-                vec!["No packages found".to_string()],
-            ));
-        }
-
-        info!("Parsed {} packages from dependency file", packages.len());
+        info!(
+            "Parsed {} packages from dependency file (graph has {} packages)",
+            packages.len(),
+            dependency_graph.package_count()
+        );
 
         // Convert packages to Arc for shared ownership to avoid cloning
         let packages_arc: Vec<Arc<Package>> =
@@ -246,6 +367,49 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             }
         };
 
+        // Use BacktrackingResolver for complex constraint resolution if needed
+        // This could be used for resolving version conflicts in the dependency graph
+        if dependency_graph.dependency_count() > 0 {
+            debug!(
+                "Dependency graph available with {} edges for constraint resolution",
+                dependency_graph.dependency_count()
+            );
+
+            // Fetch available versions for all packages in the graph
+            match self
+                .get_available_versions(&dependency_graph, ecosystem.clone())
+                .await
+            {
+                Ok(available_versions) => {
+                    if !available_versions.is_empty() {
+                        let resolution_result =
+                            BacktrackingResolver::resolve(&dependency_graph, &available_versions);
+                        if !resolution_result.conflicts.is_empty() {
+                            warn!(
+                                "Found {} dependency conflicts in the dependency graph",
+                                resolution_result.conflicts.len()
+                            );
+                            for conflict in &resolution_result.conflicts {
+                                warn!("Conflict for {}: {}", conflict.package, conflict.message);
+                            }
+                        } else {
+                            debug!(
+                                "Successfully resolved {} packages with no conflicts",
+                                resolution_result.resolved.len()
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!(
+                        "Failed to fetch available versions for conflict resolution: {}",
+                        e
+                    );
+                    // Continue without conflict resolution - this is best-effort
+                }
+            }
+        }
+
         let report = AnalysisReport::new(
             packages,
             vulnerabilities,
@@ -254,13 +418,42 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         );
 
         info!(
-            "Analysis completed in {:?}: {} packages, {} vulnerabilities",
+            "Analysis completed in {:?}: {} packages, {} vulnerabilities (graph: {} nodes, {} edges)",
             analysis_duration,
             report.metadata.total_packages,
-            report.metadata.total_vulnerabilities
+            report.metadata.total_vulnerabilities,
+            dependency_graph.package_count(),
+            dependency_graph.dependency_count()
         );
 
-        Ok(report)
+        // Store results in cache if analysis context is available
+        if let (Some(_ctx), Some(path)) = (&self.analysis_context, &file_path) {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            file_content.hash(&mut hasher);
+            let content_hash = hasher.finish();
+            let cache_key = format!("analysis_result:{}:{}", path.display(), content_hash);
+
+            // Cache the results with a TTL of 24 hours
+            let cache_ttl = std::time::Duration::from_secs(24 * 3600);
+            let result_to_cache = (report.clone(), dependency_graph.clone());
+            if let Err(e) = self
+                .cache_service
+                .set(&cache_key, &result_to_cache, cache_ttl)
+                .await
+            {
+                warn!(
+                    "Failed to cache analysis results for {}: {}",
+                    path.display(),
+                    e
+                );
+            } else {
+                debug!("Cached analysis results for {}", path.display());
+            }
+        }
+
+        Ok((report, dependency_graph))
     }
 
     /// Parse dependency file content into packages
@@ -437,6 +630,101 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         );
 
         Ok(all_vulnerabilities)
+    }
+
+    /// Helper method to fetch available versions for all packages in a dependency graph
+    async fn get_available_versions(
+        &self,
+        graph: &DependencyGraph,
+        ecosystem: Ecosystem,
+    ) -> Result<
+        HashMap<PackageId, Vec<vulnera_core::domain::vulnerability::value_objects::Version>>,
+        ApplicationError,
+    > {
+        use vulnera_core::infrastructure::registries::{
+            CratesIoRegistryClient, MultiplexRegistryClient, NpmRegistryClient, PyPiRegistryClient,
+        };
+
+        let registry: Arc<dyn PackageRegistryClient> = match ecosystem {
+            Ecosystem::Npm => Arc::new(NpmRegistryClient),
+            Ecosystem::PyPI => Arc::new(PyPiRegistryClient),
+            Ecosystem::Cargo => Arc::new(CratesIoRegistryClient),
+            _ => Arc::new(MultiplexRegistryClient::new()),
+        };
+
+        let mut available_versions = HashMap::new();
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.max_concurrent_registry_queries,
+        ));
+        let mut join_set: JoinSet<
+            Result<
+                (
+                    PackageId,
+                    Vec<vulnera_core::domain::vulnerability::value_objects::Version>,
+                ),
+                ApplicationError,
+            >,
+        > = JoinSet::new();
+
+        // Fetch versions for each package in the graph
+        for (package_id, _node) in &graph.nodes {
+            let package_id_clone = package_id.clone();
+            let package_name = package_id.name.clone();
+            let ecosystem_clone = ecosystem.clone();
+            let registry_clone = registry.clone();
+            let permit = Arc::clone(&semaphore);
+
+            join_set.spawn(async move {
+                let _permit = permit.acquire().await.map_err(|e| {
+                    ApplicationError::Vulnerability(
+                        vulnera_core::application::errors::VulnerabilityError::Api(
+                            vulnera_core::application::errors::ApiError::Http {
+                                status: 500,
+                                message: format!("Failed to acquire semaphore: {}", e),
+                            },
+                        ),
+                    )
+                })?;
+
+                match registry_clone
+                    .list_versions(ecosystem_clone, &package_name)
+                    .await
+                {
+                    Ok(version_infos) => {
+                        let versions: Vec<
+                            vulnera_core::domain::vulnerability::value_objects::Version,
+                        > = version_infos.into_iter().map(|vi| vi.version).collect();
+                        Ok((package_id_clone, versions))
+                    }
+                    Err(e) => {
+                        debug!("Failed to fetch versions for {}: {}", package_name, e);
+                        // Return empty vector rather than error - best effort
+                        Ok((package_id_clone, Vec::new()))
+                    }
+                }
+            });
+        }
+
+        // Collect results
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok((package_id, versions))) => {
+                    if !versions.is_empty() {
+                        available_versions.insert(package_id, versions);
+                    }
+                }
+                Ok(Err(e)) => {
+                    warn!("Error fetching available versions: {}", e);
+                    // Continue with other packages
+                }
+                Err(e) => {
+                    warn!("Join error while fetching available versions: {}", e);
+                    // Continue with other packages
+                }
+            }
+        }
+
+        Ok(available_versions)
     }
 }
 
