@@ -4115,6 +4115,7 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "vulnera-core",
+ "vulnera-deps",
  "walkdir",
 ]
 

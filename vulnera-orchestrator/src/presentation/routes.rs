@@ -18,7 +18,7 @@ use crate::presentation::{
         AuthAppState, create_api_key, list_api_keys, login, refresh_token, register, revoke_api_key,
     },
     controllers::{
-        OrchestratorState, analyze,
+        OrchestratorState, analyze, analyze_dependencies,
         health::{health_check, metrics},
     },
     middleware::{
@@ -38,6 +38,7 @@ use axum::{
 #[openapi(
     paths(
         crate::presentation::controllers::analyze,
+        crate::presentation::controllers::analyze_dependencies,
         crate::presentation::controllers::health::health_check,
         crate::presentation::controllers::health::metrics,
         crate::presentation::auth::controller::login,
@@ -53,6 +54,20 @@ use axum::{
             FinalReportResponse,
             ErrorResponse,
             HealthResponse,
+            BatchDependencyAnalysisRequest,
+            BatchDependencyAnalysisResponse,
+            DependencyFileRequest,
+            FileAnalysisResult,
+            BatchAnalysisMetadata,
+            PackageDto,
+            DependencyGraphDto,
+            DependencyGraphNodeDto,
+            DependencyGraphEdgeDto,
+            VulnerabilityDto,
+            AffectedPackageDto,
+            AnalysisMetadataDto,
+            SeverityBreakdownDto,
+            VersionRecommendationDto,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::TokenResponse,
@@ -66,6 +81,7 @@ use axum::{
     ),
     tags(
         (name = "analysis", description = "Vulnerability analysis endpoints using job-based orchestration"),
+        (name = "dependencies", description = "Dependency analysis endpoints optimized for LSP/IDE extensions"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
         (name = "auth", description = "Authentication and authorization endpoints")
     ),
@@ -127,6 +143,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Orchestrator job-based analysis route
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
+        .route("/dependencies/analyze", post(analyze_dependencies))
         .merge(auth_routes);
 
     let health_routes = Router::new()

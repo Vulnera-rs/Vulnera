@@ -37,6 +37,27 @@ impl DependencyAnalyzerModule {
 
         Self { use_case }
     }
+
+    /// Create a new module with analysis context for workspace-aware analysis
+    pub fn new_with_context(
+        parser_factory: Arc<ParserFactory>,
+        vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
+        cache_service: Arc<CacheServiceImpl>,
+        max_concurrent_requests: usize,
+        max_concurrent_registry_queries: usize,
+        project_root: Option<std::path::PathBuf>,
+    ) -> Self {
+        let use_case = Arc::new(AnalyzeDependenciesUseCase::new_with_context(
+            parser_factory,
+            vulnerability_repository,
+            cache_service,
+            max_concurrent_requests,
+            max_concurrent_registry_queries,
+            project_root,
+        ));
+
+        Self { use_case }
+    }
 }
 
 #[async_trait]
@@ -91,7 +112,7 @@ impl AnalysisModule for DependencyAnalyzerModule {
         let filename = config.config.get("filename").and_then(|v| v.as_str());
 
         // Execute analysis
-        let analysis_report = self
+        let (analysis_report, _dependency_graph) = self
             .use_case
             .execute(file_content, ecosystem, filename)
             .await

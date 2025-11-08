@@ -10,6 +10,7 @@ categories.workspace = true
 
 [dependencies]
 vulnera-core = { path = "../vulnera-core" }
+vulnera-deps = { path = "../vulnera-deps" }
 sqlx = { workspace = true }
 
 # Web framework
