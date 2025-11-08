@@ -16,6 +16,7 @@ use vulnera_orchestrator::infrastructure::{
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 use vulnera_orchestrator::presentation::routes::create_router;
 use vulnera_sast::SastModule;
+use vulnera_secrets::SecretDetectionModule;
 
 use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
@@ -152,10 +153,14 @@ pub async fn create_app(
     // Create SAST module
     let sast_module = Arc::new(SastModule::with_config(&config.sast));
 
+    // Create secret detection module
+    let secrets_module = Arc::new(SecretDetectionModule::with_config(&config.secret_detection));
+
     // Register modules
     let mut module_registry = ModuleRegistry::new();
     module_registry.register(deps_module);
     module_registry.register(sast_module);
+    module_registry.register(secrets_module);
 
     // Create orchestrator use cases
     let project_detector = Arc::new(FileSystemProjectDetector);

@@ -4134,6 +4134,7 @@ dependencies = [
  "vulnera-deps",
  "vulnera-orchestrator",
  "vulnera-sast",
+ "vulnera-secrets",
 ]
 
 [[package]]
@@ -4155,6 +4156,26 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-python",
+ "vulnera-core",
+ "walkdir",
+]
+
+[[package]]
+name = "vulnera-secrets"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "hex",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
  "vulnera-core",
  "walkdir",
 ]

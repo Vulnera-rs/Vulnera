@@ -10,7 +10,3 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Create index on email for fast lookups
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-
--- Note: The updated_at trigger is created in a separate migration (20240101000003)
--- to work around PostgreSQL library loading issues on some systems
-
