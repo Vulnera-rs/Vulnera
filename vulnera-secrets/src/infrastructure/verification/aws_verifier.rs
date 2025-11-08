@@ -26,7 +26,9 @@ impl AwsVerifier {
     fn validate_access_key_format(access_key: &str) -> bool {
         access_key.len() == 20
             && access_key.starts_with("AKIA")
-            && access_key[4..].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            && access_key[4..]
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
     }
 
     /// Validate AWS secret access key format
@@ -42,9 +44,14 @@ impl AwsVerifier {
     /// Format: Base64-like string, typically 100+ characters
     fn validate_session_token_format(token: &str) -> bool {
         token.len() >= 100
-            && token
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '/' || c == '+' || c == '=' || c == '_' || c == '-')
+            && token.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || c == '/'
+                    || c == '+'
+                    || c == '='
+                    || c == '_'
+                    || c == '-'
+            })
     }
 }
 
@@ -126,7 +133,10 @@ impl AwsVerifier {
         if secret.len() <= 8 {
             return "***".to_string();
         }
-        format!("{}...{}", &secret[..4], &secret[secret.len().saturating_sub(4)..])
+        format!(
+            "{}...{}",
+            &secret[..4],
+            &secret[secret.len().saturating_sub(4)..]
+        )
     }
 }
-

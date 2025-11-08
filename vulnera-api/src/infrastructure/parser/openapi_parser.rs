@@ -1,10 +1,10 @@
 //! OpenAPI 3.x and Swagger 2.0 parser
 
 use crate::domain::value_objects::*;
+use serde_json::Value as JsonValue;
 use std::io::Cursor;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
-use serde_json::Value as JsonValue;
 
 /// Parser for OpenAPI/Swagger specifications
 pub struct OpenApiParser;
@@ -12,15 +12,14 @@ pub struct OpenApiParser;
 impl OpenApiParser {
     /// Parse an OpenAPI/Swagger specification from a file
     pub fn parse_file(file_path: &Path) -> Result<OpenApiSpec, ParseError> {
-        let content = std::fs::read_to_string(file_path)
-            .map_err(|e| {
-                error!(
-                    error = %e,
-                    file = %file_path.display(),
-                    "Failed to read OpenAPI file"
-                );
-                e
-            })?;
+        let content = std::fs::read_to_string(file_path).map_err(|e| {
+            error!(
+                error = %e,
+                file = %file_path.display(),
+                "Failed to read OpenAPI file"
+            );
+            e
+        })?;
         Self::parse(&content, file_path)
     }
 
@@ -62,7 +61,7 @@ impl OpenApiParser {
         // Extract security requirements from raw spec
         let global_security = Self::extract_security_from_json(&raw_spec, None);
         let path_securities = Self::extract_path_securities_from_json(&raw_spec);
-        
+
         // Extract OAuth flow token URLs from raw JSON (oas3 crate has private fields)
         let oauth_token_urls = Self::extract_oauth_token_urls(&raw_spec);
 
@@ -88,15 +87,27 @@ impl OpenApiParser {
             });
         }
 
-        Self::convert_spec_with_security(spec, file_path, global_security, path_securities, oauth_token_urls)
+        Self::convert_spec_with_security(
+            spec,
+            file_path,
+            global_security,
+            path_securities,
+            oauth_token_urls,
+        )
     }
 
     fn convert_spec_with_security(
         spec: oas3::Spec,
         _file_path: &Path,
         global_security: Vec<SecurityRequirement>,
-        path_securities: std::collections::HashMap<String, std::collections::HashMap<String, Vec<SecurityRequirement>>>,
-        oauth_token_urls: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+        path_securities: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, Vec<SecurityRequirement>>,
+        >,
+        oauth_token_urls: std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, String>,
+        >,
     ) -> Result<OpenApiSpec, ParseError> {
         debug!(
             version = %spec.openapi,
@@ -106,7 +117,8 @@ impl OpenApiParser {
 
         // Convert oas3::Spec to our domain model
         let paths = Self::parse_paths_with_security(&spec.paths, &path_securities);
-        let security_schemes = Self::parse_security_schemes_with_oauth_urls(&spec.components, &oauth_token_urls);
+        let security_schemes =
+            Self::parse_security_schemes_with_oauth_urls(&spec.components, &oauth_token_urls);
 
         Ok(OpenApiSpec {
             version: spec.openapi,
@@ -118,7 +130,10 @@ impl OpenApiParser {
 
     fn parse_paths_with_security(
         paths: &std::collections::BTreeMap<String, oas3::spec::PathItem>,
-        path_securities: &std::collections::HashMap<String, std::collections::HashMap<String, Vec<SecurityRequirement>>>,
+        path_securities: &std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, Vec<SecurityRequirement>>,
+        >,
     ) -> Vec<ApiPath> {
         let mut api_paths = Vec::new();
 
@@ -129,7 +144,7 @@ impl OpenApiParser {
                 .and_then(|ops| ops.get("_path"))
                 .cloned()
                 .unwrap_or_default();
-            
+
             let mut operations = Vec::new();
 
             // Parse operations from path item with their security requirements
@@ -214,11 +229,13 @@ impl OpenApiParser {
     ) -> ApiOperation {
         // Security requirements are now passed in from the raw JSON/YAML parsing
         // Operation-level security overrides path-level security (handled in parse_paths_with_security)
-        
+
         let parameters = Self::parse_parameters(&operation.parameters);
         let request_body = operation.request_body.as_ref().and_then(|rb| {
             match rb {
-                oas3::spec::ObjectOrReference::Object(rb_obj) => Some(Self::parse_request_body(rb_obj)),
+                oas3::spec::ObjectOrReference::Object(rb_obj) => {
+                    Some(Self::parse_request_body(rb_obj))
+                }
                 oas3::spec::ObjectOrReference::Ref { .. } => {
                     // Skip references for now - could be resolved later
                     warn!("Skipping request body reference");
@@ -237,7 +254,9 @@ impl OpenApiParser {
         }
     }
 
-    fn parse_parameters(params: &Vec<oas3::spec::ObjectOrReference<oas3::spec::Parameter>>) -> Vec<ApiParameter> {
+    fn parse_parameters(
+        params: &Vec<oas3::spec::ObjectOrReference<oas3::spec::Parameter>>,
+    ) -> Vec<ApiParameter> {
         let mut api_params = Vec::new();
 
         for param_ref in params {
@@ -279,7 +298,12 @@ impl OpenApiParser {
         }
     }
 
-    fn parse_responses(responses: &std::collections::BTreeMap<String, oas3::spec::ObjectOrReference<oas3::spec::Response>>) -> Vec<ApiResponse> {
+    fn parse_responses(
+        responses: &std::collections::BTreeMap<
+            String,
+            oas3::spec::ObjectOrReference<oas3::spec::Response>,
+        >,
+    ) -> Vec<ApiResponse> {
         let mut api_responses = Vec::new();
 
         for (status_code, response_ref) in responses.iter() {
@@ -304,20 +328,26 @@ impl OpenApiParser {
         api_responses
     }
 
-    fn parse_content(content: &Option<std::collections::BTreeMap<String, oas3::spec::MediaType>>) -> Vec<ApiContent> {
+    fn parse_content(
+        content: &Option<std::collections::BTreeMap<String, oas3::spec::MediaType>>,
+    ) -> Vec<ApiContent> {
         let mut api_content = Vec::new();
 
         if let Some(content_map) = content {
             for (media_type, media_type_obj) in content_map.iter() {
-                let schema = media_type_obj.schema.as_ref().and_then(|schema_ref| {
-                    match schema_ref {
-                        oas3::spec::ObjectOrReference::Object(schema) => Some(Self::parse_schema(schema)),
-                        oas3::spec::ObjectOrReference::Ref { .. } => {
-                            warn!("Skipping schema reference in media type");
-                            None
-                        }
-                    }
-                });
+                let schema =
+                    media_type_obj
+                        .schema
+                        .as_ref()
+                        .and_then(|schema_ref| match schema_ref {
+                            oas3::spec::ObjectOrReference::Object(schema) => {
+                                Some(Self::parse_schema(schema))
+                            }
+                            oas3::spec::ObjectOrReference::Ref { .. } => {
+                                warn!("Skipping schema reference in media type");
+                                None
+                            }
+                        });
                 api_content.push(ApiContent {
                     media_type: media_type.clone(),
                     schema,
@@ -328,13 +358,21 @@ impl OpenApiParser {
         api_content
     }
 
-    fn parse_response_headers(headers: &std::collections::BTreeMap<String, oas3::spec::ObjectOrReference<oas3::spec::Header>>) -> Vec<ApiHeader> {
+    fn parse_response_headers(
+        headers: &std::collections::BTreeMap<
+            String,
+            oas3::spec::ObjectOrReference<oas3::spec::Header>,
+        >,
+    ) -> Vec<ApiHeader> {
         let mut api_headers = Vec::new();
 
         for (name, header_ref) in headers.iter() {
             match header_ref {
                 oas3::spec::ObjectOrReference::Object(header) => {
-                    let schema = header.schema.as_ref().map(|schema| Self::parse_schema(schema));
+                    let schema = header
+                        .schema
+                        .as_ref()
+                        .map(|schema| Self::parse_schema(schema));
                     api_headers.push(ApiHeader {
                         name: name.clone(),
                         schema,
@@ -351,17 +389,17 @@ impl OpenApiParser {
     }
 
     fn parse_schema(schema: &oas3::spec::Schema) -> ApiSchema {
-        let properties: Vec<ApiProperty> = schema.properties.iter()
-            .filter_map(|(name, prop_schema_ref)| {
-                match prop_schema_ref {
-                    oas3::spec::ObjectOrReference::Object(prop_schema) => Some(ApiProperty {
-                        name: name.clone(),
-                        schema: Self::parse_schema(prop_schema),
-                    }),
-                    oas3::spec::ObjectOrReference::Ref { .. } => {
-                        warn!(property_name = %name, "Skipping schema reference in property");
-                        None
-                    }
+        let properties: Vec<ApiProperty> = schema
+            .properties
+            .iter()
+            .filter_map(|(name, prop_schema_ref)| match prop_schema_ref {
+                oas3::spec::ObjectOrReference::Object(prop_schema) => Some(ApiProperty {
+                    name: name.clone(),
+                    schema: Self::parse_schema(prop_schema),
+                }),
+                oas3::spec::ObjectOrReference::Ref { .. } => {
+                    warn!(property_name = %name, "Skipping schema reference in property");
+                    None
                 }
             })
             .collect();
@@ -382,7 +420,10 @@ impl OpenApiParser {
 
     fn parse_security_schemes_with_oauth_urls(
         components: &Option<oas3::spec::Components>,
-        oauth_token_urls: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+        oauth_token_urls: &std::collections::HashMap<
+            String,
+            std::collections::HashMap<String, String>,
+        >,
     ) -> Vec<SecurityScheme> {
         let mut schemes = Vec::new();
 
@@ -391,30 +432,34 @@ impl OpenApiParser {
                 match scheme_ref {
                     oas3::spec::ObjectOrReference::Object(scheme) => {
                         let scheme_type = match scheme {
-                        oas3::spec::SecurityScheme::ApiKey { location, name: key_name } => {
-                            SecuritySchemeType::ApiKey {
+                            oas3::spec::SecurityScheme::ApiKey {
+                                location,
+                                name: key_name,
+                            } => SecuritySchemeType::ApiKey {
                                 location: format!("{:?}", location),
                                 name: key_name.clone(),
-                            }
-                        }
-                        oas3::spec::SecurityScheme::Http { scheme: http_scheme, bearer_format } => {
-                            SecuritySchemeType::Http {
+                            },
+                            oas3::spec::SecurityScheme::Http {
+                                scheme: http_scheme,
+                                bearer_format,
+                            } => SecuritySchemeType::Http {
                                 scheme: http_scheme.clone(),
                                 bearer_format: Some(bearer_format.clone()),
+                            },
+                            oas3::spec::SecurityScheme::OAuth2 { flows } => {
+                                // Get token URLs for this scheme from extracted JSON
+                                let scheme_token_urls =
+                                    oauth_token_urls.get(name).cloned().unwrap_or_default();
+                                let oauth_flows =
+                                    Self::parse_oauth_flows_with_urls(&flows, &scheme_token_urls);
+                                SecuritySchemeType::OAuth2 { flows: oauth_flows }
                             }
-                        }
-                        oas3::spec::SecurityScheme::OAuth2 { flows } => {
-                            // Get token URLs for this scheme from extracted JSON
-                            let scheme_token_urls = oauth_token_urls.get(name).cloned().unwrap_or_default();
-                            let oauth_flows = Self::parse_oauth_flows_with_urls(&flows, &scheme_token_urls);
-                            SecuritySchemeType::OAuth2 { flows: oauth_flows }
-                        }
-                        oas3::spec::SecurityScheme::OpenIdConnect { open_id_connect_url } => {
-                            SecuritySchemeType::OpenIdConnect {
+                            oas3::spec::SecurityScheme::OpenIdConnect {
+                                open_id_connect_url,
+                            } => SecuritySchemeType::OpenIdConnect {
                                 url: open_id_connect_url.clone(),
-                            }
-                        }
-                    };
+                            },
+                        };
 
                         schemes.push(SecurityScheme {
                             name: name.clone(),
@@ -486,7 +531,8 @@ impl OpenApiParser {
     }
 
     fn parse_oauth_scopes(scopes: &std::collections::BTreeMap<String, String>) -> Vec<OAuthScope> {
-        scopes.iter()
+        scopes
+            .iter()
             .map(|(name, description)| OAuthScope {
                 name: name.clone(),
                 description: Some(description.clone()),
@@ -525,8 +571,7 @@ impl OpenApiParser {
 
         // Navigate to the target object (spec root or a specific path)
         let target = if let Some(path_key) = path {
-            spec.get("paths")
-                .and_then(|paths| paths.get(path_key))
+            spec.get("paths").and_then(|paths| paths.get(path_key))
         } else {
             Some(spec)
         };
@@ -562,7 +607,10 @@ impl OpenApiParser {
     /// Returns a map: path -> (operation -> security_requirements)
     fn extract_path_securities_from_json(
         spec: &JsonValue,
-    ) -> std::collections::HashMap<String, std::collections::HashMap<String, Vec<SecurityRequirement>>> {
+    ) -> std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, Vec<SecurityRequirement>>,
+    > {
         let mut result = std::collections::HashMap::new();
 
         if let Some(paths) = spec.get("paths").and_then(|p| p.as_object()) {
@@ -577,18 +625,26 @@ impl OpenApiParser {
 
                 // Extract operation-level security
                 if let Some(path_obj) = path_value.as_object() {
-                    for op_method in &["get", "post", "put", "delete", "patch", "head", "options", "trace"] {
+                    for op_method in &[
+                        "get", "post", "put", "delete", "patch", "head", "options", "trace",
+                    ] {
                         if let Some(op_value) = path_obj.get(*op_method) {
                             if let Some(op_obj) = op_value.as_object() {
-                                if let Some(security_array) = op_obj.get("security").and_then(|s| s.as_array()) {
+                                if let Some(security_array) =
+                                    op_obj.get("security").and_then(|s| s.as_array())
+                                {
                                     let mut op_requirements = Vec::new();
                                     for security_item in security_array {
                                         if let Some(security_obj) = security_item.as_object() {
                                             for (scheme_name, scopes_value) in security_obj {
-                                                let scopes = if let Some(scopes_array) = scopes_value.as_array() {
+                                                let scopes = if let Some(scopes_array) =
+                                                    scopes_value.as_array()
+                                                {
                                                     scopes_array
                                                         .iter()
-                                                        .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                                        .filter_map(|s| {
+                                                            s.as_str().map(|s| s.to_string())
+                                                        })
                                                         .collect()
                                                 } else {
                                                     Vec::new()
@@ -631,29 +687,47 @@ impl OpenApiParser {
                 if let Some(schemes_obj) = security_schemes.as_object() {
                     for (scheme_name, scheme_value) in schemes_obj {
                         if let Some(scheme_obj) = scheme_value.as_object() {
-                            if let Some(type_str) = scheme_obj.get("type").and_then(|t| t.as_str()) {
+                            if let Some(type_str) = scheme_obj.get("type").and_then(|t| t.as_str())
+                            {
                                 if type_str == "oauth2" {
-                                    if let Some(flows_obj) = scheme_obj.get("flows").and_then(|f| f.as_object()) {
+                                    if let Some(flows_obj) =
+                                        scheme_obj.get("flows").and_then(|f| f.as_object())
+                                    {
                                         let mut flow_urls = std::collections::HashMap::new();
-                                        
+
                                         // Extract clientCredentials token URL
-                                        if let Some(client_creds) = flows_obj.get("clientCredentials") {
-                                            if let Some(client_creds_obj) = client_creds.as_object() {
-                                                if let Some(token_url) = client_creds_obj.get("tokenUrl").and_then(|u| u.as_str()) {
-                                                    flow_urls.insert("clientCredentials".to_string(), token_url.to_string());
+                                        if let Some(client_creds) =
+                                            flows_obj.get("clientCredentials")
+                                        {
+                                            if let Some(client_creds_obj) = client_creds.as_object()
+                                            {
+                                                if let Some(token_url) = client_creds_obj
+                                                    .get("tokenUrl")
+                                                    .and_then(|u| u.as_str())
+                                                {
+                                                    flow_urls.insert(
+                                                        "clientCredentials".to_string(),
+                                                        token_url.to_string(),
+                                                    );
                                                 }
                                             }
                                         }
-                                        
+
                                         // Extract password token URL
                                         if let Some(password) = flows_obj.get("password") {
                                             if let Some(password_obj) = password.as_object() {
-                                                if let Some(token_url) = password_obj.get("tokenUrl").and_then(|u| u.as_str()) {
-                                                    flow_urls.insert("password".to_string(), token_url.to_string());
+                                                if let Some(token_url) = password_obj
+                                                    .get("tokenUrl")
+                                                    .and_then(|u| u.as_str())
+                                                {
+                                                    flow_urls.insert(
+                                                        "password".to_string(),
+                                                        token_url.to_string(),
+                                                    );
                                                 }
                                             }
                                         }
-                                        
+
                                         if !flow_urls.is_empty() {
                                             result.insert(scheme_name.clone(), flow_urls);
                                         }
@@ -690,7 +764,5 @@ pub enum ParseError {
     Yaml(#[from] serde_yaml::Error),
 
     #[error("OpenAPI version validation failed: {version}")]
-    InvalidVersion {
-        version: String,
-    },
+    InvalidVersion { version: String },
 }

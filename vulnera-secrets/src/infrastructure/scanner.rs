@@ -57,8 +57,7 @@ impl DirectoryScanner {
                 if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
                     if self.exclude_patterns.iter().any(|p| {
                         dir_name.contains(p)
-                            || p.contains('*')
-                                && dir_name.matches(&p.replace('*', "")).count() > 0
+                            || p.contains('*') && dir_name.matches(&p.replace('*', "")).count() > 0
                     }) {
                         trace!(directory = %dir_name, "Excluding directory");
                         excluded_count += 1;
@@ -137,5 +136,3 @@ impl DirectoryScanner {
         true
     }
 }
-
-

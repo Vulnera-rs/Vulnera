@@ -1,7 +1,7 @@
 //! API security use cases
 
 use std::path::Path;
-use tracing::{error, info, instrument, debug};
+use tracing::{debug, error, info, instrument};
 use vulnera_core::config::ApiSecurityConfig;
 
 use crate::domain::entities::{ApiFinding, FindingSeverity};
@@ -58,7 +58,10 @@ impl ScanApiSpecificationUseCase {
         let mut all_findings = Vec::new();
 
         // Define analyzer names and their corresponding analyzer functions
-        let analyzers: Vec<(&str, fn(&crate::domain::value_objects::OpenApiSpec) -> Vec<ApiFinding>)> = vec![
+        let analyzers: Vec<(
+            &str,
+            fn(&crate::domain::value_objects::OpenApiSpec) -> Vec<ApiFinding>,
+        )> = vec![
             ("authentication", |s| AuthenticationAnalyzer::analyze(s)),
             ("authorization", |s| AuthorizationAnalyzer::analyze(s)),
             ("input_validation", |s| InputValidationAnalyzer::analyze(s)),
@@ -71,15 +74,18 @@ impl ScanApiSpecificationUseCase {
         // Filter analyzers if enabled_analyzers is specified
         let analyzers_to_run = if self.config.enabled_analyzers.is_empty() {
             // All analyzers enabled
-            analyzers.iter().map(|(name, func)| (*name, *func)).collect::<Vec<_>>()
+            analyzers
+                .iter()
+                .map(|(name, func)| (*name, *func))
+                .collect::<Vec<_>>()
         } else {
             // Only run enabled analyzers
             analyzers
                 .iter()
                 .filter(|(name, _)| {
                     self.config.enabled_analyzers.iter().any(|enabled| {
-                        enabled.eq_ignore_ascii_case(name) || 
-                        enabled.eq_ignore_ascii_case(&format!("{}_analyzer", name))
+                        enabled.eq_ignore_ascii_case(name)
+                            || enabled.eq_ignore_ascii_case(&format!("{}_analyzer", name))
                     })
                 })
                 .map(|(name, func)| (*name, *func))
@@ -176,10 +182,7 @@ impl Default for ScanApiSpecificationUseCase {
 #[derive(Debug, thiserror::Error)]
 pub enum ScanError {
     #[error("Parse error: {message} (file: {file})")]
-    ParseError {
-        message: String,
-        file: String,
-    },
+    ParseError { message: String, file: String },
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -188,9 +191,5 @@ pub enum ScanError {
     Configuration(String),
 
     #[error("OpenAPI version not supported: {version} (supported: 3.0.0+)")]
-    UnsupportedVersion {
-        version: String,
-    },
+    UnsupportedVersion { version: String },
 }
-
-

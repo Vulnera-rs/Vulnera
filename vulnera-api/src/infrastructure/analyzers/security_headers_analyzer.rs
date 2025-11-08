@@ -24,16 +24,20 @@ impl SecurityHeadersAnalyzer {
             for operation in &path.operations {
                 // Check all responses for security headers
                 for response in &operation.responses {
-                    let found_headers: Vec<String> = response.headers.iter()
-                        .map(|h| h.name.clone())
-                        .collect();
+                    let found_headers: Vec<String> =
+                        response.headers.iter().map(|h| h.name.clone()).collect();
 
                     // Check for missing security headers
                     for required_header in &required_security_headers {
-                        if !found_headers.iter().any(|h| h.eq_ignore_ascii_case(required_header)) {
+                        if !found_headers
+                            .iter()
+                            .any(|h| h.eq_ignore_ascii_case(required_header))
+                        {
                             findings.push(ApiFinding {
-                                id: format!("security-header-missing-{}-{}-{}", 
-                                    path.path, operation.method, required_header),
+                                id: format!(
+                                    "security-header-missing-{}-{}-{}",
+                                    path.path, operation.method, required_header
+                                ),
                                 vulnerability_type: ApiVulnerabilityType::MissingSecurityHeaders,
                                 location: ApiLocation {
                                     file_path: "openapi.yaml".to_string(),
@@ -59,7 +63,10 @@ impl SecurityHeadersAnalyzer {
                     // Check for CORS headers and validate configuration
                     // Note: CORS header values are in the header schema, not the header name
                     // This is a simplified check - in a full implementation, we'd parse the header schema
-                    if found_headers.iter().any(|h| h.eq_ignore_ascii_case("Access-Control-Allow-Origin")) {
+                    if found_headers
+                        .iter()
+                        .any(|h| h.eq_ignore_ascii_case("Access-Control-Allow-Origin"))
+                    {
                         // Flag CORS header presence for review (can't check value from spec alone)
                         findings.push(ApiFinding {
                             id: format!("cors-review-{}-{}", path.path, operation.method),
@@ -87,4 +94,3 @@ impl SecurityHeadersAnalyzer {
         findings
     }
 }
-

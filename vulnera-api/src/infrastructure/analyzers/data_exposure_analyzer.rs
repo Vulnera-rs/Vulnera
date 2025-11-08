@@ -10,7 +10,15 @@ impl DataExposureAnalyzer {
     pub fn analyze(spec: &OpenApiSpec) -> Vec<ApiFinding> {
         let mut findings = Vec::new();
 
-        let sensitive_param_names = ["password", "token", "secret", "key", "api_key", "access_token", "refresh_token"];
+        let sensitive_param_names = [
+            "password",
+            "token",
+            "secret",
+            "key",
+            "api_key",
+            "access_token",
+            "refresh_token",
+        ];
 
         for path in &spec.paths {
             for operation in &path.operations {
@@ -18,7 +26,10 @@ impl DataExposureAnalyzer {
                 for param in &operation.parameters {
                     if param.location == ParameterLocation::Query {
                         let param_lower = param.name.to_lowercase();
-                        if sensitive_param_names.iter().any(|&sensitive| param_lower.contains(sensitive)) {
+                        if sensitive_param_names
+                            .iter()
+                            .any(|&sensitive| param_lower.contains(sensitive))
+                        {
                             findings.push(ApiFinding {
                                 id: format!("sensitive-query-{}-{}-{}", path.path, operation.method, param.name),
                                 vulnerability_type: ApiVulnerabilityType::SensitiveDataInUrl,
@@ -46,4 +57,3 @@ impl DataExposureAnalyzer {
         findings
     }
 }
-

@@ -3,6 +3,186 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.3.0] - 2025-11-08
+
+### Added
+
+- **SAST (Static Application Security Testing) Module:**
+  - Multi-language static code analysis support:
+    - Python: AST parsing via `tree-sitter-python` crate
+    - JavaScript/TypeScript: AST parsing via `tree-sitter-javascript` crate
+    - Rust: AST parsing via `syn` crate (proc-macro-based)
+  - Configurable rule repository with TOML/JSON file loading
+  - Default rule set for common vulnerabilities:
+    - SQL injection detection
+    - Command injection detection
+    - Unsafe deserialization patterns
+    - Additional security anti-patterns
+  - Pattern-based detection with multiple matcher types:
+    - AST node type matching
+    - Function call name matching
+    - Regular expression pattern matching
+  - Automatic confidence scoring based on pattern specificity (High/Medium/Low)
+  - Configurable scan depth and exclude patterns
+  - Severity classification: Critical, High, Medium, Low, Info
+  - File counting and comprehensive logging integration
+
+- **Secrets Detection Module:**
+  - Multi-method secret detection:
+    - Regex-based pattern matching for known secret formats
+    - Entropy-based statistical analysis for high-entropy strings
+    - Git history scanning for secrets in commit history
+  - Supported secret types:
+    - AWS credentials (access keys, secret keys, session tokens)
+    - API keys (generic, Stripe, Twilio, and more)
+    - OAuth tokens and JWT tokens
+    - Database credentials and connection strings
+    - Private keys (SSH, RSA, EC, PGP)
+    - Cloud provider credentials (Azure, GCP)
+    - Version control tokens (GitHub, GitLab)
+    - High-entropy strings (Base64, hex)
+  - Configurable entropy thresholds:
+    - Base64 strings (default: 4.5)
+    - Hexadecimal strings (default: 3.0)
+  - Optional secret verification service integration
+  - Baseline file support for tracking known secrets
+  - File size limits and timeout controls
+  - Comprehensive exclude patterns for build artifacts and dependencies
+  - Git history scanning with configurable depth and date ranges
+
+- **API Security Module:**
+  - OpenAPI 3.x specification analysis via `oas3` crate
+  - Comprehensive security analyzer suite:
+    - Authentication analyzer: Missing/weak authentication, JWT expiration issues
+    - Authorization analyzer: Missing authorization checks, RBAC gaps, overly permissive access
+    - Input validation analyzer: Missing request validation, SQL injection risks, file upload limits
+    - Data exposure analyzer: Sensitive data in URLs/headers, missing encryption, PII handling
+    - Security headers analyzer: Missing security headers, insecure CORS configuration
+    - Design analyzer: Versioning issues, error handling, information disclosure, pagination
+    - OAuth analyzer: Insecure OAuth flows, missing token validation, redirect URI issues
+  - Configurable analyzer enablement (selective analysis)
+  - Severity overrides for specific vulnerability types
+  - Path exclusion support
+  - Strict mode for more aggressive security checks
+
+- **Orchestrator Pattern & Module Registry:**
+  - Unified analysis architecture with orchestrator pattern
+  - Centralized `ModuleRegistry` for managing all analysis modules
+  - Standardized `AnalysisModule` trait interface for module implementation
+  - Rule-based module selection (`RuleBasedModuleSelector`) based on source type and analysis depth
+  - Orchestrator use cases:
+    - `CreateAnalysisJobUseCase`: Job creation with automatic module selection
+    - `ExecuteAnalysisJobUseCase`: Parallel/sequential module execution
+    - `AggregateResultsUseCase`: Unified result aggregation from all modules
+  - Project detector (`FileSystemProjectDetector`) for automatic source type detection
+  - Analysis depth levels: minimal, standard, full
+
+- **Unified Analysis API:**
+  - New endpoint: `POST /api/v1/analyze/job`
+    - Accepts source type (git, file_upload, directory, s3_bucket)
+    - Accepts source URI (repository URL, file path, etc.)
+    - Accepts analysis depth (minimal, standard, full)
+    - Automatically selects and executes appropriate modules
+    - Returns unified report with findings from all executed modules
+  - Response includes:
+    - Job ID for tracking
+    - Execution status
+    - Aggregated summary across all modules
+    - Findings array with module type tagging
+
+- **Module-Specific Configuration:**
+  - SAST configuration section:
+    - `VULNERA__SAST__MAX_SCAN_DEPTH`: Maximum directory depth (default: 10)
+    - `VULNERA__SAST__EXCLUDE_PATTERNS`: Exclude patterns array
+    - `VULNERA__SAST__RULE_FILE_PATH`: Optional custom rule file path
+    - `VULNERA__SAST__ENABLE_LOGGING`: Enable logging (default: true)
+  - Secrets detection configuration section:
+    - `VULNERA__SECRET_DETECTION__MAX_SCAN_DEPTH`: Maximum directory depth (default: 10)
+    - `VULNERA__SECRET_DETECTION__EXCLUDE_PATTERNS`: Exclude patterns array
+    - `VULNERA__SECRET_DETECTION__BASE64_ENTROPY_THRESHOLD`: Base64 entropy threshold (default: 4.5)
+    - `VULNERA__SECRET_DETECTION__HEX_ENTROPY_THRESHOLD`: Hex entropy threshold (default: 3.0)
+    - `VULNERA__SECRET_DETECTION__ENABLE_ENTROPY_DETECTION`: Enable entropy detection (default: true)
+    - `VULNERA__SECRET_DETECTION__MAX_FILE_SIZE_BYTES`: Maximum file size (default: 10MB)
+    - `VULNERA__SECRET_DETECTION__ENABLE_VERIFICATION`: Enable verification (default: false)
+    - `VULNERA__SECRET_DETECTION__SCAN_GIT_HISTORY`: Scan git history (default: false)
+    - `VULNERA__SECRET_DETECTION__MAX_COMMITS_TO_SCAN`: Maximum commits to scan (null = unlimited)
+  - API security configuration section:
+    - `VULNERA__API_SECURITY__ENABLED_ANALYZERS`: List of enabled analyzers (empty = all)
+    - `VULNERA__API_SECURITY__STRICT_MODE`: Strict mode flag (default: false)
+    - `VULNERA__API_SECURITY__EXCLUDE_PATHS`: Path exclusion list
+    - `VULNERA__API_SECURITY__SEVERITY_OVERRIDES`: Severity override map
+
+### Changed
+
+- **Architecture Evolution:**
+  - Migrated from single-purpose dependency analysis to modular architecture
+  - Introduced orchestrator pattern for unified multi-module analysis
+  - Module registry enables extensible analysis capabilities
+  - Standardized module interface allows for easy addition of new analysis types
+  - Analysis results now include module type metadata for proper categorization
+
+- **Multi-Level Caching:**
+  - Enhanced caching system with L1 (in-memory) and L2 (filesystem) layers
+  - L1 cache uses Moka with configurable size and TTL
+  - L2 cache maintains filesystem-based storage with optional compression
+  - Cache key standardization across all modules
+
+### Configuration
+
+New environment variables for module configuration:
+
+```bash
+# SAST Module
+VULNERA__SAST__MAX_SCAN_DEPTH=10
+VULNERA__SAST__EXCLUDE_PATTERNS='["node_modules", ".git", "target"]'
+VULNERA__SAST__RULE_FILE_PATH=/path/to/rules.toml
+VULNERA__SAST__ENABLE_LOGGING=true
+
+# Secrets Detection Module
+VULNERA__SECRET_DETECTION__MAX_SCAN_DEPTH=10
+VULNERA__SECRET_DETECTION__BASE64_ENTROPY_THRESHOLD=4.5
+VULNERA__SECRET_DETECTION__HEX_ENTROPY_THRESHOLD=3.0
+VULNERA__SECRET_DETECTION__ENABLE_ENTROPY_DETECTION=true
+VULNERA__SECRET_DETECTION__MAX_FILE_SIZE_BYTES=10485760
+VULNERA__SECRET_DETECTION__SCAN_GIT_HISTORY=false
+
+# API Security Module
+VULNERA__API_SECURITY__ENABLED_ANALYZERS='[]'
+VULNERA__API_SECURITY__STRICT_MODE=false
+VULNERA__API_SECURITY__EXCLUDE_PATHS='[]'
+```
+
+### Technical Details
+
+- **SAST Implementation:**
+  - Tree-sitter parsers for Python and JavaScript provide robust AST parsing
+  - Syn crate enables proc-macro-based Rust AST analysis
+  - Rule repository supports both TOML and JSON formats
+  - Confidence calculation based on pattern specificity and context
+
+- **Secrets Detection Implementation:**
+  - Regex detector with comprehensive pattern library
+  - Entropy detector using Shannon entropy calculation
+  - Git history scanning via `git2` crate
+  - Verification service integration for secret validation
+
+- **API Security Implementation:**
+  - OpenAPI 3.x parsing via `oas3` crate
+  - Analyzer pattern enables modular security checks
+  - Configurable analyzer enablement for performance optimization
+
+- **Orchestrator Implementation:**
+  - Domain-driven design with clear separation of concerns
+  - Module registry pattern for extensibility
+  - Rule-based selection for intelligent module execution
+  - Parallel module execution where applicable
+
+### Breaking Changes
+
+- None. All changes are additive. Existing dependency analysis endpoints remain unchanged.
+
+---
+
 ## [0.2.0] - 2025-11-03
 
 ### Added

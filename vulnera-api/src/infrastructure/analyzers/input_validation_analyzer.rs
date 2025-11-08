@@ -13,7 +13,11 @@ impl InputValidationAnalyzer {
         for path in &spec.paths {
             for operation in &path.operations {
                 // Check for missing request validation
-                if operation.request_body.is_none() && (operation.method == "POST" || operation.method == "PUT" || operation.method == "PATCH") {
+                if operation.request_body.is_none()
+                    && (operation.method == "POST"
+                        || operation.method == "PUT"
+                        || operation.method == "PATCH")
+                {
                     findings.push(ApiFinding {
                         id: format!("validation-missing-{}-{}", path.path, operation.method),
                         vulnerability_type: ApiVulnerabilityType::MissingRequestValidation,
@@ -28,7 +32,8 @@ impl InputValidationAnalyzer {
                             "Endpoint {} {} is missing request body validation",
                             operation.method, path.path
                         ),
-                        recommendation: "Define request body schema with validation rules".to_string(),
+                        recommendation: "Define request body schema with validation rules"
+                            .to_string(),
                         path: Some(path.path.clone()),
                         method: Some(operation.method.clone()),
                     });
@@ -38,7 +43,10 @@ impl InputValidationAnalyzer {
                 for param in &operation.parameters {
                     if param.location == ParameterLocation::Query && param.schema.is_none() {
                         findings.push(ApiFinding {
-                            id: format!("sqli-risk-{}-{}-{}", path.path, operation.method, param.name),
+                            id: format!(
+                                "sqli-risk-{}-{}-{}",
+                                path.path, operation.method, param.name
+                            ),
                             vulnerability_type: ApiVulnerabilityType::SqlInjectionRisk,
                             location: ApiLocation {
                                 file_path: "openapi.yaml".to_string(),
@@ -51,7 +59,8 @@ impl InputValidationAnalyzer {
                                 "Query parameter '{}' in {} {} lacks schema validation",
                                 param.name, operation.method, path.path
                             ),
-                            recommendation: "Add schema validation to prevent SQL injection".to_string(),
+                            recommendation: "Add schema validation to prevent SQL injection"
+                                .to_string(),
                             path: Some(path.path.clone()),
                             method: Some(operation.method.clone()),
                         });
@@ -63,4 +72,3 @@ impl InputValidationAnalyzer {
         findings
     }
 }
-

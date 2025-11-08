@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
-use tokio::time::{timeout, Duration, Instant};
+use tokio::time::{Duration, Instant, timeout};
 use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::SecretDetectionConfig;
@@ -81,9 +81,10 @@ impl ScanForSecretsUseCase {
             ))
         };
 
-        let baseline_repository = config.baseline_file_path.as_ref().map(|path| {
-            Arc::new(FileBaselineRepository::new(path))
-        });
+        let baseline_repository = config
+            .baseline_file_path
+            .as_ref()
+            .map(|path| Arc::new(FileBaselineRepository::new(path)));
 
         // Use verification_concurrent_limit for file scanning concurrency, with a reasonable default
         let max_concurrent_scans = config.verification_concurrent_limit.max(10).min(100);
@@ -109,21 +110,21 @@ impl ScanForSecretsUseCase {
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
         info!("Starting secret detection scan");
-        
+
         // Track start time for overall timeout
         let start_time = Instant::now();
-        
+
         // Create cancellation token using tokio's watch channel
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let cancel_tx = Arc::new(cancel_tx);
-        
+
         // Set up overall scan timeout if configured
         let scan_future = async {
             // Check for cancellation before starting
             if *cancel_rx.borrow() {
                 return Err(ScanError::Configuration("Scan was cancelled".to_string()));
             }
-            
+
             let files = self.scanner.scan(root).map_err(|e| {
                 error!(
                     error = %e,
@@ -155,7 +156,7 @@ impl ScanForSecretsUseCase {
                     warn!("Scan cancelled, stopping file processing");
                     break;
                 }
-                
+
                 let detector_engine = self.detector_engine.clone();
                 let semaphore = semaphore.clone();
                 let cancel_tx_task = cancel_tx_clone.clone();
@@ -164,21 +165,24 @@ impl ScanForSecretsUseCase {
                     if *cancel_tx_task.subscribe().borrow() {
                         return Err(ScanError::Configuration("Task cancelled".to_string()));
                     }
-                    
+
                     // Acquire permit before scanning (will wait if limit reached)
-                    let _permit = semaphore.acquire().await.map_err(|e| {
-                        ScanError::ParseFailed {
-                            message: format!("Failed to acquire scan permit: {}", e),
-                            file: file.path.display().to_string(),
-                        }
-                    })?;
-                    
+                    let _permit =
+                        semaphore
+                            .acquire()
+                            .await
+                            .map_err(|e| ScanError::ParseFailed {
+                                message: format!("Failed to acquire scan permit: {}", e),
+                                file: file.path.display().to_string(),
+                            })?;
+
                     // Check cancellation again after acquiring permit
                     if *cancel_tx_task.subscribe().borrow() {
                         return Err(ScanError::Configuration("Task cancelled".to_string()));
                     }
-                    
-                    Self::scan_file_async_with_timeout(&detector_engine, &file, file_read_timeout).await
+
+                    Self::scan_file_async_with_timeout(&detector_engine, &file, file_read_timeout)
+                        .await
                 });
                 handles.push(handle);
             }
@@ -191,12 +195,12 @@ impl ScanForSecretsUseCase {
                     warn!("Scan cancelled, stopping result collection");
                     break;
                 }
-                
+
                 match handle.await {
                     Ok(Ok(findings)) => {
                         files_scanned += 1;
                         all_findings.extend(findings);
-                        
+
                         // Report progress at intervals
                         if (idx + 1) % progress_interval == 0 || (idx + 1) == file_count {
                             let progress_pct = ((idx + 1) * 100) / file_count;
@@ -240,60 +244,60 @@ impl ScanForSecretsUseCase {
                 }
             }
 
-        // Filter findings using baseline if available
-        let filtered_findings = if let Some(ref baseline_repo) = self.baseline_repository {
-            let mut filtered = Vec::new();
-            let mut new_findings_for_baseline = Vec::new();
-            
-            for finding in all_findings {
-                match baseline_repo.contains(&finding) {
-                    Ok(true) => {
-                        debug!(
-                            file = %finding.location.file_path,
-                            line = finding.location.line,
-                            "Finding filtered by baseline"
-                        );
-                        // Skip findings that exist in baseline (assumed false positives)
-                    }
-                    Ok(false) => {
-                        filtered.push(finding.clone());
-                        // Track new findings for baseline update
-                        if self.update_baseline {
-                            new_findings_for_baseline.push(finding);
+            // Filter findings using baseline if available
+            let filtered_findings = if let Some(ref baseline_repo) = self.baseline_repository {
+                let mut filtered = Vec::new();
+                let mut new_findings_for_baseline = Vec::new();
+
+                for finding in all_findings {
+                    match baseline_repo.contains(&finding) {
+                        Ok(true) => {
+                            debug!(
+                                file = %finding.location.file_path,
+                                line = finding.location.line,
+                                "Finding filtered by baseline"
+                            );
+                            // Skip findings that exist in baseline (assumed false positives)
+                        }
+                        Ok(false) => {
+                            filtered.push(finding.clone());
+                            // Track new findings for baseline update
+                            if self.update_baseline {
+                                new_findings_for_baseline.push(finding);
+                            }
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Error checking baseline, including finding");
+                            filtered.push(finding);
                         }
                     }
-                    Err(e) => {
-                        warn!(error = %e, "Error checking baseline, including finding");
-                        filtered.push(finding);
+                }
+
+                // Update baseline with new findings if enabled
+                if self.update_baseline && !new_findings_for_baseline.is_empty() {
+                    info!(
+                        new_finding_count = new_findings_for_baseline.len(),
+                        "Updating baseline with new findings"
+                    );
+
+                    let entries: Vec<_> = new_findings_for_baseline
+                        .iter()
+                        .map(|finding| {
+                            FileBaselineRepository::finding_to_entry(finding, true, false)
+                        })
+                        .collect();
+
+                    if let Err(e) = baseline_repo.add_entries(entries) {
+                        warn!(error = %e, "Failed to update baseline");
+                    } else {
+                        info!("Baseline updated successfully");
                     }
                 }
-            }
-            
-            // Update baseline with new findings if enabled
-            if self.update_baseline && !new_findings_for_baseline.is_empty() {
-                info!(
-                    new_finding_count = new_findings_for_baseline.len(),
-                    "Updating baseline with new findings"
-                );
-                
-                let entries: Vec<_> = new_findings_for_baseline
-                    .iter()
-                    .map(|finding| {
-                        FileBaselineRepository::finding_to_entry(finding, true, false)
-                    })
-                    .collect();
-                
-                if let Err(e) = baseline_repo.add_entries(entries) {
-                    warn!(error = %e, "Failed to update baseline");
-                } else {
-                    info!("Baseline updated successfully");
-                }
-            }
-            
-            filtered
-        } else {
-            all_findings
-        };
+
+                filtered
+            } else {
+                all_findings
+            };
 
             info!(
                 finding_count = filtered_findings.len(),
@@ -362,7 +366,9 @@ impl ScanForSecretsUseCase {
             }
         };
 
-        let findings = detector_engine.detect_in_file_async(&file.path, &content).await;
+        let findings = detector_engine
+            .detect_in_file_async(&file.path, &content)
+            .await;
         Ok(findings)
     }
 }
@@ -385,10 +391,7 @@ pub enum ScanError {
     },
 
     #[error("Parse error: {message} (file: {file})")]
-    ParseFailed {
-        message: String,
-        file: String,
-    },
+    ParseFailed { message: String, file: String },
 
     #[error("Configuration error: {0}")]
     Configuration(String),
@@ -399,4 +402,3 @@ pub enum ScanError {
         timeout_seconds: u64,
     },
 }
-

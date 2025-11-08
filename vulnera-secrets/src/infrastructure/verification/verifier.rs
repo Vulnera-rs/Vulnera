@@ -76,4 +76,3 @@ impl VerificationService {
         VerificationResult::NotSupported
     }
 }
-

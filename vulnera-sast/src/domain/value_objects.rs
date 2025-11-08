@@ -35,4 +35,3 @@ pub enum Confidence {
     Medium,
     Low,
 }
-
