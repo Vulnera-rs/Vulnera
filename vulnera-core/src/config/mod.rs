@@ -96,6 +96,7 @@ pub struct Config {
     pub analysis: AnalysisConfig,
     pub sast: SastConfig,
     pub secret_detection: SecretDetectionConfig,
+    pub api_security: ApiSecurityConfig,
     pub auth: AuthConfig,
     pub database: DatabaseConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
@@ -467,10 +468,28 @@ pub struct SecretDetectionConfig {
     pub enable_entropy_detection: bool,
     /// Maximum file size to scan in bytes (default: 10MB)
     pub max_file_size_bytes: u64,
-    /// Whether to enable secret verification (future feature)
+    /// Whether to enable secret verification
     pub enable_verification: bool,
+    /// Timeout for secret verification in seconds
+    pub verification_timeout_seconds: u64,
+    /// Maximum concurrent verification requests
+    pub verification_concurrent_limit: usize,
+    /// Optional path to baseline file for tracking known secrets
+    pub baseline_file_path: Option<PathBuf>,
+    /// Whether to update baseline after scan
+    pub update_baseline: bool,
+    /// Whether to scan git history for secrets
+    pub scan_git_history: bool,
+    /// Maximum number of commits to scan (None = unlimited)
+    pub max_commits_to_scan: Option<usize>,
+    /// Only scan commits since this date (None = scan all)
+    pub since_date: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether to enable logging for secret detection operations
     pub enable_logging: bool,
+    /// Timeout for file read operations in seconds (default: 30)
+    pub file_read_timeout_seconds: u64,
+    /// Overall scan timeout in seconds (None = no timeout)
+    pub scan_timeout_seconds: Option<u64>,
 }
 
 impl Default for SecretDetectionConfig {
@@ -497,7 +516,41 @@ impl Default for SecretDetectionConfig {
             enable_entropy_detection: true,
             max_file_size_bytes: 10 * 1024 * 1024, // 10MB
             enable_verification: false,
+            verification_timeout_seconds: 5,
+            verification_concurrent_limit: 10,
+            baseline_file_path: None,
+            update_baseline: false,
+            scan_git_history: false,
+            max_commits_to_scan: None,
+            since_date: None,
             enable_logging: true,
+            file_read_timeout_seconds: 30,
+            scan_timeout_seconds: None,
+        }
+    }
+}
+
+/// API Security configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ApiSecurityConfig {
+    /// List of enabled analyzers (empty = all enabled)
+    pub enabled_analyzers: Vec<String>,
+    /// Severity overrides for specific vulnerability types
+    pub severity_overrides: std::collections::HashMap<String, String>,
+    /// Paths to exclude from analysis
+    pub exclude_paths: Vec<String>,
+    /// Whether to use strict mode (more aggressive checks)
+    pub strict_mode: bool,
+}
+
+impl Default for ApiSecurityConfig {
+    fn default() -> Self {
+        Self {
+            enabled_analyzers: Vec::new(), // Empty = all enabled
+            severity_overrides: std::collections::HashMap::new(),
+            exclude_paths: Vec::new(),
+            strict_mode: false,
         }
     }
 }
@@ -632,6 +685,7 @@ impl Default for Config {
             },
             sast: SastConfig::default(),
             secret_detection: SecretDetectionConfig::default(),
+            api_security: ApiSecurityConfig::default(),
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),
             popular_packages: None,
@@ -646,6 +700,7 @@ impl Validate for Config {
         self.apis.validate()?;
         self.analysis.validate()?;
         validation::Validate::validate(&self.secret_detection)?;
+        validation::Validate::validate(&self.api_security)?;
         validation::Validate::validate(&self.auth)?;
         validation::Validate::validate(&self.database)?;
         Ok(())
