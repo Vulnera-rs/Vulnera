@@ -1,7 +1,6 @@
 //! Authentication use cases
 
 use chrono::Utc;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::domain::auth::{
