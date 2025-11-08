@@ -53,5 +53,3 @@ impl SecretVerifier for GitLabVerifier {
         }
     }
 }
-
-

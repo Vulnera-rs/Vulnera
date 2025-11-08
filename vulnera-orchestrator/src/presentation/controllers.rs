@@ -329,9 +329,7 @@ async fn convert_analysis_report_to_response(
         for vuln in &report.vulnerabilities {
             for affected_pkg in &vuln.affected_packages {
                 let identifier = affected_pkg.package.identifier();
-                if !vulnerable_packages.contains_key(&identifier) {
-                    vulnerable_packages.insert(identifier, &affected_pkg.package);
-                }
+                vulnerable_packages.entry(identifier).or_insert(&affected_pkg.package);
             }
         }
 
@@ -345,7 +343,7 @@ async fn convert_analysis_report_to_response(
                     let identifier = affected_pkg.package.identifier();
                     package_vulnerability_indices
                         .entry(identifier)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(vuln_idx);
                 }
             }

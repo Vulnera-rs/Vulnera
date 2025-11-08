@@ -1,7 +1,9 @@
 //! OAuth/OIDC security analyzer
 
 use crate::domain::entities::{ApiFinding, ApiLocation, FindingSeverity};
-use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec, OAuthFlowType, SecuritySchemeType};
+use crate::domain::value_objects::{
+    ApiVulnerabilityType, OAuthFlowType, OpenApiSpec, SecuritySchemeType,
+};
 
 /// Analyzer for OAuth/OIDC issues
 pub struct OAuthAnalyzer;
@@ -36,7 +38,9 @@ impl OAuthAnalyzer {
                     }
 
                     // Check for missing token URL in authorization code flow
-                    if flow.flow_type == OAuthFlowType::AuthorizationCode && flow.token_url.is_none() {
+                    if flow.flow_type == OAuthFlowType::AuthorizationCode
+                        && flow.token_url.is_none()
+                    {
                         findings.push(ApiFinding {
                             id: format!("oauth-token-url-{}", scheme.name),
                             vulnerability_type: ApiVulnerabilityType::InsecureOAuthFlow,
@@ -51,7 +55,8 @@ impl OAuthAnalyzer {
                                 "OAuth2 authorization code flow for '{}' is missing token URL",
                                 scheme.name
                             ),
-                            recommendation: "Add token URL to the OAuth2 flow configuration".to_string(),
+                            recommendation: "Add token URL to the OAuth2 flow configuration"
+                                .to_string(),
                             path: None,
                             method: None,
                         });
@@ -63,5 +68,3 @@ impl OAuthAnalyzer {
         findings
     }
 }
-
-

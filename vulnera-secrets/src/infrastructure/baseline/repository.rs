@@ -148,7 +148,6 @@ impl FileBaselineRepository {
         Ok(baseline)
     }
 
-
     /// Hash a secret for baseline tracking
     pub fn hash_secret(secret: &str) -> String {
         use sha2::{Digest, Sha256};
@@ -231,7 +230,11 @@ impl FileBaselineRepository {
     }
 
     /// Convert a SecretFinding to a BaselineEntry
-    pub fn finding_to_entry(finding: &SecretFinding, is_secret: bool, is_verified: bool) -> BaselineEntry {
+    pub fn finding_to_entry(
+        finding: &SecretFinding,
+        is_secret: bool,
+        is_verified: bool,
+    ) -> BaselineEntry {
         BaselineEntry {
             secret_hash: Self::hash_secret(&finding.matched_secret),
             file_path: finding.location.file_path.clone(),
@@ -255,4 +258,3 @@ pub enum BaselineError {
     #[error("Serialize error: {0}")]
     SerializeError(String),
 }
-

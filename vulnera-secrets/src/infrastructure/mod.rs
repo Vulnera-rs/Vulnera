@@ -13,4 +13,3 @@ pub use git::*;
 pub use rules::*;
 pub use scanner::*;
 pub use verification::*;
-

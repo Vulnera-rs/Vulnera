@@ -10,35 +10,35 @@ pub enum ApiVulnerabilityType {
     WeakAuthentication,
     MissingRateLimiting,
     JwtWithoutExpiration,
-    
+
     // Authorization issues
     MissingAuthorization,
     OverlyPermissiveAccess,
     MissingRbac,
-    
+
     // Input validation
     MissingRequestValidation,
     MissingInputSanitization,
     MissingFileUploadSizeLimit,
     SqlInjectionRisk,
-    
+
     // Data exposure
     SensitiveDataInUrl,
     SensitiveDataInHeaders,
     MissingEncryption,
     PiiWithoutConsent,
-    
+
     // Security headers
     MissingSecurityHeaders,
     InsecureCors,
     MissingRateLimitingHeaders,
-    
+
     // API design
     VersioningIssues,
     MissingErrorHandling,
     InformationDisclosure,
     MissingPagination,
-    
+
     // OAuth/OIDC
     InsecureOAuthFlow,
     MissingTokenValidation,
@@ -144,10 +144,20 @@ pub struct SecurityScheme {
 /// Security scheme type
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecuritySchemeType {
-    ApiKey { location: String, name: String },
-    Http { scheme: String, bearer_format: Option<String> },
-    OAuth2 { flows: Vec<OAuthFlow> },
-    OpenIdConnect { url: String },
+    ApiKey {
+        location: String,
+        name: String,
+    },
+    Http {
+        scheme: String,
+        bearer_format: Option<String>,
+    },
+    OAuth2 {
+        flows: Vec<OAuthFlow>,
+    },
+    OpenIdConnect {
+        url: String,
+    },
 }
 
 /// OAuth flow
@@ -181,4 +191,3 @@ pub struct SecurityRequirement {
     pub scheme_name: String,
     pub scopes: Vec<String>,
 }
-

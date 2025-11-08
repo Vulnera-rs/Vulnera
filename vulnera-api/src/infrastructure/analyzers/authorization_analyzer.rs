@@ -16,7 +16,11 @@ impl AuthorizationAnalyzer {
                 // Check if operation has scopes defined (OAuth2 authorization)
                 let has_scopes = operation.security.iter().any(|req| !req.scopes.is_empty());
 
-                if !has_scopes && (operation.method == "POST" || operation.method == "PUT" || operation.method == "DELETE") {
+                if !has_scopes
+                    && (operation.method == "POST"
+                        || operation.method == "PUT"
+                        || operation.method == "DELETE")
+                {
                     findings.push(ApiFinding {
                         id: format!("authz-missing-{}-{}", path.path, operation.method),
                         vulnerability_type: ApiVulnerabilityType::MissingAuthorization,
@@ -31,7 +35,8 @@ impl AuthorizationAnalyzer {
                             "Endpoint {} {} may be missing authorization checks",
                             operation.method, path.path
                         ),
-                        recommendation: "Add OAuth2 scopes or RBAC requirements to restrict access".to_string(),
+                        recommendation: "Add OAuth2 scopes or RBAC requirements to restrict access"
+                            .to_string(),
                         path: Some(path.path.clone()),
                         method: Some(operation.method.clone()),
                     });
@@ -42,4 +47,3 @@ impl AuthorizationAnalyzer {
         findings
     }
 }
-

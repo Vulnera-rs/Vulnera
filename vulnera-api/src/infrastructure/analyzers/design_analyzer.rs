@@ -13,9 +13,13 @@ impl DesignAnalyzer {
         for path in &spec.paths {
             for operation in &path.operations {
                 // Check for missing pagination on list endpoints
-                if operation.method == "GET" && path.path.contains("list") || path.path.contains("search") {
-                    let has_pagination = operation.parameters.iter()
-                        .any(|p| p.name.to_lowercase().contains("page") || p.name.to_lowercase().contains("limit"));
+                if operation.method == "GET" && path.path.contains("list")
+                    || path.path.contains("search")
+                {
+                    let has_pagination = operation.parameters.iter().any(|p| {
+                        p.name.to_lowercase().contains("page")
+                            || p.name.to_lowercase().contains("limit")
+                    });
 
                     if !has_pagination {
                         findings.push(ApiFinding {
@@ -32,7 +36,9 @@ impl DesignAnalyzer {
                                 "List endpoint {} {} is missing pagination parameters",
                                 operation.method, path.path
                             ),
-                            recommendation: "Add pagination parameters (page, limit) to prevent large responses".to_string(),
+                            recommendation:
+                                "Add pagination parameters (page, limit) to prevent large responses"
+                                    .to_string(),
                             path: Some(path.path.clone()),
                             method: Some(operation.method.clone()),
                         });
@@ -40,7 +46,9 @@ impl DesignAnalyzer {
                 }
 
                 // Check for missing error handling
-                let has_error_responses = operation.responses.iter()
+                let has_error_responses = operation
+                    .responses
+                    .iter()
                     .any(|r| r.status_code.starts_with("4") || r.status_code.starts_with("5"));
 
                 if !has_error_responses {
@@ -58,7 +66,8 @@ impl DesignAnalyzer {
                             "Endpoint {} {} is missing error response definitions",
                             operation.method, path.path
                         ),
-                        recommendation: "Define error responses (4xx, 5xx) in the specification".to_string(),
+                        recommendation: "Define error responses (4xx, 5xx) in the specification"
+                            .to_string(),
                         path: Some(path.path.clone()),
                         method: Some(operation.method.clone()),
                     });
@@ -69,4 +78,3 @@ impl DesignAnalyzer {
         findings
     }
 }
-

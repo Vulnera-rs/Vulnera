@@ -76,4 +76,3 @@ pub enum SecretType {
     EnvironmentVariable,
     Other,
 }
-

@@ -84,7 +84,7 @@ impl DetectorEngine {
                     let verification_result = verification_service
                         .verify_secret(&regex_match.matched_text, &regex_match.rule.secret_type)
                         .await;
-                    
+
                     match verification_result {
                         VerificationResult::Verified => {
                             is_verified = true;
@@ -103,10 +103,7 @@ impl DetectorEngine {
                 }
 
                 findings.push(SecretFinding {
-                    id: format!(
-                        "{}-{}-{}",
-                        regex_match.rule_id, file_path_str, line_number
-                    ),
+                    id: format!("{}-{}-{}", regex_match.rule_id, file_path_str, line_number),
                     rule_id: regex_match.rule_id.clone(),
                     secret_type: regex_match.rule.secret_type.clone(),
                     location: Location {
@@ -153,7 +150,9 @@ impl DetectorEngine {
                             crate::domain::value_objects::EntropyEncoding::Hex => {
                                 SecretType::HighEntropyHex
                             }
-                            crate::domain::value_objects::EntropyEncoding::Generic => SecretType::Other,
+                            crate::domain::value_objects::EntropyEncoding::Generic => {
+                                SecretType::Other
+                            }
                         };
 
                         findings.push(SecretFinding {
@@ -204,11 +203,7 @@ impl DetectorEngine {
     }
 
     /// Detect secrets in a file's content (synchronous version for compatibility)
-    pub fn detect_in_file(
-        &self,
-        file_path: &Path,
-        content: &str,
-    ) -> Vec<SecretFinding> {
+    pub fn detect_in_file(&self, file_path: &Path, content: &str) -> Vec<SecretFinding> {
         // For synchronous version, we can't do async verification
         // This is used by git scanner which needs sync
         let mut findings = Vec::new();
@@ -224,10 +219,7 @@ impl DetectorEngine {
                 let severity = self.determine_severity(&regex_match.rule.secret_type);
 
                 findings.push(SecretFinding {
-                    id: format!(
-                        "{}-{}-{}",
-                        regex_match.rule_id, file_path_str, line_number
-                    ),
+                    id: format!("{}-{}-{}", regex_match.rule_id, file_path_str, line_number),
                     rule_id: regex_match.rule_id.clone(),
                     secret_type: regex_match.rule.secret_type.clone(),
                     location: Location {
@@ -268,7 +260,9 @@ impl DetectorEngine {
                             crate::domain::value_objects::EntropyEncoding::Hex => {
                                 SecretType::HighEntropyHex
                             }
-                            crate::domain::value_objects::EntropyEncoding::Generic => SecretType::Other,
+                            crate::domain::value_objects::EntropyEncoding::Generic => {
+                                SecretType::Other
+                            }
                         };
 
                         findings.push(SecretFinding {
@@ -361,4 +355,3 @@ impl DetectorEngine {
         format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
     }
 }
-

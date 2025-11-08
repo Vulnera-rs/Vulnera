@@ -141,7 +141,8 @@ pub fn oauth_token_rule() -> SecretRule {
         description: "OAuth access token".to_string(),
         secret_type: SecretType::OAuthToken,
         pattern: RulePattern::Regex(
-            r#"(?i)(?:oauth)[\s_-]*(?:token|access|secret)?[\s_-]*[:=]\s*([A-Za-z0-9_\-]{20,})"#.to_string(),
+            r#"(?i)(?:oauth)[\s_-]*(?:token|access|secret)?[\s_-]*[:=]\s*([A-Za-z0-9_\-]{20,})"#
+                .to_string(),
         ),
         keywords: vec!["oauth".to_string(), "token".to_string()],
         entropy_threshold: Some(3.5),
@@ -207,7 +208,11 @@ pub fn database_connection_string_rule() -> SecretRule {
         pattern: RulePattern::Regex(
             r#"(?i)(?:postgres|mysql|mongodb|redis)://[^:]+:[^@]+@[^\s"'`]+"#.to_string(),
         ),
-        keywords: vec!["postgres".to_string(), "mysql".to_string(), "mongodb".to_string()],
+        keywords: vec![
+            "postgres".to_string(),
+            "mysql".to_string(),
+            "mongodb".to_string(),
+        ],
         entropy_threshold: None,
         path_patterns: vec![],
     }
@@ -236,9 +241,7 @@ pub fn rsa_private_key_rule() -> SecretRule {
         name: "RSA Private Key".to_string(),
         description: "RSA private key".to_string(),
         secret_type: SecretType::RsaPrivateKey,
-        pattern: RulePattern::Regex(
-            r#"(?m)(?:-----BEGIN RSA PRIVATE KEY-----)"#.to_string(),
-        ),
+        pattern: RulePattern::Regex(r#"(?m)(?:-----BEGIN RSA PRIVATE KEY-----)"#.to_string()),
         keywords: vec!["rsa".to_string(), "private".to_string()],
         entropy_threshold: None,
         path_patterns: vec![],
@@ -252,9 +255,7 @@ pub fn ec_private_key_rule() -> SecretRule {
         name: "EC Private Key".to_string(),
         description: "Elliptic Curve private key".to_string(),
         secret_type: SecretType::EcPrivateKey,
-        pattern: RulePattern::Regex(
-            r#"(?m)(?:-----BEGIN EC PRIVATE KEY-----)"#.to_string(),
-        ),
+        pattern: RulePattern::Regex(r#"(?m)(?:-----BEGIN EC PRIVATE KEY-----)"#.to_string()),
         keywords: vec!["ec".to_string(), "private".to_string()],
         entropy_threshold: None,
         path_patterns: vec![],
@@ -268,9 +269,7 @@ pub fn pgp_private_key_rule() -> SecretRule {
         name: "PGP Private Key".to_string(),
         description: "PGP private key".to_string(),
         secret_type: SecretType::PgpPrivateKey,
-        pattern: RulePattern::Regex(
-            r#"(?m)(?:-----BEGIN PGP PRIVATE KEY BLOCK-----)"#.to_string(),
-        ),
+        pattern: RulePattern::Regex(r#"(?m)(?:-----BEGIN PGP PRIVATE KEY BLOCK-----)"#.to_string()),
         keywords: vec!["pgp".to_string(), "private".to_string()],
         entropy_threshold: None,
         path_patterns: vec![],
@@ -356,4 +355,3 @@ pub fn environment_variable_rule() -> SecretRule {
         path_patterns: vec![],
     }
 }
-

@@ -14,7 +14,8 @@ impl AuthenticationAnalyzer {
         for path in &spec.paths {
             for operation in &path.operations {
                 // Check if operation has security requirements
-                let has_security = !operation.security.is_empty() || !spec.global_security.is_empty();
+                let has_security =
+                    !operation.security.is_empty() || !spec.global_security.is_empty();
 
                 if !has_security {
                     findings.push(ApiFinding {
@@ -31,7 +32,8 @@ impl AuthenticationAnalyzer {
                             "Endpoint {} {} is missing authentication",
                             operation.method, path.path
                         ),
-                        recommendation: "Add authentication requirements to this endpoint".to_string(),
+                        recommendation: "Add authentication requirements to this endpoint"
+                            .to_string(),
                         path: Some(path.path.clone()),
                         method: Some(operation.method.clone()),
                     });
@@ -39,10 +41,16 @@ impl AuthenticationAnalyzer {
 
                 // Check for weak authentication schemes
                 for security_req in &operation.security {
-                    if let Some(scheme) = spec.security_schemes.iter()
-                        .find(|s| s.name == security_req.scheme_name) {
+                    if let Some(scheme) = spec
+                        .security_schemes
+                        .iter()
+                        .find(|s| s.name == security_req.scheme_name)
+                    {
                         match &scheme.scheme_type {
-                            SecuritySchemeType::Http { scheme: http_scheme, .. } => {
+                            SecuritySchemeType::Http {
+                                scheme: http_scheme,
+                                ..
+                            } => {
                                 if http_scheme == "basic" {
                                     findings.push(ApiFinding {
                                         id: format!("auth-weak-{}-{}", path.path, operation.method),
@@ -79,7 +87,9 @@ impl AuthenticationAnalyzer {
                                         "Endpoint {} {} uses API key only authentication",
                                         operation.method, path.path
                                     ),
-                                    recommendation: "Consider using OAuth2 or JWT for better security".to_string(),
+                                    recommendation:
+                                        "Consider using OAuth2 or JWT for better security"
+                                            .to_string(),
                                     path: Some(path.path.clone()),
                                     method: Some(operation.method.clone()),
                                 });
@@ -94,4 +104,3 @@ impl AuthenticationAnalyzer {
         findings
     }
 }
-

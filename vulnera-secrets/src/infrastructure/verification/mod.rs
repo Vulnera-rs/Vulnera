@@ -6,10 +6,8 @@ pub mod github_verifier;
 pub mod gitlab_verifier;
 pub mod verifier;
 
-pub use verifier::*;
 pub use aws_verifier::*;
+pub use generic_verifier::*;
 pub use github_verifier::*;
 pub use gitlab_verifier::*;
-pub use generic_verifier::*;
-
-
+pub use verifier::*;

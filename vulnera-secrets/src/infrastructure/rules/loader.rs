@@ -133,7 +133,11 @@ impl RuleRepository {
         let entropy_threshold = value
             .get("entropy_threshold")
             .and_then(|v| v.as_float())
-            .or_else(|| value.get("entropy_threshold").and_then(|v| v.as_integer().map(|i| i as f64)));
+            .or_else(|| {
+                value
+                    .get("entropy_threshold")
+                    .and_then(|v| v.as_integer().map(|i| i as f64))
+            });
 
         let path_patterns = value
             .get("path_patterns")
@@ -172,7 +176,9 @@ impl RuleRepository {
             "ssh_private_key" => crate::domain::entities::SecretType::SshPrivateKey,
             "rsa_private_key" => crate::domain::entities::SecretType::RsaPrivateKey,
             "database_password" => crate::domain::entities::SecretType::DatabasePassword,
-            "database_connection_string" => crate::domain::entities::SecretType::DatabaseConnectionString,
+            "database_connection_string" => {
+                crate::domain::entities::SecretType::DatabaseConnectionString
+            }
             _ => crate::domain::entities::SecretType::Other,
         }
     }
@@ -188,7 +194,10 @@ impl RuleRepository {
     }
 
     /// Get rules by secret type
-    pub fn get_rules_by_type(&self, secret_type: &crate::domain::entities::SecretType) -> Vec<&SecretRule> {
+    pub fn get_rules_by_type(
+        &self,
+        secret_type: &crate::domain::entities::SecretType,
+    ) -> Vec<&SecretRule> {
         self.rules
             .iter()
             .filter(|rule| {
@@ -217,4 +226,3 @@ pub enum RuleLoadError {
     #[error("Unsupported format: {0}")]
     UnsupportedFormat(String),
 }
-
