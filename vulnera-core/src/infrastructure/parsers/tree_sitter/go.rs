@@ -181,7 +181,7 @@ impl TreeSitterGoParser {
 
 impl TreeSitterParser for TreeSitterGoParser {
     fn language(&self) -> tree_sitter::Language {
-        unsafe { std::mem::transmute(tree_sitter_go::LANGUAGE) }
+        tree_sitter_go::language()
     }
 
     fn parse_with_tree_sitter(
