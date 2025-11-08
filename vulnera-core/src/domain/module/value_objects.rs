@@ -14,6 +14,8 @@ pub enum ModuleType {
     SAST,
     /// Secret detection module
     SecretDetection,
+    /// Malicious package detection module
+    MaliciousPackageDetection,
     /// License compliance module
     LicenseCompliance,
     /// SBOM generation module

@@ -40,6 +40,11 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 // Secret detection for all projects
                 modules.push(ModuleType::SecretDetection);
 
+                // Malicious package detection if we have dependencies
+                if !project.metadata.dependency_files.is_empty() {
+                    modules.push(ModuleType::MaliciousPackageDetection);
+                }
+
                 // License compliance if we have dependencies
                 if !project.metadata.dependency_files.is_empty() {
                     modules.push(ModuleType::LicenseCompliance);

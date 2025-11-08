@@ -73,3 +73,4 @@ pub fn get_default_rules() -> Vec<Rule> {
         null_pointer_rule(),
     ]
 }
+

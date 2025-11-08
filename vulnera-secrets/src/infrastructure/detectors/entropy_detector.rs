@@ -4,6 +4,7 @@ use crate::domain::value_objects::{Entropy, EntropyEncoding};
 use tracing::debug;
 
 /// Entropy detector for high-entropy strings
+#[derive(Clone)]
 pub struct EntropyDetector {
     base64_threshold: f64,
     hex_threshold: f64,

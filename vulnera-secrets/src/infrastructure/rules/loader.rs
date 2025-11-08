@@ -6,6 +6,7 @@ use std::path::Path;
 use tracing::{error, info, warn};
 
 /// Repository for secret detection rules
+#[derive(Clone)]
 pub struct RuleRepository {
     rules: Vec<SecretRule>,
 }
@@ -59,11 +60,121 @@ impl RuleRepository {
     }
 
     /// Load rules from TOML content
-    fn load_rules_from_toml(_content: &str) -> Result<Vec<SecretRule>, RuleLoadError> {
-        // TODO: Implement TOML parsing
-        // For now, return empty vector
-        warn!("TOML rule loading not yet implemented");
-        Ok(vec![])
+    fn load_rules_from_toml(content: &str) -> Result<Vec<SecretRule>, RuleLoadError> {
+        // Parse TOML content
+        let toml_value: toml::Value = toml::from_str(content)
+            .map_err(|e| RuleLoadError::ParseError(format!("TOML parse error: {}", e)))?;
+
+        let mut rules = Vec::new();
+
+        // Extract rules array from TOML
+        if let Some(rules_array) = toml_value.get("rules").and_then(|v| v.as_array()) {
+            for rule_value in rules_array {
+                if let Ok(rule) = Self::parse_rule_from_toml_value(rule_value) {
+                    rules.push(rule);
+                } else {
+                    warn!("Failed to parse rule from TOML, skipping");
+                }
+            }
+        } else if let Some(rule_value) = toml_value.get("rule") {
+            // Single rule format
+            if let Ok(rule) = Self::parse_rule_from_toml_value(rule_value) {
+                rules.push(rule);
+            }
+        }
+
+        Ok(rules)
+    }
+
+    /// Parse a single rule from TOML value
+    fn parse_rule_from_toml_value(value: &toml::Value) -> Result<SecretRule, RuleLoadError> {
+        let id = value
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RuleLoadError::ParseError("Missing 'id' field".to_string()))?
+            .to_string();
+
+        let name = value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(&id)
+            .to_string();
+
+        let pattern = value
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RuleLoadError::ParseError("Missing 'pattern' field".to_string()))?
+            .to_string();
+
+        let description = value
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        // Parse secret type (default to Other if not specified)
+        let secret_type_str = value
+            .get("secret_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Other");
+        let secret_type = Self::parse_secret_type(secret_type_str);
+
+        // Parse optional fields
+        let keywords = value
+            .get("keywords")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let entropy_threshold = value
+            .get("entropy_threshold")
+            .and_then(|v| v.as_float())
+            .or_else(|| value.get("entropy_threshold").and_then(|v| v.as_integer().map(|i| i as f64)));
+
+        let path_patterns = value
+            .get("path_patterns")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(SecretRule {
+            id,
+            name,
+            pattern: crate::domain::value_objects::RulePattern::Regex(pattern),
+            description,
+            secret_type,
+            keywords,
+            entropy_threshold,
+            path_patterns,
+        })
+    }
+
+    /// Parse secret type from string
+    fn parse_secret_type(s: &str) -> crate::domain::entities::SecretType {
+        match s.to_lowercase().as_str() {
+            "aws_access_key" => crate::domain::entities::SecretType::AwsAccessKey,
+            "aws_secret_key" => crate::domain::entities::SecretType::AwsSecretKey,
+            "aws_session_token" => crate::domain::entities::SecretType::AwsSessionToken,
+            "api_key" => crate::domain::entities::SecretType::ApiKey,
+            "github_token" => crate::domain::entities::SecretType::GitHubToken,
+            "gitlab_token" => crate::domain::entities::SecretType::GitLabToken,
+            "jwt_token" => crate::domain::entities::SecretType::JwtToken,
+            "oauth_token" => crate::domain::entities::SecretType::OAuthToken,
+            "bearer_token" => crate::domain::entities::SecretType::BearerToken,
+            "ssh_private_key" => crate::domain::entities::SecretType::SshPrivateKey,
+            "rsa_private_key" => crate::domain::entities::SecretType::RsaPrivateKey,
+            "database_password" => crate::domain::entities::SecretType::DatabasePassword,
+            "database_connection_string" => crate::domain::entities::SecretType::DatabaseConnectionString,
+            _ => crate::domain::entities::SecretType::Other,
+        }
     }
 
     /// Load rules from JSON content
