@@ -490,3 +490,154 @@ pub struct RepositoryDescriptorDto {
     #[schema(example = "https://github.com/rust-lang/cargo")]
     pub source_url: Option<String>,
 }
+
+/// Request for a single dependency file in batch analysis
+#[derive(Deserialize, ToSchema)]
+pub struct DependencyFileRequest {
+    /// The dependency file content to analyze
+    #[schema(example = r#"{"dependencies": {"express": "4.17.1", "lodash": "4.17.21"}}"#)]
+    pub file_content: String,
+
+    /// The package ecosystem type
+    #[schema(example = "npm")]
+    pub ecosystem: String,
+
+    /// Optional filename for automatic ecosystem detection
+    #[schema(example = "package.json")]
+    pub filename: Option<String>,
+}
+
+/// Batch dependency analysis request
+#[derive(Deserialize, ToSchema)]
+pub struct BatchDependencyAnalysisRequest {
+    /// List of dependency files to analyze
+    pub files: Vec<DependencyFileRequest>,
+}
+
+/// Package DTO for response
+#[derive(Serialize, ToSchema)]
+pub struct PackageDto {
+    /// Package name
+    #[schema(example = "express")]
+    pub name: String,
+
+    /// Package version
+    #[schema(example = "4.17.1")]
+    pub version: String,
+
+    /// Package ecosystem
+    #[schema(example = "npm")]
+    pub ecosystem: String,
+}
+
+/// Dependency graph node DTO
+#[derive(Serialize, ToSchema)]
+pub struct DependencyGraphNodeDto {
+    /// Package information
+    pub package: PackageDto,
+
+    /// Direct dependencies (package IDs)
+    pub dependencies: Vec<String>,
+
+    /// Whether this is a direct dependency
+    pub is_direct: bool,
+}
+
+/// Dependency graph edge DTO
+#[derive(Serialize, ToSchema)]
+pub struct DependencyGraphEdgeDto {
+    /// Source package ID
+    #[schema(example = "npm:express@4.17.1")]
+    pub from: String,
+
+    /// Target package ID
+    #[schema(example = "npm:body-parser@1.19.0")]
+    pub to: String,
+
+    /// Whether this is a transitive dependency
+    pub is_transitive: bool,
+}
+
+/// Dependency graph DTO
+#[derive(Serialize, ToSchema)]
+pub struct DependencyGraphDto {
+    /// All nodes in the graph
+    pub nodes: Vec<DependencyGraphNodeDto>,
+
+    /// All edges in the graph
+    pub edges: Vec<DependencyGraphEdgeDto>,
+
+    /// Total number of packages
+    pub package_count: usize,
+
+    /// Total number of dependencies
+    pub dependency_count: usize,
+}
+
+/// Result for a single file analysis
+#[derive(Serialize, ToSchema)]
+pub struct FileAnalysisResult {
+    /// Optional filename
+    #[schema(example = "package.json")]
+    pub filename: Option<String>,
+
+    /// Ecosystem detected/used
+    #[schema(example = "npm")]
+    pub ecosystem: String,
+
+    /// List of vulnerabilities (always included)
+    pub vulnerabilities: Vec<VulnerabilityDto>,
+
+    /// List of packages (included if detail_level >= standard)
+    pub packages: Option<Vec<PackageDto>>,
+
+    /// Dependency graph (included if detail_level == full)
+    pub dependency_graph: Option<DependencyGraphDto>,
+
+    /// Version recommendations (included if detail_level >= standard)
+    pub version_recommendations: Option<Vec<VersionRecommendationDto>>,
+
+    /// Analysis metadata
+    pub metadata: AnalysisMetadataDto,
+
+    /// Error message if analysis failed
+    pub error: Option<String>,
+}
+
+/// Batch analysis metadata
+#[derive(Serialize, ToSchema)]
+pub struct BatchAnalysisMetadata {
+    /// Total number of files analyzed
+    #[schema(example = 5)]
+    pub total_files: usize,
+
+    /// Number of successful analyses
+    #[schema(example = 4)]
+    pub successful: usize,
+
+    /// Number of failed analyses
+    #[schema(example = 1)]
+    pub failed: usize,
+
+    /// Total analysis duration in milliseconds
+    #[schema(example = 2500)]
+    pub duration_ms: u64,
+
+    /// Total vulnerabilities found across all files
+    #[schema(example = 12)]
+    pub total_vulnerabilities: usize,
+
+    /// Total packages analyzed across all files
+    #[schema(example = 45)]
+    pub total_packages: usize,
+}
+
+/// Batch dependency analysis response
+#[derive(Serialize, ToSchema)]
+pub struct BatchDependencyAnalysisResponse {
+    /// Results for each file (one per input file)
+    pub results: Vec<FileAnalysisResult>,
+
+    /// Batch analysis metadata
+    pub metadata: BatchAnalysisMetadata,
+}

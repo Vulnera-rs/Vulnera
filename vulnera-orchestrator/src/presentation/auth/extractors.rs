@@ -314,6 +314,88 @@ where
     }
 }
 
+/// Optional API key authentication extractor
+/// Returns None if no API key is provided, Some(ApiKeyAuth) if valid API key is found
+#[derive(Debug, Clone)]
+pub struct OptionalApiKeyAuth(pub Option<ApiKeyAuth>);
+
+impl<S> FromRequestParts<S> for OptionalApiKeyAuth
+where
+    S: Send + Sync,
+{
+    type Rejection = AuthErrorResponse;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Get AuthState from extensions
+        let auth_state = parts
+            .extensions
+            .get::<AuthState>()
+            .ok_or_else(|| AuthErrorResponse {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                error: ApplicationError::Configuration {
+                    message: "Auth state not found in request extensions".to_string(),
+                },
+            })?;
+
+        // Try to extract API key from Authorization header or X-API-Key header
+        let api_key = parts
+            .headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.strip_prefix("ApiKey "))
+            .map(|s| s.to_string())
+            .or_else(|| {
+                parts
+                    .headers
+                    .get("X-API-Key")
+                    .and_then(|h| h.to_str().ok())
+                    .map(|s| s.to_string())
+            });
+
+        // If no API key found, return None (optional auth)
+        let api_key = match api_key {
+            Some(key) => key,
+            None => return Ok(OptionalApiKeyAuth(None)),
+        };
+
+        // Validate API key
+        let user_id = auth_state
+            .validate_api_key
+            .execute(&api_key)
+            .await
+            .map_err(|_| AuthErrorResponse {
+                status: StatusCode::UNAUTHORIZED,
+                error: ApplicationError::Authentication(
+                    vulnera_core::domain::auth::errors::AuthError::ApiKeyInvalid,
+                ),
+            })?;
+
+        // Get user to get email
+        let user = auth_state
+            .user_repository
+            .find_by_id(&user_id)
+            .await
+            .map_err(|e| AuthErrorResponse {
+                status: StatusCode::UNAUTHORIZED,
+                error: ApplicationError::Authentication(e),
+            })?
+            .ok_or_else(|| AuthErrorResponse {
+                status: StatusCode::UNAUTHORIZED,
+                error: ApplicationError::Authentication(
+                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
+                        user_id: user_id.as_str(),
+                    },
+                ),
+            })?;
+
+        Ok(OptionalApiKeyAuth(Some(ApiKeyAuth {
+            user_id,
+            email: user.email,
+            api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId::generate(), // Placeholder
+        })))
+    }
+}
+
 /// Error response for authentication failures
 #[derive(Debug)]
 pub struct AuthErrorResponse {
