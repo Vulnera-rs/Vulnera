@@ -108,4 +108,3 @@ impl Default for SecretDetectionModule {
         Self::new()
     }
 }
-

@@ -26,7 +26,9 @@ impl EntropyDetector {
         // Look for Base64-like and hex-like strings
         let words: Vec<&str> = content
             .split_whitespace()
-            .flat_map(|s| s.split(|c: char| !c.is_alphanumeric() && c != '+' && c != '/' && c != '='))
+            .flat_map(|s| {
+                s.split(|c: char| !c.is_alphanumeric() && c != '+' && c != '/' && c != '=')
+            })
             .filter(|s| s.len() >= 20) // Minimum length for secrets
             .collect();
 
@@ -88,4 +90,3 @@ pub struct EntropyMatch {
     pub start_pos: usize,
     pub end_pos: usize,
 }
-

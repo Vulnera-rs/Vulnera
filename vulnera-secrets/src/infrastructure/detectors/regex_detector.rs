@@ -106,4 +106,3 @@ pub struct RegexMatch {
     pub end_pos: usize,
     pub captures: Vec<String>,
 }
-

@@ -77,6 +77,7 @@ pub struct AggregatedReport {
 
 /// Report summary statistics
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Default)]
 pub struct ReportSummary {
     pub total_findings: usize,
     pub critical: usize,
@@ -88,17 +89,3 @@ pub struct ReportSummary {
     pub modules_failed: usize,
 }
 
-impl Default for ReportSummary {
-    fn default() -> Self {
-        Self {
-            total_findings: 0,
-            critical: 0,
-            high: 0,
-            medium: 0,
-            low: 0,
-            info: 0,
-            modules_completed: 0,
-            modules_failed: 0,
-        }
-    }
-}

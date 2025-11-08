@@ -1,8 +1,8 @@
 //! Configuration validation module
 
 use crate::config::{
-    AnalysisConfig, ApiConfig, ApiSecurityConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig,
-    NvdConfig, SecretDetectionConfig, ServerConfig,
+    AnalysisConfig, ApiConfig, ApiSecurityConfig, AuthConfig, CacheConfig, DatabaseConfig,
+    GhsaConfig, GitHubConfig, NvdConfig, SecretDetectionConfig, ServerConfig,
 };
 use std::path::Path;
 
@@ -347,14 +347,16 @@ impl Validate for SecretDetectionConfig {
         // Validate verification_concurrent_limit > 0 if verification is enabled
         if self.enable_verification && self.verification_concurrent_limit == 0 {
             return Err(ValidationError::secret_detection(
-                "verification_concurrent_limit must be greater than 0 when verification is enabled".to_string(),
+                "verification_concurrent_limit must be greater than 0 when verification is enabled"
+                    .to_string(),
             ));
         }
 
         // Validate verification_timeout_seconds > 0 if verification is enabled
         if self.enable_verification && self.verification_timeout_seconds == 0 {
             return Err(ValidationError::secret_detection(
-                "verification_timeout_seconds must be greater than 0 when verification is enabled".to_string(),
+                "verification_timeout_seconds must be greater than 0 when verification is enabled"
+                    .to_string(),
             ));
         }
 

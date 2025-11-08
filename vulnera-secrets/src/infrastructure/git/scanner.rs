@@ -47,17 +47,23 @@ impl GitScanner {
         })?;
 
         let mut revwalk = repo.revwalk().map_err(GitScanError::GitError)?;
-        revwalk.set_sorting(git2::Sort::TIME).map_err(GitScanError::GitError)?;
+        revwalk
+            .set_sorting(git2::Sort::TIME)
+            .map_err(GitScanError::GitError)?;
         revwalk.push_head().map_err(GitScanError::GitError)?;
 
         let mut all_findings = Vec::new();
         let mut commit_count = 0;
-        
+
         // Estimate total commits for progress reporting (approximate)
         let mut total_commits_estimate = 0;
         let mut revwalk_estimate = repo.revwalk().map_err(GitScanError::GitError)?;
-        revwalk_estimate.set_sorting(git2::Sort::TIME).map_err(GitScanError::GitError)?;
-        revwalk_estimate.push_head().map_err(GitScanError::GitError)?;
+        revwalk_estimate
+            .set_sorting(git2::Sort::TIME)
+            .map_err(GitScanError::GitError)?;
+        revwalk_estimate
+            .push_head()
+            .map_err(GitScanError::GitError)?;
         for _ in revwalk_estimate {
             total_commits_estimate += 1;
             if total_commits_estimate > 10000 {
@@ -65,7 +71,7 @@ impl GitScanner {
                 break;
             }
         }
-        
+
         let progress_interval = (total_commits_estimate / 10).max(1); // Report every 10%
 
         for oid in revwalk {
@@ -80,8 +86,8 @@ impl GitScanner {
             }
 
             let commit = repo.find_commit(oid).map_err(GitScanError::GitError)?;
-            let commit_time = DateTime::from_timestamp(commit.time().seconds(), 0)
-                .unwrap_or_else(|| Utc::now());
+            let commit_time =
+                DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_else(|| Utc::now());
 
             // Check since_date filter
             if let Some(since) = self.since_date {
@@ -96,7 +102,7 @@ impl GitScanner {
             }
 
             commit_count += 1;
-            
+
             // Report progress at intervals
             if commit_count % progress_interval == 0 {
                 let progress_pct = if total_commits_estimate > 0 {
@@ -177,16 +183,16 @@ impl GitScanner {
         // Scan each line in the diff
         let mut file_cb = |_delta: DiffDelta, _progress: f32| true;
         let mut line_cb = |delta: DiffDelta, _hunk: Option<DiffHunk>, line: DiffLine| {
-            diff_scanner.scanner.scan_diff_line(delta, line, diff_scanner.metadata, diff_scanner.findings);
+            diff_scanner.scanner.scan_diff_line(
+                delta,
+                line,
+                diff_scanner.metadata,
+                diff_scanner.findings,
+            );
             true
         };
-        diff.foreach(
-            &mut file_cb,
-            None,
-            None,
-            Some(&mut line_cb),
-        )
-        .map_err(GitScanError::GitError)?;
+        diff.foreach(&mut file_cb, None, None, Some(&mut line_cb))
+            .map_err(GitScanError::GitError)?;
 
         Ok(findings)
     }
@@ -226,11 +232,7 @@ impl GitScanner {
                 rule_id: finding.rule_id,
                 secret_type: finding.secret_type,
                 location: Location {
-                    file_path: format!(
-                        "{}:{}",
-                        metadata.hash,
-                        finding.location.file_path
-                    ),
+                    file_path: format!("{}:{}", metadata.hash, finding.location.file_path),
                     line: finding.location.line,
                     column: finding.location.column,
                     end_line: finding.location.end_line,
@@ -262,4 +264,3 @@ pub enum GitScanError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
-

@@ -35,5 +35,3 @@ pub enum FindingSeverity {
     Low,
     Info,
 }
-
-
