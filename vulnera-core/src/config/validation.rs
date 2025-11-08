@@ -1,7 +1,7 @@
 //! Configuration validation module
 
 use crate::config::{
-    AnalysisConfig, ApiConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig,
+    AnalysisConfig, ApiConfig, ApiSecurityConfig, AuthConfig, CacheConfig, DatabaseConfig, GhsaConfig, GitHubConfig,
     NvdConfig, SecretDetectionConfig, ServerConfig,
 };
 use std::path::Path;
@@ -342,6 +342,89 @@ impl Validate for SecretDetectionConfig {
             return Err(ValidationError::secret_detection(
                 "max_file_size_bytes must be greater than 0".to_string(),
             ));
+        }
+
+        // Validate verification_concurrent_limit > 0 if verification is enabled
+        if self.enable_verification && self.verification_concurrent_limit == 0 {
+            return Err(ValidationError::secret_detection(
+                "verification_concurrent_limit must be greater than 0 when verification is enabled".to_string(),
+            ));
+        }
+
+        // Validate verification_timeout_seconds > 0 if verification is enabled
+        if self.enable_verification && self.verification_timeout_seconds == 0 {
+            return Err(ValidationError::secret_detection(
+                "verification_timeout_seconds must be greater than 0 when verification is enabled".to_string(),
+            ));
+        }
+
+        // Validate max_commits_to_scan > 0 if Some
+        if let Some(max_commits) = self.max_commits_to_scan {
+            if max_commits == 0 {
+                return Err(ValidationError::secret_detection(
+                    "max_commits_to_scan must be greater than 0 if specified".to_string(),
+                ));
+            }
+        }
+
+        // Validate file_read_timeout_seconds > 0
+        if self.file_read_timeout_seconds == 0 {
+            return Err(ValidationError::secret_detection(
+                "file_read_timeout_seconds must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate scan_timeout_seconds > 0 if Some
+        if let Some(scan_timeout) = self.scan_timeout_seconds {
+            if scan_timeout == 0 {
+                return Err(ValidationError::secret_detection(
+                    "scan_timeout_seconds must be greater than 0 if specified".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Validate for ApiSecurityConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Validate severity override values are valid
+        for (vuln_type, severity_str) in &self.severity_overrides {
+            let severity_lower = severity_str.to_lowercase();
+            if !matches!(
+                severity_lower.as_str(),
+                "critical" | "high" | "medium" | "low" | "info"
+            ) {
+                return Err(ValidationError::server(format!(
+                    "Invalid severity override for {}: {}. Must be one of: critical, high, medium, low, info",
+                    vuln_type, severity_str
+                )));
+            }
+        }
+
+        // Validate analyzer names if specified
+        let valid_analyzers = [
+            "authentication",
+            "authorization",
+            "input_validation",
+            "data_exposure",
+            "design",
+            "security_headers",
+            "oauth",
+        ];
+        for analyzer in &self.enabled_analyzers {
+            let analyzer_lower = analyzer.to_lowercase();
+            let is_valid = valid_analyzers.iter().any(|valid| {
+                analyzer_lower == *valid || analyzer_lower == format!("{}_analyzer", valid)
+            });
+            if !is_valid {
+                return Err(ValidationError::server(format!(
+                    "Unknown analyzer: {}. Valid analyzers are: {}",
+                    analyzer,
+                    valid_analyzers.join(", ")
+                )));
+            }
         }
 
         Ok(())

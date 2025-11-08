@@ -5,6 +5,7 @@ members = [
     "vulnera-orchestrator",
     "vulnera-sast",
     "vulnera-secrets",
+    "vulnera-api",
 ]
 resolver = "2"
 
@@ -28,6 +29,7 @@ vulnera-deps = { path = "vulnera-deps" }
 vulnera-orchestrator = { path = "vulnera-orchestrator" }
 vulnera-sast = { path = "vulnera-sast" }
 vulnera-secrets = { path = "vulnera-secrets" }
+vulnera-api = { path = "vulnera-api" }
 
 # Web framework
 axum = { workspace = true }

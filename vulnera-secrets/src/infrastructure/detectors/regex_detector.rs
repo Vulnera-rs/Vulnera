@@ -6,11 +6,13 @@ use std::collections::HashMap;
 use tracing::debug;
 
 /// Regex detector for known secret patterns
+#[derive(Clone)]
 pub struct RegexDetector {
     compiled_rules: HashMap<String, CompiledRule>,
 }
 
 /// Compiled regex rule with metadata
+#[derive(Clone)]
 struct CompiledRule {
     regex: Regex,
     rule: SecretRule,
