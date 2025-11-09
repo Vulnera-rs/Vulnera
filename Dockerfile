@@ -82,12 +82,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --release --package vulnera-core --package vulnera-deps \
     --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
-    --package vulnera-api && \
-    cargo build --release --package vulnera-rust
+    --package vulnera-api || (echo "Workspace packages build failed" && exit 1) && \
+    echo "Workspace packages built successfully" && \
+    cargo build --release --package vulnera-rust || (echo "Main binary build failed" && exit 1) && \
+    echo "Main binary built successfully"
 
-# Verify binary was built successfully
-RUN test -x /app/target/release/vulnera-rust && \
-    ls -la /app/target/release/vulnera-rust
+# Debug: Check what files exist in target directory
+RUN echo "=== Checking target directory ===" && \
+    ls -la /app/target/ && \
+    echo "=== Checking release directory ===" && \
+    ls -la /app/target/release/ && \
+    echo "=== Checking for vulnera files ===" && \
+    find /app/target -name "*vulnera*" -type f
 
 # Move binary to final location
 RUN cp /app/target/release/vulnera-rust /usr/local/bin/vulnera-rust && \
