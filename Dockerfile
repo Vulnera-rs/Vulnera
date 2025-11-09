@@ -56,6 +56,11 @@ COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
 COPY migrations ./migrations
 
+# Copy SQLx offline data directory (for offline compilation)
+# This must be generated locally first using: ./scripts/prepare-sqlx.sh
+# The .sqlx directory contains query metadata for compile-time verification
+COPY .sqlx ./.sqlx
+
 # Verify workspace structure and force rebuild of workspace members
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -71,7 +76,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     -exec touch {} \; 2>/dev/null || true
 
 # Build workspace members first, then the main binary
-# This ensures workspace members are built with real source before main crate compiles
+# Enable SQLx offline mode to avoid needing database connection during build
+ENV SQLX_OFFLINE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
