@@ -57,11 +57,6 @@ COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
 COPY migrations ./migrations
 
-# Copy SQLx offline data directory (for offline compilation)
-# This must be generated locally first using: ./scripts/prepare-sqlx.sh
-# The .sqlx directory contains query metadata for compile-time verification
-COPY .sqlx ./.sqlx
-
 # Verify workspace structure and force rebuild of workspace members
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -77,8 +72,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     -exec touch {} \; 2>/dev/null || true
 
 # Build workspace members first, then the main binary
-# Enable SQLx offline mode to avoid needing database connection during build
-ENV SQLX_OFFLINE=true
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
@@ -88,6 +81,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --package vulnera-rust && \
     mkdir -p /app/bin && \
     cp /app/target/release/vulnera-rust /app/bin/vulnera-rust
+
+# Install sqlx-cli in builder stage for migrations
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo install sqlx-cli --no-default-features --features postgres --root /usr/local && \
+    mkdir -p /app/bin && \
+    cp /usr/local/bin/sqlx /app/bin/sqlx
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -105,8 +105,9 @@ RUN useradd -r -s /bin/false vulnera
 # Create app directory
 WORKDIR /app
 
-# Copy the binary from builder stage
+# Copy the binary and sqlx-cli from builder stage
 COPY --from=builder /app/bin/vulnera-rust /usr/local/bin/vulnera-rust
+COPY --from=builder /app/bin/sqlx /usr/local/bin/sqlx
 
 # Copy configuration
 COPY --from=builder /app/config ./config
@@ -131,6 +132,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Use entrypoint script (can run migrations if RUN_MIGRATIONS=true)
+# Use entrypoint script (runs migrations by default, set RUN_MIGRATIONS=false to disable)
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["vulnera-rust"]

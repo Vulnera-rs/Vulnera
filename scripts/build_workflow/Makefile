@@ -140,14 +140,39 @@ release-check: test-deploy-ready ## Check if ready for release
 	cargo clippy --release -- -D warnings
 	cargo audit
 
-# Database/Migration related (for future use)
-migrate: ## Run database migrations (future DB integration)
-	@echo "Database migrations will be available when DB integration is implemented"
-	@echo "Schema available at: src/db/schema.sql"
-	@echo "Use this target to apply migrations to your database when ready"
+# Database/Migration related
+install-sqlx-cli: ## Install SQLx CLI for database migrations
+	@echo "Installing SQLx CLI..."
+	cargo install sqlx-cli --no-default-features --features postgres
+
+migrate: ## Run database migrations
+	@if [ -z "$(DATABASE_URL)" ]; then \
+		echo "ERROR: DATABASE_URL environment variable is not set"; \
+		echo "Example: export DATABASE_URL='postgresql://user:password@localhost:5432/vulnera'"; \
+		exit 1; \
+	fi
+	@echo "Running database migrations..."
+	sqlx migrate run --source migrations
+
+migrate-info: ## Show migration status
+	@if [ -z "$(DATABASE_URL)" ]; then \
+		echo "ERROR: DATABASE_URL environment variable is not set"; \
+		exit 1; \
+	fi
+	sqlx migrate info --source migrations
+
+migrate-reset: ## Reset database (WARNING: This will drop all tables)
+	@if [ -z "$(DATABASE_URL)" ]; then \
+		echo "ERROR: DATABASE_URL environment variable is not set"; \
+		exit 1; \
+	fi
+	@echo "WARNING: This will drop all tables in the database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	sqlx migrate revert --source migrations
+	sqlx migrate run --source migrations
 
 # Environment setup
-setup: install-deps ## Setup development environment
+setup: install-deps install-sqlx-cli ## Setup development environment
 	@echo "Installing additional test dependencies..."
 	cargo install cargo-tarpaulin cargo-audit || true
 	@echo "Development environment setup complete"
@@ -157,6 +182,11 @@ setup: install-deps ## Setup development environment
 	@echo "  make test-fast          - Quick test run without coverage"
 	@echo "  make test-comprehensive - Full test suite with coverage"
 	@echo "  make test-deploy-ready  - Production readiness check"
+	@echo ""
+	@echo "Database commands:"
+	@echo "  make migrate            - Run database migrations"
+	@echo "  make migrate-info       - Show migration status"
+	@echo "  make migrate-reset      - Reset database (dangerous)"
 
 # Quality gates
 quality-gate: test-deploy-ready ## Run all quality checks for production
