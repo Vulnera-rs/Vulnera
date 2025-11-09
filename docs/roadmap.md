@@ -164,7 +164,6 @@ This roadmap breaks the project into manageable phases, each with clear goals an
 **Goal**: Enhance the platform's intelligence, user experience, and advanced capabilities.
 *   **Tasks**:
     1.  **Evolve the "AI Model"**: Move from a rules engine to a true machine learning model that can better predict which modules to run, prioritize findings based on project context, and even suggest code fixes.
-    2.  **Develop a Web UI**: remake the frontend to visualize scan results, manage projects, and configure policies.
-    3.  **Implement Fuzz Testing Microservice**: An advanced feature for finding deep, complex bugs.
-    4.  **Performance Tuning & Optimization**: Continuously monitor and scale the platform.
+    2.  **Implement Fuzz Testing Microservice**: An advanced feature for finding deep, complex bugs.
+    3.  **Performance Tuning & Optimization**: Continuously monitor and scale the platform.
 *   **Key Outcome**: The platform becomes a market-leading, intelligent security analysis solution.

@@ -15,4 +15,3 @@ async fn test_metrics_endpoint() {
     // Placeholder for now
     assert!(true);
 }
-

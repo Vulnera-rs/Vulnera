@@ -2,11 +2,7 @@
 
 use tempfile::TempDir;
 
-async fn create_test_file(
-    dir: &TempDir,
-    filename: &str,
-    content: &str,
-) -> std::path::PathBuf {
+async fn create_test_file(dir: &TempDir, filename: &str, content: &str) -> std::path::PathBuf {
     let path = dir.path().join(filename);
     tokio::fs::write(&path, content)
         .await
@@ -28,10 +24,10 @@ fn sample_high_entropy() -> &'static str {
 #[tokio::test]
 async fn test_regex_detection() {
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     // Create test file with secrets
     create_test_file(&temp_dir, "config.env", sample_aws_key()).await;
-    
+
     // Test secret detection
     // Placeholder for actual detector implementation
     assert!(temp_dir.path().exists());
@@ -40,10 +36,10 @@ async fn test_regex_detection() {
 #[tokio::test]
 async fn test_entropy_detection() {
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     // Create test file with high entropy
     create_test_file(&temp_dir, "token.txt", sample_high_entropy()).await;
-    
+
     // Test entropy detection
     // Placeholder for actual detector implementation
     assert!(temp_dir.path().exists());
@@ -55,4 +51,3 @@ async fn test_git_scanner() {
     // Placeholder for now
     assert!(true);
 }
-

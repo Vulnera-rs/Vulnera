@@ -16,7 +16,7 @@ proptest! {
             assert_eq!(version.to_string(), version_str);
         }
     }
-    
+
     #[test]
     fn test_version_comparison_consistency(
         major1 in 0u64..100u64,
@@ -28,7 +28,7 @@ proptest! {
     ) {
         let v1_str = format!("{}.{}.{}", major1, minor1, patch1);
         let v2_str = format!("{}.{}.{}", major2, minor2, patch2);
-        
+
         if let (Ok(v1), Ok(v2)) = (Version::parse(&v1_str), Version::parse(&v2_str)) {
             // Comparison should be consistent
             let cmp_str = if major1 != major2 {
@@ -38,10 +38,9 @@ proptest! {
             } else {
                 patch1.cmp(&patch2)
             };
-            
+
             let cmp_version = v1.cmp(&v2);
             assert_eq!(cmp_str, cmp_version);
         }
     }
 }
-
