@@ -7,6 +7,7 @@ FROM rust:slim as builder
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,7 +17,7 @@ WORKDIR /app
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
 
-# Copy workspace member manifests first 
+# Copy workspace member manifests first
 COPY vulnera-core/Cargo.toml ./vulnera-core/
 COPY vulnera-deps/Cargo.toml ./vulnera-deps/
 COPY vulnera-orchestrator/Cargo.toml ./vulnera-orchestrator/
@@ -94,6 +95,7 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     libssl3 \
+    libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user
