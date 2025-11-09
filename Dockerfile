@@ -7,6 +7,7 @@ FROM rust:slim as builder
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
