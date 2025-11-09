@@ -1,0 +1,8 @@
+---
+source: vulnera-orchestrator/tests/snapshot_api_responses.rs
+expression: response
+---
+{
+  "code": 400,
+  "error": "Invalid request"
+}

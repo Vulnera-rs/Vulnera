@@ -78,8 +78,11 @@ impl SourceLocation {
                 }
             }
         } else {
-            // Single line location
-            if line == self.line && column < self.column {
+            // Single line location - must be on the same line
+            if line != self.line {
+                return false;
+            }
+            if column < self.column {
                 return false;
             }
         }

@@ -33,3 +33,8 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+proptest = { workspace = true }
+criterion = { workspace = true }
+rstest = { workspace = true }
+tempfile = { workspace = true }
+futures = { workspace = true }

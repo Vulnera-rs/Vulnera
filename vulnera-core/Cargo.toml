@@ -85,3 +85,12 @@ tree-sitter-go = { workspace = true }
 tempfile = { workspace = true }
 mockito = { workspace = true }
 tokio-test = { workspace = true }
+proptest = { workspace = true }
+mockall = { workspace = true }
+criterion = { workspace = true }
+insta = { workspace = true }
+datatest-stable = { workspace = true }
+wiremock = { workspace = true }
+rstest = { workspace = true }
+serial_test = { workspace = true }
+futures = { workspace = true }
