@@ -109,6 +109,13 @@ hex = "0.4.3"
 moka = { version = "0.12", features = ["future"] }
 flate2 = "1.0"
 
+# Redis client for Dragonfly DB
+redis = { version = "0.26", features = [
+    "tokio-comp",
+    "connection-manager",
+    "aio",
+] }
+
 # Authentication and security
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 bcrypt = "0.17.1"
