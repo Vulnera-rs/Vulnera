@@ -43,6 +43,11 @@ impl VersionConstraint {
             return Ok(VersionConstraint::Any);
         }
 
+        // Range: >=1.0.0,<2.0.0 or 1.0.0 - 2.0.0
+        if s.contains(',') || s.contains(" - ") {
+            return Self::parse_range(s);
+        }
+
         // Exact version (== prefix or no prefix)
         if let Some(version_str) = s.strip_prefix("==") {
             let version = Version::parse(version_str.trim())
@@ -90,11 +95,6 @@ impl VersionConstraint {
             let version = Version::parse(version_str.trim())
                 .map_err(|e| format!("Invalid version in constraint: {}", e))?;
             return Ok(VersionConstraint::LessThan(version));
-        }
-
-        // Range: >=1.0.0,<2.0.0 or 1.0.0 - 2.0.0
-        if s.contains(',') || s.contains(" - ") {
-            return Self::parse_range(s);
         }
 
         // Try parsing as exact version (no prefix)
