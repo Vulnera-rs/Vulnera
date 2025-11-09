@@ -76,8 +76,7 @@ pub struct AggregatedReport {
 }
 
 /// Report summary statistics
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ReportSummary {
     pub total_findings: usize,
     pub critical: usize,
@@ -88,4 +87,3 @@ pub struct ReportSummary {
     pub modules_completed: usize,
     pub modules_failed: usize,
 }
-

@@ -7,6 +7,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Parser for requirements.txt files
@@ -119,12 +120,12 @@ impl RequirementsTxtParser {
         // Patterns: X.YaN, X.YbN, X.YrcN, X.Y.ZaN, X.Y.ZbN, X.Y.ZrcN
         let version = version.trim();
 
+        static RE_PYTHON_PRERELEASE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$").unwrap());
+
         // Try to match Python pre-release patterns
         // Match patterns like: 21.5b0, 1.0a1, 2.0rc1, 1.2.3a4, etc.
-        if let Some(captures) = Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$")
-            .ok()
-            .and_then(|re| re.captures(version))
-        {
+        if let Some(captures) = RE_PYTHON_PRERELEASE.captures(version) {
             let major = captures.get(1).unwrap().as_str();
             let minor = captures.get(2).unwrap().as_str();
             let patch = captures.get(3).map(|m| m.as_str()).unwrap_or("0");

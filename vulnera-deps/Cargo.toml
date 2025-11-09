@@ -31,6 +31,9 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 # Time handling
 chrono = { workspace = true }
 
+# Version parsing
+semver = { workspace = true }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 proptest = { workspace = true }

@@ -59,5 +59,3 @@ pub enum RulePattern {
     /// Custom pattern matcher
     Custom(String),
 }
-
-

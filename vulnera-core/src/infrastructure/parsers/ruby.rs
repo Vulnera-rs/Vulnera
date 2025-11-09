@@ -17,7 +17,11 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use regex::Regex;
+
+static RE_BASE_VERSION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(\d+(?:\.\d+){0,3})\b").unwrap());
 
 fn is_comment_or_blank(line: &str) -> bool {
     let t = line.trim();
@@ -33,8 +37,7 @@ fn is_comment_or_blank(line: &str) -> bool {
 fn extract_base_version(input: &str) -> Option<String> {
     // Capture a leading numeric dotted version (1 to 4 segments).
     // Many Ruby gems use 4 segments (e.g., 4.2.11.1)
-    let re_num = Regex::new(r"(?i)\b(\d+(?:\.\d+){0,3})\b").unwrap();
-    if let Some(caps) = re_num.captures(input) {
+    if let Some(caps) = RE_BASE_VERSION.captures(input) {
         return Some(caps.get(1).unwrap().as_str().to_string());
     }
     None
@@ -75,20 +78,26 @@ fn parse_version_lenient(v: &str) -> Result<Version, ParseError> {
     }
 }
 
+static RE_GEM_LINE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"(?i)^\s*gem\s+["']([^"']+)["']\s*(?:,\s*(.+))?\s*$"#).unwrap());
+
+static RE_QUOTED_STRING: Lazy<Regex> = Lazy::new(|| Regex::new(r#""([^"]+)"|'([^']+)'"#).unwrap());
+
+static RE_SPEC_LINE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"^\s{4}([A-Za-z0-9_\-\.]+)\s+\(([^)]+)\)"#).unwrap());
+
 /// Parse a Gemfile `gem` declaration line to (name, version-like-string).
 /// Returns None if the line is not a valid `gem` line.
 fn parse_gem_line(line: &str) -> Option<(String, Option<String>)> {
     // Basic match for: gem 'name'[, version_or_constraints, ...]
     // We capture the gem name in group 1, and the rest of the args (if any) in group 2.
-    let re = Regex::new(r#"(?i)^\s*gem\s+["']([^"']+)["']\s*(?:,\s*(.+))?\s*$"#).unwrap();
-    let caps = re.captures(line)?;
+    let caps = RE_GEM_LINE.captures(line)?;
     let name = caps.get(1)?.as_str().trim().to_string();
     let args = caps.get(2).map(|m| m.as_str().trim().to_string());
 
     // If args exist, try to find the first quoted string that looks like a version constraint.
     if let Some(args_str) = args.as_ref() {
-        let re_quoted = Regex::new(r#""([^"]+)"|'([^']+)'"#).unwrap();
-        for m in re_quoted.captures_iter(args_str) {
+        for m in RE_QUOTED_STRING.captures_iter(args_str) {
             let candidate = m
                 .get(1)
                 .or_else(|| m.get(2))
@@ -191,8 +200,6 @@ impl GemfileLockParser {
         let mut in_gem_section = false;
         let mut in_specs = false;
 
-        let re_spec_line = Regex::new(r#"^\s{4}([A-Za-z0-9_\-\.]+)\s+\(([^)]+)\)"#).unwrap();
-
         for line in content.lines() {
             let trimmed = line.trim();
 
@@ -228,7 +235,7 @@ impl GemfileLockParser {
                 continue;
             }
 
-            if let Some(caps) = re_spec_line.captures(line) {
+            if let Some(caps) = RE_SPEC_LINE.captures(line) {
                 let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
                 let raw_version = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim();
 

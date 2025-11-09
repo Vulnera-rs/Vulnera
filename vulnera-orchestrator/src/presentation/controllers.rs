@@ -329,7 +329,9 @@ async fn convert_analysis_report_to_response(
         for vuln in &report.vulnerabilities {
             for affected_pkg in &vuln.affected_packages {
                 let identifier = affected_pkg.package.identifier();
-                vulnerable_packages.entry(identifier).or_insert(&affected_pkg.package);
+                vulnerable_packages
+                    .entry(identifier)
+                    .or_insert(&affected_pkg.package);
             }
         }
 

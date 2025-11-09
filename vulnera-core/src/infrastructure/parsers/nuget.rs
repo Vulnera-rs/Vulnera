@@ -5,9 +5,13 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use regex::Regex;
+
+static RE_NUGET_VERSION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?i)\b(\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z\.-]+)?)\b").unwrap());
 
 /// Best-effort cleaning of NuGet version strings:
 /// - Extracts the first numeric dotted version (1 to 4 segments), optionally keeps a simple pre-release suffix
@@ -21,8 +25,7 @@ fn clean_nuget_version(input: &str) -> String {
     // Capture numeric dotted version with optional simple pre-release (e.g., -rc1)
     // Accept up to 4 numeric segments because NuGet sometimes uses 4-part versions (e.g., 4.2.11.1)
     // Semver crate may not accept 4 segments, so fall back by truncating to 3 segments if needed later.
-    let re = Regex::new(r"(?i)\b(\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z\.-]+)?)\b").unwrap();
-    if let Some(caps) = re.captures(s) {
+    if let Some(caps) = RE_NUGET_VERSION.captures(s) {
         return caps.get(1).unwrap().as_str().to_string();
     }
     "0.0.0".to_string()

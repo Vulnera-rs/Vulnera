@@ -2,11 +2,7 @@
 
 use tempfile::TempDir;
 
-async fn create_source_file(
-    dir: &TempDir,
-    filename: &str,
-    content: &str,
-) -> std::path::PathBuf {
+async fn create_source_file(dir: &TempDir, filename: &str, content: &str) -> std::path::PathBuf {
     let path = dir.path().join(filename);
     tokio::fs::write(&path, content)
         .await
@@ -32,11 +28,11 @@ fn sample_javascript_vulnerable() -> &'static str {
 #[tokio::test]
 async fn test_directory_scanning() {
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     // Create test source files
     create_source_file(&temp_dir, "test.py", sample_python_vulnerable()).await;
     create_source_file(&temp_dir, "test.js", sample_javascript_vulnerable()).await;
-    
+
     // Test directory scanning
     // Placeholder for actual scanner implementation
     assert!(temp_dir.path().exists());
@@ -55,4 +51,3 @@ async fn test_language_detection() {
     // Placeholder for now
     assert!(true);
 }
-

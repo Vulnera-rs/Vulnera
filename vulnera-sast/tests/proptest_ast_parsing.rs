@@ -11,7 +11,7 @@ proptest! {
         // Placeholder for actual parser test
         let _ = code;
     }
-    
+
     #[test]
     fn test_javascript_parsing_doesnt_crash(
         code in "[a-zA-Z0-9_\\s=+\\-*/().,;:{}\\[\\]\"']+"
@@ -21,4 +21,3 @@ proptest! {
         let _ = code;
     }
 }
-

@@ -63,10 +63,38 @@ cargo run
 
 #### Using Docker
 
+**Build with BuildKit (recommended for faster builds):**
+
 ```bash
+# Enable BuildKit for cache mounts (faster builds)
+DOCKER_BUILDKIT=1 docker build -t vulnera-rust .
+
+# Or set it permanently
+export DOCKER_BUILDKIT=1
 docker build -t vulnera-rust .
-docker run -p 3000:3000 vulnera-rust
 ```
+
+**Run the container:**
+
+```bash
+# Basic run
+docker run -p 3000:3000 \
+  -e DATABASE_URL='postgresql://user:password@host:5432/vulnera' \
+  vulnera-rust
+
+# With migrations (if sqlx-cli is installed in image)
+docker run -p 3000:3000 \
+  -e DATABASE_URL='postgresql://user:password@host:5432/vulnera' \
+  -e RUN_MIGRATIONS=true \
+  vulnera-rust
+
+# Run migrations separately (recommended for production)
+docker run --rm \
+  -e DATABASE_URL='postgresql://user:password@host:5432/vulnera' \
+  vulnera-rust sqlx migrate run --source /app/migrations
+```
+
+**Note:** The Dockerfile includes BuildKit cache mounts for significantly faster rebuilds. Migrations are included in the image but should typically be run as a separate init container or job in production.
 
 ---
 

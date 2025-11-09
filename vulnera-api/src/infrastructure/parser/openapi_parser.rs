@@ -414,10 +414,6 @@ impl OpenApiParser {
         }
     }
 
-    fn parse_security_schemes(components: &Option<oas3::spec::Components>) -> Vec<SecurityScheme> {
-        Self::parse_security_schemes_with_oauth_urls(components, &std::collections::HashMap::new())
-    }
-
     fn parse_security_schemes_with_oauth_urls(
         components: &Option<oas3::spec::Components>,
         oauth_token_urls: &std::collections::HashMap<
@@ -477,10 +473,6 @@ impl OpenApiParser {
         schemes
     }
 
-    fn parse_oauth_flows(flows: &oas3::spec::Flows) -> Vec<OAuthFlow> {
-        Self::parse_oauth_flows_with_urls(flows, &std::collections::HashMap::new())
-    }
-
     fn parse_oauth_flows_with_urls(
         flows: &oas3::spec::Flows,
         token_urls: &std::collections::HashMap<String, String>,
@@ -538,28 +530,6 @@ impl OpenApiParser {
                 description: Some(description.clone()),
             })
             .collect()
-    }
-
-    /// Parse security requirements from OpenAPI spec
-    /// Security requirements are represented as a list of maps, where each map
-    /// contains scheme names as keys and required scopes as values
-    fn parse_security_requirements(
-        security: Option<&Vec<std::collections::BTreeMap<String, Vec<String>>>>,
-    ) -> Vec<SecurityRequirement> {
-        let mut requirements = Vec::new();
-
-        if let Some(security_vec) = security {
-            for req in security_vec {
-                for (scheme_name, scopes) in req.iter() {
-                    requirements.push(SecurityRequirement {
-                        scheme_name: scheme_name.clone(),
-                        scopes: scopes.clone(),
-                    });
-                }
-            }
-        }
-
-        requirements
     }
 
     /// Extract security requirements from raw JSON/YAML spec at a specific path

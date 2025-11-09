@@ -11,7 +11,7 @@ fn test_openapi_findings_snapshot() {
             }
         ]
     });
-    
+
     insta::assert_json_snapshot!("openapi_findings", findings);
 }
 
@@ -23,7 +23,6 @@ fn test_oauth_findings_snapshot() {
             "security_issues": []
         }
     });
-    
+
     insta::assert_json_snapshot!("oauth_findings", findings);
 }
-

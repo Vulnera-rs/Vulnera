@@ -83,8 +83,8 @@ impl TreeSitterGoParser {
 
         let version = crate::domain::vulnerability::value_objects::Version::parse(&clean_version)
             .map_err(|_| ParseError::Version {
-                version: version_str.to_string(),
-            })?;
+            version: version_str.to_string(),
+        })?;
 
         let package = Package::new(module_path.to_string(), version, self.ecosystem.clone())
             .map_err(|e| ParseError::MissingField { field: e })?;
@@ -191,7 +191,9 @@ impl TreeSitterGoParser {
                     // Version might be a string node or version node
                     let text = content[child.byte_range()].trim();
                     // Check if it looks like a version (starts with v or is a version number)
-                    if text.starts_with('v') || text.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                    if text.starts_with('v')
+                        || text.chars().next().map_or(false, |c| c.is_ascii_digit())
+                    {
                         version = Some(text.to_string());
                     }
                 }
@@ -205,7 +207,10 @@ impl TreeSitterGoParser {
                             module_path = Some(text.to_string());
                         }
                         // If it looks like a version (starts with v or is a version number)
-                        else if (text.starts_with('v') || text.chars().next().map_or(false, |c| c.is_ascii_digit())) && version.is_none() {
+                        else if (text.starts_with('v')
+                            || text.chars().next().map_or(false, |c| c.is_ascii_digit()))
+                            && version.is_none()
+                        {
                             version = Some(text.to_string());
                         }
                     }
@@ -217,9 +222,12 @@ impl TreeSitterGoParser {
         if module_path.is_none() || version.is_none() {
             let directive_text = content[directive_node.byte_range()].trim();
             // Remove "require" keyword if present
-            let text = directive_text.strip_prefix("require").unwrap_or(directive_text).trim();
+            let text = directive_text
+                .strip_prefix("require")
+                .unwrap_or(directive_text)
+                .trim();
             let parts: Vec<&str> = text.split_whitespace().collect();
-            
+
             if parts.len() >= 2 {
                 if module_path.is_none() {
                     module_path = Some(parts[0].to_string());

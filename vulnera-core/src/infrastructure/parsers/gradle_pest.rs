@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use pest::Parser;
 use pest::iterators::{Pair, Pairs};
 use regex::Regex;
@@ -203,12 +204,14 @@ impl GradlePestParser {
         let mut seen = std::collections::HashSet::new();
 
         // 1) Direct coordinates: implementation 'group:artifact:version' or with parentheses
-        let re_coord = Regex::new(
-            r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*(?:\(\s*)?['"]([^:'"]+)[:]([^:'"]+)[:]([^'"]+)['"]\s*\)?"#,
-        )
-        .unwrap();
+        static RE_COORD: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*(?:\(\s*)?['"]([^:'"]+)[:]([^:'"]+)[:]([^'"]+)['"]\s*\)?"#,
+            )
+            .unwrap()
+        });
 
-        for caps in re_coord.captures_iter(content) {
+        for caps in RE_COORD.captures_iter(content) {
             let g = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
             let a = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
             let v = caps.get(3).map(|m| m.as_str()).unwrap_or_default();
@@ -225,12 +228,14 @@ impl GradlePestParser {
         }
 
         // 1b) Secondary regex specifically for double-quoted coordinates (including optional parentheses)
-        let re_coord_dq = Regex::new(
-            r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*(?:\(\s*)?"([^:"]+)[:]([^:"]+)[:]([^"]+)"\s*\)?"#
-        )
-        .unwrap();
+        static RE_COORD_DQ: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*(?:\(\s*)?"([^:"]+)[:]([^:"]+)[:]([^"]+)"\s*\)?"#
+            )
+            .unwrap()
+        });
 
-        for caps in re_coord_dq.captures_iter(content) {
+        for caps in RE_COORD_DQ.captures_iter(content) {
             let g = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
             let a = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
             let v = caps.get(3).map(|m| m.as_str()).unwrap_or_default();
@@ -247,12 +252,14 @@ impl GradlePestParser {
         }
 
         // 2) platform/enforcedPlatform coordinates inside parentheses
-        let re_platform = Regex::new(
-            r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*\(\s*(?:enforcedPlatform|platform)\(\s*['"]([^:'"]+)[:]([^:'"]+)[:]([^'"]+)['"]\s*\)\s*\)"#,
-        )
-        .unwrap();
+        static RE_PLATFORM: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile|testCompileOnly|testRuntimeOnly|annotationProcessor|kapt|compile|provided|runtime|testRuntime)\s*\(\s*(?:enforcedPlatform|platform)\(\s*['"]([^:'"]+)[:]([^:'"]+)[:]([^'"]+)['"]\s*\)\s*\)"#,
+            )
+            .unwrap()
+        });
 
-        for caps in re_platform.captures_iter(content) {
+        for caps in RE_PLATFORM.captures_iter(content) {
             let g = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
             let a = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
             let v = caps.get(3).map(|m| m.as_str()).unwrap_or_default();
@@ -269,12 +276,14 @@ impl GradlePestParser {
         }
 
         // 3) Groovy named args: implementation group: 'g', name: 'a', version: 'v'
-        let re_named_groovy = Regex::new(
-            r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile)\s+group\s*:\s*['"]([^'"]+)['"]\s*,\s*name\s*:\s*['"]([^'"]+)['"]\s*,\s*version\s*:\s*['"]([^'"]+)['"]"#,
-        )
-        .unwrap();
+        static RE_NAMED_GROOVY: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile)\s+group\s*:\s*['"]([^'"]+)['"]\s*,\s*name\s*:\s*['"]([^'"]+)['"]\s*,\s*version\s*:\s*['"]([^'"]+)['"]"#,
+            )
+            .unwrap()
+        });
 
-        for caps in re_named_groovy.captures_iter(content) {
+        for caps in RE_NAMED_GROOVY.captures_iter(content) {
             let g = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
             let a = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
             let v = caps.get(3).map(|m| m.as_str()).unwrap_or_default();
@@ -291,12 +300,14 @@ impl GradlePestParser {
         }
 
         // 4) Kotlin named args: implementation(group = "g", name = "a", version = "v")
-        let re_named_kotlin = Regex::new(
-            r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile)\s*\(\s*group\s*=\s*['"]([^'"]+)['"]\s*,\s*name\s*=\s*['"]([^'"]+)['"]\s*,\s*version\s*=\s*['"]([^'"]+)['"]\s*\)"#,
-        )
-        .unwrap();
+        static RE_NAMED_KOTLIN: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(
+                r#"(?m)^\s*(?:implementation|api|compileOnly|runtimeOnly|testImplementation|testCompile)\s*\(\s*group\s*=\s*['"]([^'"]+)['"]\s*,\s*name\s*=\s*['"]([^'"]+)['"]\s*,\s*version\s*=\s*['"]([^'"]+)['"]\s*\)"#,
+            )
+            .unwrap()
+        });
 
-        for caps in re_named_kotlin.captures_iter(content) {
+        for caps in RE_NAMED_KOTLIN.captures_iter(content) {
             let g = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
             let a = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
             let v = caps.get(3).map(|m| m.as_str()).unwrap_or_default();

@@ -8,20 +8,17 @@ use vulnera_core::infrastructure::cache::{FileCacheRepository, MemoryCache, Mult
 #[tokio::test]
 async fn test_file_cache_integration() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let cache = FileCacheRepository::new(
-        temp_dir.path().to_path_buf(),
-        Duration::from_secs(3600),
-    );
-    
+    let cache = FileCacheRepository::new(temp_dir.path().to_path_buf(), Duration::from_secs(3600));
+
     // Test write and read
     let key = "test_key";
     let value: i32 = 42;
-    
+
     cache
         .set(key, &value, Duration::from_secs(60))
         .await
         .unwrap();
-    
+
     let retrieved: Option<i32> = cache.get(key).await.unwrap();
     assert_eq!(retrieved, Some(value));
 }
@@ -29,15 +26,12 @@ async fn test_file_cache_integration() {
 #[tokio::test]
 async fn test_memory_cache_integration() {
     let cache = MemoryCache::new(100, 3600);
-    
+
     let key = "test_key";
     let value: String = "test_value".to_string();
-    
-    cache
-        .set(key, &value)
-        .await
-        .unwrap();
-    
+
+    cache.set(key, &value).await.unwrap();
+
     let retrieved: Option<String> = cache.get(key).await.unwrap();
     assert_eq!(retrieved, Some(value));
 }
@@ -50,27 +44,26 @@ async fn test_multi_level_cache_integration() {
         temp_dir.path().to_path_buf(),
         Duration::from_secs(3600),
     ));
-    
+
     let cache = MultiLevelCache::new(l1.clone(), l2);
-    
+
     let key = "test_key";
     let value: i32 = 42;
-    
+
     // Write to cache
     cache
         .set(key, &value, Duration::from_secs(60))
         .await
         .unwrap();
-    
+
     // Read from cache (should hit L1)
     let retrieved: Option<i32> = cache.get(key).await.unwrap();
     assert_eq!(retrieved, Some(value));
-    
+
     // Invalidate L1 cache directly
     l1.invalidate(key).await;
-    
+
     // Read again (should hit L2)
     let retrieved: Option<i32> = cache.get(key).await.unwrap();
     assert_eq!(retrieved, Some(value));
 }
-
