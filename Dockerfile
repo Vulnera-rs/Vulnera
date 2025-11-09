@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.4
 # Multi-stage build for Vulnera Rust
 # Build with: DOCKER_BUILDKIT=1 docker build -t vulnera-rust .
-FROM rust:latest-slim as builder
+# Using rust:slim for latest stable slim image (Rust 1.88+)
+# For production, consider pinning: rust:1.88-slim or rust:1-slim
+FROM rust:slim as builder
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
