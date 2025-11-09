@@ -85,7 +85,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --package vulnera-core --package vulnera-deps \
     --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
     --package vulnera-api && \
-    cargo build --release --package vulnera-rust
+    cargo build --release --package vulnera-rust && \
+    ls -la /app/target/release/vulnera-rust && \
+    test -x /app/target/release/vulnera-rust
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -106,6 +108,9 @@ WORKDIR /app
 
 # Copy the binary from builder stage
 COPY --from=builder /app/target/release/vulnera-rust /usr/local/bin/vulnera-rust
+
+# Verify the binary was copied successfully
+RUN ls -la /usr/local/bin/vulnera-rust && test -x /usr/local/bin/vulnera-rust
 
 # Copy configuration
 COPY --from=builder /app/config ./config
