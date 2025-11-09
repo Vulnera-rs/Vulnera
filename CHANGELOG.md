@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
-## [0.3.0] - 2025-11-08
+## [0.3.0] - 2025-11-09
 
 ### Added
 
@@ -121,13 +121,31 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   - Standardized module interface allows for easy addition of new analysis types
   - Analysis results now include module type metadata for proper categorization
 
-- **Multi-Level Caching:**
-  - Enhanced caching system with L1 (in-memory) and L2 (filesystem) layers
-  - L1 cache uses Moka with configurable size and TTL
-  - L2 cache maintains filesystem-based storage with optional compression
-  - Cache key standardization across all modules
+- **Caching System Migration to Dragonfly DB:**
+  - Migrated from file-based caching to Dragonfly DB as the primary cache backend
+  - Dragonfly DB provides high-performance, Redis-compatible in-memory data store
+  - Multi-threaded architecture for better performance and scalability
+  - Built-in persistence, replication, and horizontal scaling support
+  - TTL-configurable cache entries with optional compression for large entries
+  - Redis-compatible protocol allows easy migration and tool compatibility
+  - Configuration via `VULNERA__CACHE__DRAGONFLY_URL` environment variable
+  - Connection timeout configuration via `VULNERA__CACHE__DRAGONFLY_CONNECTION_TIMEOUT_SECONDS`
+  - File-based cache system has been replaced (L1/L2 multi-level caching removed)
+  - Cache key standardization maintained across all modules
+  - Improved cache performance and reduced latency for vulnerability data lookups
 
 ### Configuration
+
+New environment variables for caching and module configuration:
+
+```bash
+# Cache Configuration (Dragonfly DB)
+VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
+VULNERA__CACHE__DRAGONFLY_CONNECTION_TIMEOUT_SECONDS=5
+VULNERA__CACHE__TTL_HOURS=24
+VULNERA__CACHE__ENABLE_CACHE_COMPRESSION=true
+VULNERA__CACHE__COMPRESSION_THRESHOLD_BYTES=10240
+```
 
 New environment variables for module configuration:
 
@@ -443,7 +461,7 @@ curl -X GET http://localhost:3000/api/v1/analyze \
   - Go proxy: `https://proxy.golang.org/{module}/@v/list`
   - Maven Central: `https://repo1.maven.org/maven2/{groupPath}/{artifact}/maven-metadata.xml`
 - Caching for registry version listings:
-  - Cached via Dragonfly DB with TTL from `VULNERA__CACHE__TTL_HOURS` (default: 24).
+  - Cached via file-based caching with TTL from `VULNERA__CACHE__TTL_HOURS` (default: 24).
   - Cache keys follow standard helpers to ensure consistent naming.
 - OpenAPI/Swagger updates:
   - New DTO fields for recommendations and repository response documented and included in components.
