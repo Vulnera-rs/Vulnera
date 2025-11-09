@@ -1,0 +1,313 @@
+//! Version constraint parsing and validation
+//!
+//! This module provides parsing and manipulation of version constraints
+//! (^1.2.3, ~1.2.3, >=1.0.0, etc.) used across different package ecosystems.
+
+use vulnera_core::domain::vulnerability::value_objects::Version;
+
+/// Version constraint for dependency specifications
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum VersionConstraint {
+    /// Exact version match
+    Exact(Version),
+    /// Caret range: ^1.2.3 means >=1.2.3 <2.0.0
+    Caret(Version),
+    /// Tilde range: ~1.2.3 means >=1.2.3 <1.3.0
+    Tilde(Version),
+    /// Greater than or equal
+    GreaterOrEqual(Version),
+    /// Less than or equal
+    LessOrEqual(Version),
+    /// Strictly greater than
+    GreaterThan(Version),
+    /// Strictly less than
+    LessThan(Version),
+    /// Range: >=1.0.0,<2.0.0
+    Range {
+        min: Version,
+        max: Version,
+        min_inclusive: bool,
+        max_inclusive: bool,
+    },
+    /// Any version (wildcard, *)
+    Any,
+}
+
+impl VersionConstraint {
+    /// Parse a version constraint string
+    /// Supports: ^, ~, >=, <=, >, <, ==, ranges, and wildcards
+    pub fn parse(s: &str) -> Result<Self, String> {
+        let s = s.trim();
+
+        if s.is_empty() || s == "*" || s == "latest" {
+            return Ok(VersionConstraint::Any);
+        }
+
+        // Range: >=1.0.0,<2.0.0 or 1.0.0 - 2.0.0
+        if s.contains(',') || s.contains(" - ") {
+            return Self::parse_range(s);
+        }
+
+        // Exact version (== prefix or no prefix)
+        if let Some(version_str) = s.strip_prefix("==") {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::Exact(version));
+        }
+
+        // Caret range: ^1.2.3
+        if let Some(version_str) = s.strip_prefix('^') {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::Caret(version));
+        }
+
+        // Tilde range: ~1.2.3
+        if let Some(version_str) = s.strip_prefix('~') {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::Tilde(version));
+        }
+
+        // Greater or equal: >=1.0.0
+        if let Some(version_str) = s.strip_prefix(">=") {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::GreaterOrEqual(version));
+        }
+
+        // Less or equal: <=1.0.0
+        if let Some(version_str) = s.strip_prefix("<=") {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::LessOrEqual(version));
+        }
+
+        // Greater than: >1.0.0
+        if let Some(version_str) = s.strip_prefix('>') {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::GreaterThan(version));
+        }
+
+        // Less than: <1.0.0
+        if let Some(version_str) = s.strip_prefix('<') {
+            let version = Version::parse(version_str.trim())
+                .map_err(|e| format!("Invalid version in constraint: {}", e))?;
+            return Ok(VersionConstraint::LessThan(version));
+        }
+
+        // Try parsing as exact version (no prefix)
+        if let Ok(version) = Version::parse(s) {
+            return Ok(VersionConstraint::Exact(version));
+        }
+
+        Err(format!("Unable to parse version constraint: {}", s))
+    }
+
+    /// Parse a range constraint
+    fn parse_range(s: &str) -> Result<Self, String> {
+        let parts: Vec<&str> = if s.contains(',') {
+            s.split(',').collect()
+        } else {
+            s.split(" - ").collect()
+        };
+
+        if parts.len() != 2 {
+            return Err(format!("Invalid range format: {}", s));
+        }
+
+        let min_str = parts[0].trim();
+        let max_str = parts[1].trim();
+
+        let (min, min_inclusive) = if let Some(v) = min_str.strip_prefix(">=") {
+            (
+                Version::parse(v.trim()).map_err(|e| format!("Invalid min version: {}", e))?,
+                true,
+            )
+        } else if let Some(v) = min_str.strip_prefix('>') {
+            (
+                Version::parse(v.trim()).map_err(|e| format!("Invalid min version: {}", e))?,
+                false,
+            )
+        } else {
+            // Assume >= if no prefix
+            (
+                Version::parse(min_str).map_err(|e| format!("Invalid min version: {}", e))?,
+                true,
+            )
+        };
+
+        let (max, max_inclusive) = if let Some(v) = max_str.strip_prefix("<=") {
+            (
+                Version::parse(v.trim()).map_err(|e| format!("Invalid max version: {}", e))?,
+                true,
+            )
+        } else if let Some(v) = max_str.strip_prefix('<') {
+            (
+                Version::parse(v.trim()).map_err(|e| format!("Invalid max version: {}", e))?,
+                false,
+            )
+        } else {
+            // Assume < if no prefix
+            (
+                Version::parse(max_str).map_err(|e| format!("Invalid max version: {}", e))?,
+                false,
+            )
+        };
+
+        Ok(VersionConstraint::Range {
+            min,
+            max,
+            min_inclusive,
+            max_inclusive,
+        })
+    }
+
+    /// Check if a version satisfies this constraint
+    pub fn satisfies(&self, version: &Version) -> bool {
+        match self {
+            VersionConstraint::Exact(v) => version == v,
+            VersionConstraint::Caret(v) => {
+                // ^1.2.3 means >=1.2.3 <2.0.0
+                version >= v && version < &Version::new(v.0.major + 1, 0, 0)
+            }
+            VersionConstraint::Tilde(v) => {
+                // ~1.2.3 means >=1.2.3 <1.3.0
+                version >= v && version < &Version::new(v.0.major, v.0.minor + 1, 0)
+            }
+            VersionConstraint::GreaterOrEqual(v) => version >= v,
+            VersionConstraint::LessOrEqual(v) => version <= v,
+            VersionConstraint::GreaterThan(v) => version > v,
+            VersionConstraint::LessThan(v) => version < v,
+            VersionConstraint::Range {
+                min,
+                max,
+                min_inclusive,
+                max_inclusive,
+            } => {
+                let min_ok = if *min_inclusive {
+                    version >= min
+                } else {
+                    version > min
+                };
+                let max_ok = if *max_inclusive {
+                    version <= max
+                } else {
+                    version < max
+                };
+                min_ok && max_ok
+            }
+            VersionConstraint::Any => true,
+        }
+    }
+
+    /// Get the minimum version that satisfies this constraint (if applicable)
+    pub fn min_version(&self) -> Option<Version> {
+        match self {
+            VersionConstraint::Exact(v) => Some(v.clone()),
+            VersionConstraint::Caret(v) => Some(v.clone()),
+            VersionConstraint::Tilde(v) => Some(v.clone()),
+            VersionConstraint::GreaterOrEqual(v) => Some(v.clone()),
+            VersionConstraint::GreaterThan(v) => {
+                // Next patch version
+                Some(Version::new(v.0.major, v.0.minor, v.0.patch + 1))
+            }
+            VersionConstraint::Range { min, .. } => Some(min.clone()),
+            _ => None,
+        }
+    }
+
+    /// Intersect two constraints (find versions that satisfy both)
+    pub fn intersect(&self, other: &Self) -> Option<Self> {
+        // Simplified intersection - in practice, this could be more complex
+        // For now, return the more restrictive constraint
+        match (self, other) {
+            (VersionConstraint::Any, c) | (c, VersionConstraint::Any) => Some(c.clone()),
+            (VersionConstraint::Exact(v1), VersionConstraint::Exact(v2)) => {
+                if v1 == v2 {
+                    Some(VersionConstraint::Exact(v1.clone()))
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // For complex cases, return None (no intersection)
+                // A full implementation would compute the actual intersection
+                None
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for VersionConstraint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VersionConstraint::Exact(v) => write!(f, "=={}", v),
+            VersionConstraint::Caret(v) => write!(f, "^{}", v),
+            VersionConstraint::Tilde(v) => write!(f, "~{}", v),
+            VersionConstraint::GreaterOrEqual(v) => write!(f, ">={}", v),
+            VersionConstraint::LessOrEqual(v) => write!(f, "<={}", v),
+            VersionConstraint::GreaterThan(v) => write!(f, ">{}", v),
+            VersionConstraint::LessThan(v) => write!(f, "<{}", v),
+            VersionConstraint::Range {
+                min,
+                max,
+                min_inclusive,
+                max_inclusive,
+            } => {
+                let min_op = if *min_inclusive { ">=" } else { ">" };
+                let max_op = if *max_inclusive { "<=" } else { "<" };
+                write!(f, "{}{}, {}{}", min_op, min, max_op, max)
+            }
+            VersionConstraint::Any => write!(f, "*"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_exact() {
+        let c = VersionConstraint::parse("1.2.3").unwrap();
+        assert!(matches!(c, VersionConstraint::Exact(_)));
+        assert!(c.satisfies(&Version::parse("1.2.3").unwrap()));
+        assert!(!c.satisfies(&Version::parse("1.2.4").unwrap()));
+    }
+
+    #[test]
+    fn test_parse_caret() {
+        let c = VersionConstraint::parse("^1.2.3").unwrap();
+        assert!(matches!(c, VersionConstraint::Caret(_)));
+        assert!(c.satisfies(&Version::parse("1.2.3").unwrap()));
+        assert!(c.satisfies(&Version::parse("1.9.9").unwrap()));
+        assert!(!c.satisfies(&Version::parse("2.0.0").unwrap()));
+    }
+
+    #[test]
+    fn test_parse_tilde() {
+        let c = VersionConstraint::parse("~1.2.3").unwrap();
+        assert!(matches!(c, VersionConstraint::Tilde(_)));
+        assert!(c.satisfies(&Version::parse("1.2.3").unwrap()));
+        assert!(c.satisfies(&Version::parse("1.2.9").unwrap()));
+        assert!(!c.satisfies(&Version::parse("1.3.0").unwrap()));
+    }
+
+    #[test]
+    fn test_parse_range() {
+        let c = VersionConstraint::parse(">=1.0.0,<2.0.0").unwrap();
+        assert!(matches!(c, VersionConstraint::Range { .. }));
+        assert!(c.satisfies(&Version::parse("1.5.0").unwrap()));
+        assert!(!c.satisfies(&Version::parse("2.0.0").unwrap()));
+    }
+
+    #[test]
+    fn test_parse_any() {
+        let c = VersionConstraint::parse("*").unwrap();
+        assert!(matches!(c, VersionConstraint::Any));
+        assert!(c.satisfies(&Version::parse("1.0.0").unwrap()));
+        assert!(c.satisfies(&Version::parse("999.999.999").unwrap()));
+    }
+}

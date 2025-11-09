@@ -1,0 +1,94 @@
+[package]
+name = "vulnera-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Sources
+osv = { workspace = true }
+nvd_cve = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# OpenAPI documentation
+utoipa = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Configuration
+config = { workspace = true }
+dotenvy = { workspace = true }
+
+# Logging and tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+# Hashing for cache keys
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# Multi-level caching
+moka = { workspace = true }
+flate2 = { workspace = true }
+
+# Authentication and security
+jsonwebtoken = { workspace = true }
+bcrypt = { workspace = true }
+rand = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# File and Version parsing
+toml = { workspace = true }
+serde_yml = { workspace = true }
+quick-xml = { workspace = true }
+regex = { workspace = true }
+pest = { workspace = true }
+pest_derive = { workspace = true }
+semver = { workspace = true }
+octocrab = { workspace = true }
+base64 = { workspace = true }
+percent-encoding = { workspace = true }
+once_cell = { workspace = true }
+# Tree-sitter parsers
+tree-sitter = { workspace = true }
+tree-sitter-json = { workspace = true }
+tree-sitter-go = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+mockito = { workspace = true }
+tokio-test = { workspace = true }
+proptest = { workspace = true }
+mockall = { workspace = true }
+criterion = { workspace = true }
+insta = { workspace = true }
+datatest-stable = { workspace = true }
+wiremock = { workspace = true }
+rstest = { workspace = true }
+serial_test = { workspace = true }
+futures = { workspace = true }

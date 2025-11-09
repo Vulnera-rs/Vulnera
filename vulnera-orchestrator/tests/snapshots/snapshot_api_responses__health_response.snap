@@ -1,0 +1,9 @@
+---
+source: vulnera-orchestrator/tests/snapshot_api_responses.rs
+expression: response
+---
+{
+  "status": "healthy",
+  "timestamp": "2024-01-01T00:00:00Z",
+  "version": "0.3.0"
+}
