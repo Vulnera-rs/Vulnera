@@ -56,7 +56,7 @@ COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
 COPY migrations ./migrations
 
-# Verify workspace structure and source files are present
+# Verify workspace structure and force rebuild of workspace members
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
@@ -64,16 +64,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     test -f vulnera-core/src/lib.rs && \
     test -f vulnera-api/src/lib.rs && \
     test -d vulnera-core/src/application && \
-    cargo clean --package vulnera-rust --package vulnera-core --package vulnera-deps \
-    --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
-    --package vulnera-api 2>/dev/null || true
+    rm -rf /app/target/release/deps/libvulnera_* \
+    /app/target/release/incremental/vulnera_* 2>/dev/null || true && \
+    find vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
+    vulnera-sast/src vulnera-secrets/src vulnera-api/src -type f -name "*.rs" \
+    -exec touch {} \; 2>/dev/null || true
 
-# Build for release with BuildKit cache mounts
-# Dependencies are cached, only workspace members will rebuild
+# Build workspace members first, then the main binary
+# This ensures workspace members are built with real source before main crate compiles
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release
+    cargo build --release --package vulnera-core --package vulnera-deps \
+    --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
+    --package vulnera-api && \
+    cargo build --release --package vulnera-rust
 
 # Runtime stage
 FROM debian:bookworm-slim
