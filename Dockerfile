@@ -1,7 +1,5 @@
 # syntax=docker/dockerfile:1.4
 # Multi-stage build for Vulnera Rust
-# Build with: DOCKER_BUILDKIT=1 docker build -t vulnera-rust .
-# Using rust:slim for latest stable slim image (Rust 1.88+)
 # For production, consider pinning: rust:1.88-slim or rust:1-slim
 FROM rust:slim as builder
 
@@ -44,9 +42,7 @@ RUN mkdir -p src vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release && \
-    rm -rf src vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
-    vulnera-sast/src vulnera-secrets/src vulnera-api/src
+    cargo build --release
 
 # Copy actual source code
 COPY src ./src
@@ -60,7 +56,20 @@ COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
 COPY migrations ./migrations
 
-# Build for release with BuildKit cache mounts (this will only rebuild if source changed)
+# Verify workspace structure and source files are present
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo metadata --format-version 1 > /dev/null && \
+    test -f vulnera-core/src/lib.rs && \
+    test -f vulnera-api/src/lib.rs && \
+    test -d vulnera-core/src/application && \
+    cargo clean --package vulnera-rust --package vulnera-core --package vulnera-deps \
+    --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
+    --package vulnera-api 2>/dev/null || true
+
+# Build for release with BuildKit cache mounts
+# Dependencies are cached, only workspace members will rebuild
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
