@@ -232,11 +232,10 @@ impl Default for SecurityConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheConfig {
-    pub directory: PathBuf,
     pub ttl_hours: u64,
-    /// L1 cache size in MB (in-memory cache)
+    /// L1 cache size in MB (deprecated, kept for backward compatibility)
     pub l1_cache_size_mb: u64,
-    /// L1 cache TTL in seconds
+    /// L1 cache TTL in seconds (deprecated, kept for backward compatibility)
     pub l1_cache_ttl_seconds: u64,
     /// Enable cache compression for entries larger than threshold
     pub enable_cache_compression: bool,
@@ -256,7 +255,6 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            directory: PathBuf::from(".vulnera_cache"),
             ttl_hours: 24,
             l1_cache_size_mb: 100,
             l1_cache_ttl_seconds: 300, // 5 minutes
@@ -650,13 +648,12 @@ impl Default for Config {
                 rate_limit: RateLimitConfig::default(),
             },
             cache: CacheConfig {
-                directory: PathBuf::from(".vulnera_cache"),
                 ttl_hours: 24,
                 l1_cache_size_mb: 100,
                 l1_cache_ttl_seconds: 300,
                 enable_cache_compression: true,
                 compression_threshold_bytes: 10240,
-                dragonfly_enabled: false,
+                dragonfly_enabled: true,
                 dragonfly_url: "redis://127.0.0.1:6379".to_string(),
                 dragonfly_connection_pool_size: None,
                 dragonfly_connection_timeout_seconds: 5,

@@ -401,10 +401,6 @@ VULNERA__AUTH__API_KEY_LENGTH=32
 
 ## 📦 Supported Ecosystems & File Formats
 
-</text>
-
-<old_text line=95>
-
 - Example environment overrides:
 
   ```bash
@@ -577,12 +573,12 @@ Vulnera uses Dragonfly DB as the default cache backend, providing high-performan
    ```bash
    # Using Docker (recommended)
    docker run -d --name dragonfly -p 6379:6379 docker.dragonflydb.io/dragonflydb/dragonfly
-   
+
    # Or using Homebrew (macOS)
    brew tap dragonflydb/dragonfly
    brew install dragonfly
    dragonfly
-   
+
    # Or download from https://www.dragonflydb.io/download
    ```
 
@@ -703,7 +699,7 @@ Please read `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md` before opening PRs. We we
 - **API rate limits:** Provide API keys for OSV/NVD/GHSA
 - **Token sharing:** GitHub token automatically shared with GHSA client when enabled (default: enabled)
 
-- **Cache issues:** Clear `.vulnera_cache` or adjust TTL
+- **Cache issues:** Check Dragonfly DB connection and adjust TTL
 
 - **Debugging:**
 
@@ -788,7 +784,7 @@ This section outlines concrete, near-term work we plan to deliver across the too
 
 ### Platform and backend
 
-- Redis optional cache backend with shared TTLs and cache key parity to filesystem cache
+- Dragonfly DB cache backend with TTLs and compression support
 - Resilience: centralized backoff/retry budgets and per-provider rate limiting
 - Observability: OpenTelemetry traces/metrics, enriched Application Insights dashboards
 - Security: API keys/OAuth, RBAC roles, audit logs, and secret-less auth via Entra Managed Identities on Azure
