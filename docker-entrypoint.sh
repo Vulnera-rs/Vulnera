@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# Optional: Run database migrations before starting the application
-# Set RUN_MIGRATIONS=true to enable (requires sqlx-cli to be installed in the image)
+# Run database migrations before starting the application
+# Set RUN_MIGRATIONS=false to disable migrations
 # 
-if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
     echo "Running database migrations..."
     
     # Check if sqlx-cli is available
