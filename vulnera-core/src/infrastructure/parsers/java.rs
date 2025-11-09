@@ -7,6 +7,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use once_cell::sync::Lazy;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use regex::Regex;
@@ -189,12 +190,17 @@ impl GradleParser {
         let mut packages = Vec::new();
 
         // Regex patterns for different Gradle dependency formats
-        let dependency_patterns = vec![
+        static RE_GRADLE_COORD: Lazy<Regex> = Lazy::new(|| {
             // implementation 'group:artifact:version'
-            Regex::new(r#"(?:implementation|compile|api|testImplementation|testCompile)\s+['"]([^:]+):([^:]+):([^'"]+)['"]"#).unwrap(),
+            Regex::new(r#"(?:implementation|compile|api|testImplementation|testCompile)\s+['"]([^:]+):([^:]+):([^'"]+)['"]"#).unwrap()
+        });
+
+        static RE_GRADLE_NAMED: Lazy<Regex> = Lazy::new(|| {
             // implementation group: 'group', name: 'artifact', version: 'version'
-            Regex::new(r#"(?:implementation|compile|api|testImplementation|testCompile)\s+group:\s*['"]([^'"]+)['"],\s*name:\s*['"]([^'"]+)['"],\s*version:\s*['"]([^'"]+)['"]"#).unwrap(),
-        ];
+            Regex::new(r#"(?:implementation|compile|api|testImplementation|testCompile)\s+group:\s*['"]([^'"]+)['"],\s*name:\s*['"]([^'"]+)['"],\s*version:\s*['"]([^'"]+)['"]"#).unwrap()
+        });
+
+        let dependency_patterns = [&*RE_GRADLE_COORD, &*RE_GRADLE_NAMED];
 
         for pattern in dependency_patterns {
             for captures in pattern.captures_iter(content) {

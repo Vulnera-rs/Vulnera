@@ -11,5 +11,3 @@ pub use generic_verifier::*;
 pub use github_verifier::*;
 pub use gitlab_verifier::*;
 pub use verifier::*;
-
-

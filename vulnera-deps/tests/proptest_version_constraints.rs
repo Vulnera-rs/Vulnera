@@ -16,11 +16,10 @@ proptest! {
             format!(">={}", version),
             format!("<={}", version),
         ];
-        
+
         for constraint in constraints {
             // Just verify parsing doesn't crash
             let _ = constraint;
         }
     }
 }
-

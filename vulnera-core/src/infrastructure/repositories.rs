@@ -15,6 +15,7 @@ use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
 use crate::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource,
 };
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 /// Aggregating repository that combines multiple vulnerability sources
@@ -122,11 +123,11 @@ impl AggregatingVulnerabilityRepository {
     fn normalize_python_version(version: &str) -> String {
         let version = version.trim();
 
+        static RE_PYTHON_PRERELEASE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$").unwrap());
+
         // Try to match Python pre-release patterns: X.YaN, X.YbN, X.YrcN, X.Y.ZaN, X.Y.ZbN, X.Y.ZrcN
-        if let Some(captures) = Regex::new(r"^(\d+)\.(\d+)(?:\.(\d+))?(a|b|rc)(\d+)$")
-            .ok()
-            .and_then(|re| re.captures(version))
-        {
+        if let Some(captures) = RE_PYTHON_PRERELEASE.captures(version) {
             let major = captures.get(1).unwrap().as_str();
             let minor = captures.get(2).unwrap().as_str();
             let patch = captures.get(3).map(|m| m.as_str()).unwrap_or("0");

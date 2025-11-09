@@ -1,10 +1,6 @@
 //! Integration tests for dependency resolution
 
-fn assert_version_satisfies(
-    _version: &str,
-    _constraint: &str,
-    _expected: bool,
-) {
+fn assert_version_satisfies(_version: &str, _constraint: &str, _expected: bool) {
     // This would use the actual version constraint parsing logic
     // Placeholder for now - actual implementation would test semver constraints
 }
@@ -40,4 +36,3 @@ async fn test_version_constraint_satisfaction() {
     assert_version_satisfies("1.2.3", "^1.0.0", true);
     assert_version_satisfies("2.0.0", "^1.0.0", false);
 }
-

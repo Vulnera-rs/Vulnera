@@ -39,7 +39,7 @@ fn assert_openapi_valid(spec: &str) {
 #[tokio::test]
 async fn test_openapi_parsing() {
     let spec = sample_openapi_spec();
-    
+
     // Test OpenAPI parsing
     assert_openapi_valid(spec);
     assert!(!spec.is_empty());
@@ -48,9 +48,8 @@ async fn test_openapi_parsing() {
 #[tokio::test]
 async fn test_oauth_analysis() {
     let spec = sample_openapi_oauth();
-    
+
     // Test OAuth analysis
     assert_openapi_valid(spec);
     assert!(spec.contains("oauth2"));
 }
-

@@ -21,7 +21,7 @@ proptest! {
 }}"#,
             name, version, dep_name, dep_version
         );
-        
+
         let factory = ParserFactory::new();
         if let Some(parser) = factory.create_parser("package.json") {
             let _ = tokio::runtime::Runtime::new()
@@ -30,14 +30,14 @@ proptest! {
             // We just check it doesn't panic
         }
     }
-    
+
     #[test]
     fn test_requirements_txt_parsing_doesnt_crash(
         package in "[a-zA-Z0-9_-]+",
         version in r"[0-9]+\.[0-9]+(\.[0-9]+)?"
     ) {
         let content = format!("{}=={}\n", package, version);
-        
+
         let factory = ParserFactory::new();
         if let Some(parser) = factory.create_parser("requirements.txt") {
             let _ = tokio::runtime::Runtime::new()
@@ -47,4 +47,3 @@ proptest! {
         }
     }
 }
-

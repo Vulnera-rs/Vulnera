@@ -12,7 +12,7 @@ proptest! {
         let _ = data;
         // Placeholder for actual entropy calculation test
     }
-    
+
     #[test]
     fn test_regex_matching_properties(
         text in "[a-zA-Z0-9_=]{10,50}"
@@ -22,4 +22,3 @@ proptest! {
         // Placeholder for actual regex matching test
     }
 }
-
