@@ -7,6 +7,7 @@ FROM rust:slim as builder
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -84,7 +85,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --package vulnera-core --package vulnera-deps \
     --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
     --package vulnera-api && \
-    cargo build --release --package vulnera-rust
+    cargo build --release --package vulnera-rust && \
+    mkdir -p /app/bin && \
+    cp /app/target/release/vulnera-rust /app/bin/vulnera-rust
 
 # Runtime stage
 FROM debian:bookworm-slim
@@ -103,7 +106,7 @@ RUN useradd -r -s /bin/false vulnera
 WORKDIR /app
 
 # Copy the binary from builder stage
-COPY --from=builder /app/target/release/vulnera-rust /usr/local/bin/vulnera-rust
+COPY --from=builder /app/bin/vulnera-rust /usr/local/bin/vulnera-rust
 
 # Copy configuration
 COPY --from=builder /app/config ./config
@@ -115,8 +118,8 @@ COPY --from=builder /app/migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Create cache directory
-RUN mkdir -p .vulnera_cache && chown vulnera:vulnera .vulnera_cache
+# Create NVD data directory (for SQLite database)
+RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
 # Switch to app user
 USER vulnera

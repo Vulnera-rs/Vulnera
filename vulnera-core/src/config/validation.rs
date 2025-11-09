@@ -116,40 +116,6 @@ impl Validate for CacheConfig {
             ));
         }
 
-        // Check if directory exists or can be created
-        let parent = self.directory.parent();
-        if let Some(parent) = parent {
-            // Skip validation if parent is empty (root path) or if it's the current directory "."
-            // For relative paths, we'll try to create the directory during runtime
-            if !parent.as_os_str().is_empty() && parent != Path::new(".") && !parent.exists() {
-                return Err(ValidationError::cache(format!(
-                    "Cache directory parent does not exist: {}",
-                    parent.display()
-                )));
-            }
-        }
-
-        // If directory exists, check if it's writable
-        if self.directory.exists() {
-            if !self.directory.is_dir() {
-                return Err(ValidationError::cache(format!(
-                    "Cache directory path exists but is not a directory: {}",
-                    self.directory.display()
-                )));
-            }
-            // Check if directory is writable by attempting to create a test file
-            // Note: This is a best-effort check; actual permissions may vary
-        } else {
-            // Directory doesn't exist - check if parent is writable
-            let parent = self.directory.parent().unwrap_or(Path::new("."));
-            if parent.exists() && !is_writable(parent) {
-                return Err(ValidationError::cache(format!(
-                    "Cannot create cache directory - parent is not writable: {}",
-                    parent.display()
-                )));
-            }
-        }
-
         Ok(())
     }
 }
@@ -430,43 +396,6 @@ impl Validate for ApiSecurityConfig {
         }
 
         Ok(())
-    }
-}
-
-/// Helper function to check if a path is writable
-/// This is a best-effort check and may not catch all permission issues
-fn is_writable(path: &Path) -> bool {
-    use std::fs;
-
-    // Try to create a test file to check writability
-    let test_file = path.join(".vulnera_write_test");
-    match fs::File::create(&test_file) {
-        Ok(_) => {
-            // Successfully created, so it's writable - clean up
-            let _ = fs::remove_file(&test_file);
-            true
-        }
-        Err(_) => {
-            // Check file metadata as fallback
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Ok(metadata) = path.metadata() {
-                    let perms = metadata.permissions();
-                    // Check if owner has write permission
-                    let mode = perms.mode();
-                    (mode & 0o200) != 0
-                } else {
-                    false
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                // On non-Unix systems, we can't easily check permissions
-                // Assume writable if we can't determine (will fail at runtime if not)
-                true
-            }
-        }
     }
 }
 
