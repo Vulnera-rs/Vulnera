@@ -19,7 +19,7 @@ Vulnera is a fast, scalable, multi-ecosystem vulnerability analysis toolkit and 
 - **Unified Orchestration:** Modular architecture with orchestrator pattern for multi-module analysis
 - **Authentication & Authorization:** JWT tokens and API keys with PostgreSQL-backed user management
 - **Async & Concurrent:** Built with Tokio for high throughput and bounded concurrency
-- **Smart Caching & Recommendations:** Filesystem-based, TTL-configurable cache for reduced API calls; safe version recommendations (nearest and most up-to-date), upgrade impact classification (major/minor/patch), and next safe minor within current major, with a prerelease exclusion toggle
+- **Smart Caching & Recommendations:** Dragonfly DB-based, TTL-configurable cache for reduced API calls; safe version recommendations (nearest and most up-to-date), upgrade impact classification (major/minor/patch), and next safe minor within current major, with a prerelease exclusion toggle
 - **Domain-Driven Design:** Clean separation of domain, application, infrastructure, and presentation layers
 - **OpenAPI Documentation:** Auto-generated Swagger UI for easy API exploration
 - **Secure by Default:** Input validation, rate limiting, secure API handling, bcrypt password hashing
@@ -561,11 +561,46 @@ The orchestrator automatically selects and executes appropriate modules based on
 Dependency file → Parser → Concurrent package processing (default: 3 packages in parallel) → AggregatingVulnerabilityRepository (parallel API calls per package, merge results) → AnalysisReport → Optional reporting/caching.
 
 **Caching:**
-Multi-level caching system:
 
-- **L1 Cache:** In-memory cache (Moka) with configurable size and TTL
-- **L2 Cache:** Filesystem-based cache with SHA256 keys, TTL configurable, optional compression
+Vulnera uses Dragonfly DB as the default cache backend, providing high-performance, Redis-compatible caching:
+
+- **Dragonfly DB Cache:** High-performance, multi-threaded in-memory data store
+- Replaces traditional file-based caching for better performance and scalability
+- Built-in persistence, replication, and horizontal scaling support
+- TTL configurable, optional compression for large entries
 - Cache keys follow standardized helpers for consistency
+
+**Dragonfly DB Setup:**
+
+1. **Install Dragonfly DB:**
+
+   ```bash
+   # Using Docker (recommended)
+   docker run -d --name dragonfly -p 6379:6379 docker.dragonflydb.io/dragonflydb/dragonfly
+   
+   # Or using Homebrew (macOS)
+   brew tap dragonflydb/dragonfly
+   brew install dragonfly
+   dragonfly
+   
+   # Or download from https://www.dragonflydb.io/download
+   ```
+
+2. **Configure Vulnera:**
+
+   ```toml
+   [cache]
+   dragonfly_url = "redis://127.0.0.1:6379"
+   dragonfly_connection_timeout_seconds = 5
+   ```
+
+   Or via environment variable:
+
+   ```bash
+   export VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
+   ```
+
+**Note:** Dragonfly DB is the default and only cache backend. The file-based cache system has been replaced. Ensure Dragonfly DB is running before starting Vulnera.
 
 **Error Handling:**
 Early mapping to domain/application errors, graceful degradation, and clear API responses. Module execution errors are isolated and reported without affecting other modules.
