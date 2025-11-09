@@ -1,0 +1,13 @@
+---
+source: vulnera-api/tests/snapshot_openapi_findings.rs
+expression: findings
+---
+{
+  "vulnerabilities": [
+    {
+      "path": "/users",
+      "severity": "high",
+      "type": "missing_authentication"
+    }
+  ]
+}
