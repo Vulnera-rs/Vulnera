@@ -12,11 +12,11 @@ RUN apt-get update && apt-get install -y \
     libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create app user early
-RUN useradd -r -s /bin/false vulnera
-
 # Create app directory
 WORKDIR /app
+
+# Create app user
+RUN useradd -r -s /bin/false vulnera
 
 # Copy manifests
 COPY Cargo.toml Cargo.lock ./
@@ -94,12 +94,12 @@ RUN cp /app/target/release/vulnera-rust /usr/local/bin/vulnera-rust && \
     chmod +x /usr/local/bin/vulnera-rust && \
     strip /usr/local/bin/vulnera-rust || true
 
+# Create cache directory and set ownership
+RUN mkdir -p .vulnera_cache && \
+    chown -R vulnera:vulnera /app/.vulnera_cache
+
 # Switch to app user for security
 USER vulnera
-
-# Create cache directory with correct permissions
-RUN mkdir -p .vulnera_cache
-
 # Expose port
 EXPOSE 3000
 
