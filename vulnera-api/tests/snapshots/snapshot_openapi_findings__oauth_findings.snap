@@ -1,0 +1,12 @@
+---
+source: vulnera-api/tests/snapshot_openapi_findings.rs
+expression: findings
+---
+{
+  "oauth": {
+    "flows": [
+      "authorizationCode"
+    ],
+    "security_issues": []
+  }
+}

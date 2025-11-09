@@ -1,0 +1,38 @@
+[package]
+name = "vulnera-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+vulnera-core = { path = "../vulnera-core" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# OpenAPI parsing - using oas3 crate for OpenAPI 3.x support
+oas3 = "0.3"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+insta = { workspace = true }
+rstest = { workspace = true }
+tempfile = { workspace = true }
+futures = { workspace = true }
+

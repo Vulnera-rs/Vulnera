@@ -1,0 +1,88 @@
+# Nextest configuration for optimized test execution
+# See https://nexte.st/book/config.html for full documentation
+
+[profile.default]
+# Number of test threads to run in parallel
+# Set to 0 to use all available CPU cores
+test-threads = 0
+
+# Retry flaky tests up to 3 times
+retries = 3
+
+# Timeout for individual tests (in seconds)
+test-timeout = "300s"
+
+# Timeout for test binaries to start (in seconds)
+slow-timeout = "60s"
+
+# Whether to fail the test run if any tests are flaky
+fail-fast = false
+
+# Output format
+output = "human"
+
+# JUnit report output (for CI)
+junit-xml = "target/nextest/junit.xml"
+
+# Test result summary
+status-level = "flaky"
+
+# Run tests in a deterministic order
+run-ignored = "only"
+
+[profile.default.overrides]
+# Override for slow tests (integration tests, benchmarks)
+matcher = { test-name = "integration|bench" }
+test-timeout = "600s"
+slow-timeout = "120s"
+
+# Override for property-based tests (proptest)
+matcher = { test-name = "proptest" }
+test-timeout = "180s"
+
+# Override for serial tests
+matcher = { test-name = "serial" }
+test-threads = 1
+
+# Override for tests that need database
+matcher = { test-name = "database|postgres|sqlx" }
+test-timeout = "300s"
+
+[profile.ci]
+# CI profile with stricter settings
+inherit = "default"
+retries = 1
+fail-fast = true
+status-level = "none"
+junit-xml = "target/nextest/junit.xml"
+
+[profile.ci.overrides]
+# In CI, run serial tests sequentially
+matcher = { test-name = "serial" }
+test-threads = 1
+
+[profile.debug]
+# Debug profile for local development
+inherit = "default"
+test-threads = 4
+retries = 0
+fail-fast = false
+status-level = "all"
+
+# Test filtering
+[filter]
+# Exclude benchmarks from default test runs
+exclude-package = ["benches"]
+
+# Test execution
+[runner]
+# Use cargo test runner
+cargo-args = ["--all-features"]
+
+# Environment variables
+[env]
+# Set RUST_BACKTRACE for better error messages
+RUST_BACKTRACE = "1"
+# Set RUST_LOG for test logging
+RUST_LOG = "warn"
+
