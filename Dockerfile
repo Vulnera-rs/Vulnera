@@ -113,7 +113,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp /usr/local/bin/sqlx /app/bin/sqlx"
 
 # Runtime stage
-FROM debian:bookworm-slim
+# Use sid (unstable) to match GLIBC version from rust:slim builder
+# This ensures sqlx-cli binary compiled in builder stage is compatible
+FROM debian:sid-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \

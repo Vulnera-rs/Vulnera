@@ -270,7 +270,7 @@ Vulnera solves critical pain points experienced by security teams and developers
 - Scan results stored for 90 days
 - Advanced reporting, webhook integrations, CI/CD integrations
 
-**Professional Tier - $299-499/month**
+**Professional Tier - $99-199/month**
 
 - 2,000 scans/month
 - 50,000 API calls/month
@@ -281,7 +281,7 @@ Vulnera solves critical pain points experienced by security teams and developers
 - Scan results stored for 1 year
 - Advanced reporting, compliance reports, API access, custom integrations, priority processing
 
-**Enterprise Tier - Custom pricing ($2,000+/month)**
+**Enterprise Tier - Custom pricing ($1,000+/month)**
 
 - Unlimited scans
 - Unlimited repositories
