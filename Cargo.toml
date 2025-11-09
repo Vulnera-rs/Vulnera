@@ -87,13 +87,6 @@ utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 anyhow = "1.0"
 thiserror = "2.0"
 
-# Dev dependencies 
-tempfile = "3.23.0"
-axum-test = "18.1"
-mockito = "1.7.0"
-tokio-test = "0.4.4"
-serial_test = "3.2.0"
-
 # Configuration
 config = "0.15"
 dotenvy = "0.15"
@@ -155,12 +148,20 @@ quote = "1.0"
 proc-macro2 = "1.0"
 walkdir = "2.5"
 
-[workspace.dev-dependencies]
-tempfile = "3.23.0"
+# Testing crates (for use in dev-dependencies)
+proptest = "1.5.1"
+mockall = "0.13.1"
+criterion = { version = "0.5.1", features = ["html_reports", "async_tokio"] }
+insta = { version = "1.40.0", features = ["redactions", "json"] }
+snapbox = "0.5.9"
+datatest-stable = "0.1.1"
+testcontainers = { version = "0.16.0", features = ["postgres", "async"] }
+wiremock = "0.6.0"
+rstest = "0.20.0"
 axum-test = "18.1"
+tempfile = "3.23.0"
 mockito = "1.7.0"
 tokio-test = "0.4.4"
-futures = "0.3.31"
 serial_test = "3.2.0"
 
 [workspace.lints.clippy]

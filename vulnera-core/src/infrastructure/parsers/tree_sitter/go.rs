@@ -8,7 +8,7 @@ use crate::infrastructure::parsers::traits::PackageFileParser;
 use async_trait::async_trait;
 use tree_sitter::{Node, Tree};
 
-use super::traits::{TreeSitterParser, create_parser_with_recovery, parse_with_error_recovery};
+use super::traits::TreeSitterParser;
 
 /// Tree-sitter based Go parser for go.mod files
 pub struct TreeSitterGoParser {
@@ -18,6 +18,78 @@ pub struct TreeSitterGoParser {
 impl TreeSitterGoParser {
     pub fn new(ecosystem: Ecosystem) -> Result<Self, ParseError> {
         Ok(Self { ecosystem })
+    }
+
+    /// Parse go.mod file using text-based parsing (fallback since tree-sitter-go is for Go source, not go.mod)
+    fn parse_go_mod_text(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+        let mut packages = Vec::new();
+        let mut in_require_block = false;
+
+        for line in content.lines() {
+            let line = line.trim();
+
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+
+            // Handle require block
+            if line.starts_with("require (") {
+                in_require_block = true;
+                continue;
+            } else if line == ")" && in_require_block {
+                in_require_block = false;
+                continue;
+            }
+
+            // Parse require statements
+            if line.starts_with("require ") || in_require_block {
+                if let Some(package) = self.parse_require_line(line)? {
+                    packages.push(package);
+                }
+            }
+        }
+
+        Ok(packages)
+    }
+
+    /// Parse a single require line
+    fn parse_require_line(&self, line: &str) -> Result<Option<Package>, ParseError> {
+        let line = line.trim();
+
+        // Remove "require " prefix if present
+        let line = if let Some(stripped) = line.strip_prefix("require ") {
+            stripped
+        } else {
+            line
+        };
+
+        // Skip lines that don't look like dependencies
+        if line.is_empty() || line.starts_with("//") || line == "(" || line == ")" {
+            return Ok(None);
+        }
+
+        // Parse module path and version
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Ok(None);
+        }
+
+        let module_path = parts[0];
+        let version_str = parts[1];
+
+        // Clean version string
+        let clean_version = self.clean_go_version(version_str);
+
+        let version = crate::domain::vulnerability::value_objects::Version::parse(&clean_version)
+            .map_err(|_| ParseError::Version {
+                version: version_str.to_string(),
+            })?;
+
+        let package = Package::new(module_path.to_string(), version, self.ecosystem.clone())
+            .map_err(|e| ParseError::MissingField { field: e })?;
+
+        Ok(Some(package))
     }
 
     /// Extract dependencies from go.mod using tree-sitter AST
@@ -45,13 +117,16 @@ impl TreeSitterGoParser {
         let mut cursor = node.walk();
 
         for child in node.children(&mut cursor) {
-            match child.kind() {
-                "require_block" => {
+            let kind = child.kind();
+            match kind {
+                "require_block" | "require" if child.child_count() > 1 => {
                     // Multi-line require block: require ( ... )
+                    // Also handle "require" nodes that contain multiple children
                     packages.extend(self.parse_require_block(&child, content)?);
                 }
-                "require_directive" => {
+                "require_directive" | "require" => {
                     // Single-line require: require module/path v1.2.3
+                    // tree-sitter-go uses "require" as the node type
                     if let Some(package) = self.parse_require_directive(&child, content)? {
                         packages.push(package);
                     }
@@ -76,10 +151,16 @@ impl TreeSitterGoParser {
         let mut cursor = block_node.walk();
 
         for child in block_node.children(&mut cursor) {
-            if child.kind() == "require_directive" {
+            let kind = child.kind();
+            // tree-sitter-go uses "require" for both single and multi-line requires
+            // In a block, each line is a "require" node
+            if kind == "require_directive" || kind == "require" {
                 if let Some(package) = self.parse_require_directive(&child, content)? {
                     packages.push(package);
                 }
+            } else {
+                // Also recursively search in case the structure is nested
+                self.find_require_nodes(&child, content, &mut packages)?;
             }
         }
 
@@ -93,39 +174,71 @@ impl TreeSitterGoParser {
         directive_node: &'a Node,
         content: &str,
     ) -> Result<Option<Package>, ParseError> {
-        // Tree-sitter-go structure:
-        // require_directive -> module_path, version (optional), comment (optional)
+        // Tree-sitter-go structure can vary:
+        // - require_directive -> module_path, version (optional), comment (optional)
+        // - require -> module_path, version (optional)
+        // - Or the module_path and version might be direct children or in a different structure
         let mut module_path: Option<String> = None;
         let mut version: Option<String> = None;
 
         let mut cursor = directive_node.walk();
         for child in directive_node.children(&mut cursor) {
             match child.kind() {
-                "module_path" => {
+                "module_path" | "module_identifier" => {
                     module_path = Some(content[child.byte_range()].trim().to_string());
                 }
-                "version" => {
-                    version = Some(content[child.byte_range()].trim().to_string());
+                "version" | "string" => {
+                    // Version might be a string node or version node
+                    let text = content[child.byte_range()].trim();
+                    // Check if it looks like a version (starts with v or is a version number)
+                    if text.starts_with('v') || text.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                        version = Some(text.to_string());
+                    }
                 }
                 _ => {
-                    // Skip comments and other nodes
+                    // Skip comments and other nodes, but also check if it's a module path or version
+                    // by examining the text content
+                    let text = content[child.byte_range()].trim();
+                    if !text.is_empty() && !text.starts_with("//") {
+                        // If it looks like a module path (contains / or .)
+                        if (text.contains('/') || text.contains('.')) && module_path.is_none() {
+                            module_path = Some(text.to_string());
+                        }
+                        // If it looks like a version (starts with v or is a version number)
+                        else if (text.starts_with('v') || text.chars().next().map_or(false, |c| c.is_ascii_digit())) && version.is_none() {
+                            version = Some(text.to_string());
+                        }
+                    }
                 }
             }
         }
 
-        // If we have a module_path, try to extract version from the directive text
+        // Fallback: if we don't have module_path or version, try parsing the full directive text
+        if module_path.is_none() || version.is_none() {
+            let directive_text = content[directive_node.byte_range()].trim();
+            // Remove "require" keyword if present
+            let text = directive_text.strip_prefix("require").unwrap_or(directive_text).trim();
+            let parts: Vec<&str> = text.split_whitespace().collect();
+            
+            if parts.len() >= 2 {
+                if module_path.is_none() {
+                    module_path = Some(parts[0].to_string());
+                }
+                if version.is_none() {
+                    version = Some(parts[1].to_string());
+                }
+            } else if parts.len() == 1 && module_path.is_none() {
+                // Single part might be the module path
+                module_path = Some(parts[0].to_string());
+            }
+        }
+
+        // If we have a module_path, try to extract version
         if let Some(name) = module_path {
             let version_str = if let Some(ver) = version {
                 ver
             } else {
-                // Fallback: try to extract version from the full directive text
-                let directive_text = content[directive_node.byte_range()].trim();
-                let parts: Vec<&str> = directive_text.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    parts[1].to_string()
-                } else {
-                    return Ok(None); // No version found
-                }
+                return Ok(None); // No version found
             };
 
             let clean_version = self.clean_go_version(&version_str);
@@ -181,7 +294,7 @@ impl TreeSitterGoParser {
 
 impl TreeSitterParser for TreeSitterGoParser {
     fn language(&self) -> tree_sitter::Language {
-        tree_sitter_go::language()
+        tree_sitter_go::LANGUAGE.into()
     }
 
     fn parse_with_tree_sitter(
@@ -217,22 +330,10 @@ impl PackageFileParser for TreeSitterGoPackageParser {
     }
 
     async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        // Create a new parser for this parse (Parser doesn't implement Clone)
-        // Note: This may fail due to version incompatibility between tree-sitter-go and tree-sitter
-        // If it fails, the ParserFactory will fall back to the existing GoModParser
-        let mut parser = match create_parser_with_recovery(self.inner.language()) {
-            Ok(p) => p,
-            Err(e) => {
-                // Log the error but don't fail - let the fallback parser handle it
-                tracing::debug!(
-                    "Tree-sitter Go parser failed: {:?}, falling back to GoModParser",
-                    e
-                );
-                return Err(e);
-            }
-        };
-        let tree = parse_with_error_recovery(&mut parser, content, None)?;
-        self.inner.parse_with_tree_sitter(content, &tree)
+        // Note: tree-sitter-go is for parsing Go source code, not go.mod files.
+        // Since go.mod files have a different syntax, we fall back to text-based parsing.
+        // This parser exists for potential future use with a go.mod-specific tree-sitter grammar.
+        self.inner.parse_go_mod_text(content)
     }
 
     fn ecosystem(&self) -> Ecosystem {

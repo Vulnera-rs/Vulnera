@@ -1,0 +1,53 @@
+# Cargo Tarpaulin configuration for test coverage
+
+[tool.tarpaulin]
+# Timeout for tests (in seconds)
+timeout = 300
+
+# Test timeout for individual tests (in seconds)
+test_timeout = 60
+
+# Fail under coverage threshold (percentage)
+fail_under = 80
+
+# Exclude files from coverage
+exclude_files = [
+    "*/tests/*",
+    "*/benches/*",
+    "*/examples/*",
+    "*/target/*",
+    "*/src/main.rs",
+]
+
+# Exclude lines from coverage
+exclude_globs = [
+    "**/tests/**",
+    "**/benches/**",
+    "**/examples/**",
+    "**/target/**",
+]
+
+# Include test files
+include_tests = true
+
+# Generate HTML report
+out = ["Html", "Xml"]
+
+# Output directory for reports
+output_dir = "target/tarpaulin"
+
+# Follow symbolic links
+follow_links = true
+
+# Exclude default patterns
+exclude_default = true
+
+# Coverage for each crate
+[tool.tarpaulin.crates]
+vulnera-core = { fail_under = 85 }
+vulnera-deps = { fail_under = 80 }
+vulnera-orchestrator = { fail_under = 75 }
+vulnera-sast = { fail_under = 80 }
+vulnera-secrets = { fail_under = 80 }
+vulnera-api = { fail_under = 75 }
+

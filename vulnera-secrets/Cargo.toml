@@ -39,3 +39,9 @@ reqwest = { workspace = true, features = ["json"] }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
+proptest = { workspace = true }
+datatest-stable = { workspace = true }
+rstest = { workspace = true }
+tempfile = { workspace = true }
+futures = { workspace = true }
+wiremock = { workspace = true }
