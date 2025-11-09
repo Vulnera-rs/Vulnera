@@ -3,12 +3,16 @@
 # For production, consider pinning: rust:1.88-slim or rust:1-slim
 FROM rust:slim as builder
 
-# Install system dependencies
+# Install system dependencies including PostgreSQL for compile-time query verification
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libsqlite3-dev \
+    libpq-dev \
+    postgresql \
+    postgresql-contrib \
     curl \
+    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
@@ -57,6 +61,25 @@ COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
 COPY migrations ./migrations
 
+# Install sqlx-cli early for running migrations during build
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    cargo install sqlx-cli --no-default-features --features postgres --root /usr/local
+
+# Set up PostgreSQL for compile-time query verification
+# Initialize PostgreSQL data directory, start service, create database, and run migrations
+RUN PG_VERSION=$(ls /usr/lib/postgresql/ | head -n1) && \
+    mkdir -p /var/lib/postgresql/data && \
+    chown -R postgres:postgres /var/lib/postgresql && \
+    sudo -u postgres /usr/lib/postgresql/$PG_VERSION/bin/initdb -D /var/lib/postgresql/data && \
+    sudo -u postgres /usr/lib/postgresql/$PG_VERSION/bin/pg_ctl -D /var/lib/postgresql/data -l /var/lib/postgresql/logfile start && \
+    sleep 3 && \
+    sudo -u postgres psql -c "CREATE DATABASE vulnera_build;" && \
+    sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';" && \
+    export DATABASE_URL="postgresql://postgres:postgres@localhost:5432/vulnera_build" && \
+    sqlx migrate run --source migrations && \
+    sudo -u postgres /usr/lib/postgresql/$PG_VERSION/bin/pg_ctl -D /var/lib/postgresql/data stop
+
 # Verify workspace structure and force rebuild of workspace members
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
@@ -72,22 +95,22 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     -exec touch {} \; 2>/dev/null || true
 
 # Build workspace members first, then the main binary
+# Start PostgreSQL and set DATABASE_URL for compile-time query verification
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
+    bash -c "PG_VERSION=\$(ls /usr/lib/postgresql/ | head -n1) && \
+    sudo -u postgres /usr/lib/postgresql/\$PG_VERSION/bin/pg_ctl -D /var/lib/postgresql/data -l /var/lib/postgresql/logfile start && \
+    sleep 3 && \
+    export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vulnera_build' && \
     cargo build --release --package vulnera-core --package vulnera-deps \
     --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
     --package vulnera-api && \
     cargo build --release --package vulnera-rust && \
+    sudo -u postgres /usr/lib/postgresql/\$PG_VERSION/bin/pg_ctl -D /var/lib/postgresql/data stop && \
     mkdir -p /app/bin && \
-    cp /app/target/release/vulnera-rust /app/bin/vulnera-rust
-
-# Install sqlx-cli in builder stage for migrations
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo install sqlx-cli --no-default-features --features postgres --root /usr/local && \
-    mkdir -p /app/bin && \
-    cp /usr/local/bin/sqlx /app/bin/sqlx
+    cp /app/target/release/vulnera-rust /app/bin/vulnera-rust && \
+    cp /usr/local/bin/sqlx /app/bin/sqlx"
 
 # Runtime stage
 FROM debian:bookworm-slim
