@@ -16,12 +16,15 @@ hsts_include_subdomains = true
 
 [cache]
 ttl_hours = 24
+# Dragonfly DB configuration (default cache backend, replaces file-based caching)
+dragonfly_url = "${DRAGONFLY_URL:-redis://127.0.0.1:6379}"
+dragonfly_connection_timeout_seconds = 5
 
 [auth]
 # Production: MUST override jwt_secret via VULNERA__AUTH__JWT_SECRET environment variable
 jwt_secret = "${JWT_SECRET}"
 token_ttl_hours = 24
-refresh_token_ttl_hours = 720  # 30 days
+refresh_token_ttl_hours = 720 # 30 days
 api_key_length = 32
 api_key_ttl_days = 365
 

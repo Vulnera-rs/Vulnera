@@ -443,7 +443,7 @@ curl -X GET http://localhost:3000/api/v1/analyze \
   - Go proxy: `https://proxy.golang.org/{module}/@v/list`
   - Maven Central: `https://repo1.maven.org/maven2/{groupPath}/{artifact}/maven-metadata.xml`
 - Caching for registry version listings:
-  - Cached via filesystem cache with TTL from `VULNERA__CACHE__TTL_HOURS` (default: 24).
+  - Cached via Dragonfly DB with TTL from `VULNERA__CACHE__TTL_HOURS` (default: 24).
   - Cache keys follow standard helpers to ensure consistent naming.
 - OpenAPI/Swagger updates:
   - New DTO fields for recommendations and repository response documented and included in components.
@@ -496,7 +496,7 @@ curl -X GET http://localhost:3000/api/v1/analyze \
 - Analysis:
   - `VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES` (default: `3`)
 - Cache:
-  - `VULNERA__CACHE__DIRECTORY` (default: `.vulnera_cache`)
+  - `VULNERA__NVD__DATA_DIRECTORY` (default: `.vulnera_data`) - Directory for NVD SQLite database
   - `VULNERA__CACHE__TTL_HOURS` (default: `24`)
 - Recommendations:
   - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES` (default: `false`)

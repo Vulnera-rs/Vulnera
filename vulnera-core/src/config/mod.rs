@@ -232,27 +232,38 @@ impl Default for SecurityConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CacheConfig {
-    pub directory: PathBuf,
     pub ttl_hours: u64,
-    /// L1 cache size in MB (in-memory cache)
+    /// L1 cache size in MB (deprecated, kept for backward compatibility)
     pub l1_cache_size_mb: u64,
-    /// L1 cache TTL in seconds
+    /// L1 cache TTL in seconds (deprecated, kept for backward compatibility)
     pub l1_cache_ttl_seconds: u64,
     /// Enable cache compression for entries larger than threshold
     pub enable_cache_compression: bool,
     /// Compression threshold in bytes
     pub compression_threshold_bytes: u64,
+    /// Enable Dragonfly DB cache (default cache backend, replaces file-based caching)
+    pub dragonfly_enabled: bool,
+    /// Dragonfly DB connection URL (e.g., "redis://127.0.0.1:6379")
+    pub dragonfly_url: String,
+    /// Connection pool size for Dragonfly DB (not used directly, but kept for future use)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dragonfly_connection_pool_size: Option<u32>,
+    /// Connection timeout in seconds for Dragonfly DB
+    pub dragonfly_connection_timeout_seconds: u64,
 }
 
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            directory: PathBuf::from(".vulnera_cache"),
             ttl_hours: 24,
             l1_cache_size_mb: 100,
             l1_cache_ttl_seconds: 300, // 5 minutes
             enable_cache_compression: true,
             compression_threshold_bytes: 10240, // 10KB
+            dragonfly_enabled: true,            // Dragonfly DB is the default cache backend
+            dragonfly_url: "redis://127.0.0.1:6379".to_string(),
+            dragonfly_connection_pool_size: None,
+            dragonfly_connection_timeout_seconds: 5,
         }
     }
 }
@@ -637,12 +648,15 @@ impl Default for Config {
                 rate_limit: RateLimitConfig::default(),
             },
             cache: CacheConfig {
-                directory: PathBuf::from(".vulnera_cache"),
                 ttl_hours: 24,
                 l1_cache_size_mb: 100,
                 l1_cache_ttl_seconds: 300,
                 enable_cache_compression: true,
                 compression_threshold_bytes: 10240,
+                dragonfly_enabled: true,
+                dragonfly_url: "redis://127.0.0.1:6379".to_string(),
+                dragonfly_connection_pool_size: None,
+                dragonfly_connection_timeout_seconds: 5,
             },
             apis: ApiConfig {
                 nvd: NvdConfig {

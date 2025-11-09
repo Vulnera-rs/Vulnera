@@ -19,8 +19,8 @@ use tokio::task;
 use tokio::time::sleep;
 
 /// NVD client backed by a local `nvd_cve` SQLite cache.
-/// - The cache database is placed inside the configured cache directory:
-/// - Uses env var VULNERA__CACHE__DIRECTORY if set, otherwise defaults to ".vulnera_cache".
+/// - The cache database is placed inside the configured data directory:
+/// - Uses env var VULNERA__NVD__DATA_DIRECTORY if set, otherwise defaults to ".vulnera_data".
 /// - On first use (if db missing) it will sync the NVD feeds locally using a blocking reqwest client
 /// - on a blocking thread to avoid stalling the async runtime.
 pub struct NvdClient {
@@ -49,14 +49,15 @@ impl NvdClient {
     ///
     /// If `api_key` is not provided, VULNERA__APIS__NVD__API_KEY will be used when present to unlock higher REST rate limits.
     pub fn new(base_url: String, api_key: Option<String>) -> Self {
-        // Determine cache directory
-        let cache_dir = std::env::var("VULNERA__CACHE__DIRECTORY")
+        // Determine data directory for NVD SQLite database
+        // Uses VULNERA__NVD__DATA_DIRECTORY if set, otherwise defaults to ".vulnera_data"
+        let data_dir = std::env::var("VULNERA__NVD__DATA_DIRECTORY")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(".vulnera_cache"));
+            .unwrap_or_else(|_| PathBuf::from(".vulnera_data"));
 
-        // Ensure cache directory exists (sync at construction time is fine)
-        if let Err(e) = std::fs::create_dir_all(&cache_dir) {
-            tracing::warn!(error=?e, dir=?cache_dir, "Failed to create cache directory, continuing");
+        // Ensure data directory exists (sync at construction time is fine)
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            tracing::warn!(error=?e, dir=?data_dir, "Failed to create NVD data directory, continuing");
         }
 
         // Compute feeds base and REST base
@@ -73,7 +74,7 @@ impl NvdClient {
             )
         };
 
-        let db_path = cache_dir.join("nvd_cve.sqlite");
+        let db_path = data_dir.join("nvd_cve.sqlite");
 
         // Build a reasonable default set of feeds:
         // last 5 years + "recent" + "modified" (recent/modified last to avoid overwriting)
@@ -101,7 +102,7 @@ impl NvdClient {
             db_path,
             feeds,
             show_progress: false,
-            cvss_index_path: cache_dir.join("nvd_cvss_index.json"),
+            cvss_index_path: data_dir.join("nvd_cvss_index.json"),
             api_key,
         };
         // Start periodic sync + CVSS index refresh (fire-and-forget)
