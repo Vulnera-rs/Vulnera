@@ -15,6 +15,7 @@ use crate::application::vulnerability::services::CacheService;
 use crate::domain::vulnerability::entities::Package;
 use crate::domain::vulnerability::repositories::IVulnerabilityRepository;
 use crate::domain::vulnerability::value_objects::Ecosystem;
+use crate::infrastructure::cache::dragonfly_cache::DragonflyCache;
 use crate::infrastructure::cache::file_cache::FileCacheRepository;
 use crate::infrastructure::cache::multi_level::MultiLevelCache;
 
@@ -29,6 +30,7 @@ pub struct CacheServiceImpl {
 enum CacheBackend {
     File(Arc<FileCacheRepository>),
     MultiLevel(Arc<MultiLevelCache>),
+    Dragonfly(Arc<DragonflyCache>),
 }
 
 impl CacheServiceImpl {
@@ -46,6 +48,13 @@ impl CacheServiceImpl {
         }
     }
 
+    /// Create a new cache service implementation with DragonflyCache
+    pub fn new_with_dragonfly(cache_repository: Arc<DragonflyCache>) -> Self {
+        Self {
+            cache_repository: CacheBackend::Dragonfly(cache_repository),
+        }
+    }
+
     /// Get the underlying file cache repository if available (for stats)
     pub fn get_file_cache(&self) -> Option<&FileCacheRepository> {
         match &self.cache_repository {
@@ -55,6 +64,7 @@ impl CacheServiceImpl {
                 // This is a bit hacky but needed for stats
                 None // We'll handle stats differently
             }
+            CacheBackend::Dragonfly(_) => None, // Dragonfly doesn't have a file cache
         }
     }
 
@@ -199,6 +209,13 @@ impl CacheServiceImpl {
                                 ml.l2().exists(&cache_key).await.unwrap_or(false)
                             }
                         }
+                        CacheBackend::Dragonfly(df) => {
+                            // Check if key exists by trying to get it
+                            df.get::<serde_json::Value>(&cache_key)
+                                .await
+                                .unwrap_or(None)
+                                .is_some()
+                        }
                     };
                     if exists {
                         return Ok::<_, ApplicationError>(());
@@ -220,6 +237,10 @@ impl CacheServiceImpl {
                                 }
                                 CacheBackend::MultiLevel(ml) => {
                                     ml.set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
+                                        .await
+                                }
+                                CacheBackend::Dragonfly(df) => {
+                                    df.set(&cache_key, &vulnerabilities, Duration::from_secs(3600))
                                         .await
                                 }
                             };
@@ -283,9 +304,20 @@ impl CacheServiceImpl {
         let mut invalidated_count = 0u64;
 
         // Read cache directory and find files matching ecosystem prefix
+        // Note: Dragonfly cache doesn't support filesystem-based invalidation
+        // For Dragonfly, we would need to use SCAN to find matching keys
         let cache_dir = match &self.cache_repository {
             CacheBackend::File(fc) => fc.cache_dir(),
             CacheBackend::MultiLevel(ml) => ml.l2().cache_dir(),
+            CacheBackend::Dragonfly(_) => {
+                // For Dragonfly, we can't invalidate by ecosystem using filesystem
+                // This would require SCAN operations which are expensive
+                // For now, return 0 and log a warning
+                warn!(
+                    "Ecosystem cache invalidation not fully supported for Dragonfly cache. Use individual key invalidation instead."
+                );
+                return Ok(0);
+            }
         };
         if let Ok(mut entries) = tokio::fs::read_dir(cache_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
@@ -364,6 +396,19 @@ impl CacheServiceImpl {
                     cleanup_runs: stats.cleanup_runs,
                 })
             }
+            CacheBackend::Dragonfly(_) => {
+                // Dragonfly cache doesn't provide detailed statistics in the same way
+                // Return default statistics
+                Ok(CacheStatistics {
+                    hits: 0,
+                    misses: 0,
+                    hit_rate: 0.0,
+                    total_entries: 0,
+                    total_size_bytes: 0,
+                    expired_entries: 0,
+                    cleanup_runs: 0,
+                })
+            }
         }
     }
 
@@ -379,6 +424,10 @@ impl CacheServiceImpl {
                     ml.l2().exists(key).await
                 }
             }
+            CacheBackend::Dragonfly(df) => {
+                // Check if key exists by trying to get it
+                Ok(df.get::<serde_json::Value>(key).await?.is_some())
+            }
         }
     }
 
@@ -389,6 +438,11 @@ impl CacheServiceImpl {
             CacheBackend::MultiLevel(ml) => {
                 // Cleanup L2 (L1 is automatically cleaned via TTL)
                 ml.l2().cleanup_expired().await
+            }
+            CacheBackend::Dragonfly(_) => {
+                // Dragonfly DB automatically handles TTL expiration
+                // No manual cleanup needed
+                Ok(0)
             }
         }
     }
@@ -415,6 +469,7 @@ impl CacheService for CacheServiceImpl {
         match &self.cache_repository {
             CacheBackend::File(fc) => fc.get(key).await,
             CacheBackend::MultiLevel(ml) => ml.get(key).await,
+            CacheBackend::Dragonfly(df) => df.get(key).await,
         }
     }
 
@@ -425,6 +480,7 @@ impl CacheService for CacheServiceImpl {
         match &self.cache_repository {
             CacheBackend::File(fc) => fc.set(key, value, ttl).await,
             CacheBackend::MultiLevel(ml) => ml.set(key, value, ttl).await,
+            CacheBackend::Dragonfly(df) => df.set(key, value, ttl).await,
         }
     }
 
@@ -432,6 +488,7 @@ impl CacheService for CacheServiceImpl {
         match &self.cache_repository {
             CacheBackend::File(fc) => fc.invalidate(key).await,
             CacheBackend::MultiLevel(ml) => ml.invalidate(key).await,
+            CacheBackend::Dragonfly(df) => df.invalidate(key).await,
         }
     }
 }

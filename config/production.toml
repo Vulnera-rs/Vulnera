@@ -1,0 +1,62 @@
+[server]
+host = "0.0.0.0"
+port = 3000
+workers = 0
+enable_docs = false
+request_timeout_seconds = 30
+allowed_origins = ["${ALLOWED_ORIGIN}"]
+rate_limit.enabled = true
+
+[server.security]
+enforce_https = true
+enable_security_headers = true
+sanitize_errors = true
+hsts_max_age = 31536000        # 1 year in seconds
+hsts_include_subdomains = true
+
+[cache]
+ttl_hours = 24
+# Dragonfly DB configuration (default cache backend, replaces file-based caching)
+dragonfly_url = "${DRAGONFLY_URL:-redis://127.0.0.1:6379}"
+dragonfly_connection_timeout_seconds = 5
+
+[auth]
+# Production: MUST override jwt_secret via VULNERA__AUTH__JWT_SECRET environment variable
+jwt_secret = "${JWT_SECRET}"
+token_ttl_hours = 24
+refresh_token_ttl_hours = 720 # 30 days
+api_key_length = 32
+api_key_ttl_days = 365
+
+[database]
+# Production: MUST override via DATABASE_URL or VULNERA__DATABASE__URL environment variable
+url = "${DATABASE_URL}"
+max_connections = 20
+
+[apis.nvd]
+base_url = "https://services.nvd.nist.gov/rest/json"
+api_key = "${NVD_API_KEY}"
+timeout_seconds = 20
+rate_limit_per_30s = 100
+
+[apis.ghsa]
+graphql_url = "https://api.github.com/graphql"
+token = "${GH_TOKEN}"
+timeout_seconds = 20
+
+[apis.github]
+base_url = "https://api.github.com"
+token = "${GH_TOKEN}"
+reuse_ghsa_token = true
+timeout_seconds = 20
+max_concurrent_file_fetches = 8
+max_files_scanned = 200
+max_total_bytes = 2000000
+max_single_file_bytes = 1000000
+backoff_initial_ms = 500
+backoff_max_retries = 3
+backoff_jitter = true
+
+[logging]
+level = "warn"
+format = "json"

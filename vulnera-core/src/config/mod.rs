@@ -242,6 +242,15 @@ pub struct CacheConfig {
     pub enable_cache_compression: bool,
     /// Compression threshold in bytes
     pub compression_threshold_bytes: u64,
+    /// Enable Dragonfly DB cache (default cache backend, replaces file-based caching)
+    pub dragonfly_enabled: bool,
+    /// Dragonfly DB connection URL (e.g., "redis://127.0.0.1:6379")
+    pub dragonfly_url: String,
+    /// Connection pool size for Dragonfly DB (not used directly, but kept for future use)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dragonfly_connection_pool_size: Option<u32>,
+    /// Connection timeout in seconds for Dragonfly DB
+    pub dragonfly_connection_timeout_seconds: u64,
 }
 
 impl Default for CacheConfig {
@@ -253,6 +262,10 @@ impl Default for CacheConfig {
             l1_cache_ttl_seconds: 300, // 5 minutes
             enable_cache_compression: true,
             compression_threshold_bytes: 10240, // 10KB
+            dragonfly_enabled: true,            // Dragonfly DB is the default cache backend
+            dragonfly_url: "redis://127.0.0.1:6379".to_string(),
+            dragonfly_connection_pool_size: None,
+            dragonfly_connection_timeout_seconds: 5,
         }
     }
 }
@@ -643,6 +656,10 @@ impl Default for Config {
                 l1_cache_ttl_seconds: 300,
                 enable_cache_compression: true,
                 compression_threshold_bytes: 10240,
+                dragonfly_enabled: false,
+                dragonfly_url: "redis://127.0.0.1:6379".to_string(),
+                dragonfly_connection_pool_size: None,
+                dragonfly_connection_timeout_seconds: 5,
             },
             apis: ApiConfig {
                 nvd: NvdConfig {
