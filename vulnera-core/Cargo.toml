@@ -54,6 +54,9 @@ hex = { workspace = true }
 moka = { workspace = true }
 flate2 = { workspace = true }
 
+# Redis client for Dragonfly DB
+redis = { version = "0.26", features = ["tokio-comp", "connection-manager", "aio"] }
+
 # Authentication and security
 jsonwebtoken = { workspace = true }
 bcrypt = { workspace = true }

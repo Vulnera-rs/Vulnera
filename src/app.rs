@@ -27,7 +27,7 @@ use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
     api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, osv::OsvClient},
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
-    cache::{CacheServiceImpl, FileCacheRepository, MemoryCache, MultiLevelCache},
+    cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
     repositories::AggregatingVulnerabilityRepository,
@@ -70,23 +70,24 @@ pub async fn create_app(
             .await?,
     );
 
-    // Initialize cache
-    let l2_cache = Arc::new(FileCacheRepository::new_with_compression(
-        config.cache.directory.clone(),
-        std::time::Duration::from_secs(config.cache.ttl_hours * 3600),
-        config.cache.enable_cache_compression,
-        config.cache.compression_threshold_bytes,
-    ));
-
-    let l1_cache = Arc::new(MemoryCache::new_with_compression(
-        config.cache.l1_cache_size_mb,
-        config.cache.l1_cache_ttl_seconds,
-        config.cache.enable_cache_compression,
-        config.cache.compression_threshold_bytes,
-    ));
-
-    let multi_level_cache = Arc::new(MultiLevelCache::new(l1_cache, l2_cache.clone()));
-    let cache_service = Arc::new(CacheServiceImpl::new_with_cache(multi_level_cache));
+    // Initialize cache - Dragonfly DB is the default and only cache backend
+    tracing::info!(
+        "Initializing Dragonfly DB cache at {}",
+        config.cache.dragonfly_url
+    );
+    let dragonfly_cache = Arc::new(
+        vulnera_core::infrastructure::cache::DragonflyCache::new(
+            &config.cache.dragonfly_url,
+            config.cache.enable_cache_compression,
+            config.cache.compression_threshold_bytes,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to initialize Dragonfly DB cache: {}", e);
+            e
+        })?,
+    );
+    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache));
 
     // Initialize API clients
     let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {

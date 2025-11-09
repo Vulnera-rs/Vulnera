@@ -16,6 +16,9 @@ hsts_include_subdomains = false # Don't include subdomains in dev
 
 [cache]
 ttl_hours = 1
+# Dragonfly DB configuration (default cache backend)
+dragonfly_url = "redis://127.0.0.1:6379"
+dragonfly_connection_timeout_seconds = 5
 
 [auth]
 # Development: shorter TTL for easier testing

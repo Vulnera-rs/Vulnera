@@ -118,8 +118,8 @@ COPY --from=builder /app/migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Create cache directory
-RUN mkdir -p .vulnera_cache && chown vulnera:vulnera .vulnera_cache
+# Create NVD data directory (for SQLite database)
+RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
 # Switch to app user
 USER vulnera
