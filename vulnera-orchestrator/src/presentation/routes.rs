@@ -2,6 +2,7 @@
 
 use axum::{
     Router, middleware,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use std::sync::Arc;
@@ -30,7 +31,6 @@ use crate::presentation::{
 use axum::{
     extract::{Request, State},
     middleware::Next,
-    response::Response,
 };
 
 /// OpenAPI documentation
@@ -146,7 +146,24 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/dependencies/analyze", post(analyze_dependencies))
         .merge(auth_routes);
 
+    // Root route - redirect to docs if enabled, otherwise show API info
+    async fn root_handler() -> Response {
+        axum::Json(serde_json::json!({
+            "name": "Vulnera API",
+            "version": env!("CARGO_PKG_VERSION"),
+            "description": "A comprehensive vulnerability analysis API",
+            "endpoints": {
+                "health": "/health",
+                "metrics": "/metrics",
+                "api": "/api/v1",
+                "docs": "/docs"
+            }
+        }))
+        .into_response()
+    }
+
     let health_routes = Router::new()
+        .route("/", get(root_handler))
         .route("/health", get(health_check))
         .route("/metrics", get(metrics));
 
