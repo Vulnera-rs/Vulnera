@@ -148,7 +148,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
         .route(
-            "/jobs/:id",
+            "/jobs/{id}",
             get(crate::presentation::controllers::jobs::get_job),
         )
         .route("/dependencies/analyze", post(analyze_dependencies))
