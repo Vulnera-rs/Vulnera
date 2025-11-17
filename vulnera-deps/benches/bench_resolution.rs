@@ -1,6 +1,7 @@
 //! Benchmarks for dependency resolution
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 
 fn bench_version_parsing(c: &mut Criterion) {
     let version = "1.2.3";

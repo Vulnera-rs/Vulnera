@@ -29,7 +29,7 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 }
             }
             AnalysisDepth::Full => {
-                // Full analysis: all applicable modules
+                // Full analysis: only modules that are registered
                 modules.push(ModuleType::DependencyAnalyzer);
 
                 // SAST if we have source code
@@ -40,18 +40,10 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 // Secret detection for all projects
                 modules.push(ModuleType::SecretDetection);
 
-                // Malicious package detection if we have dependencies
-                if !project.metadata.dependency_files.is_empty() {
-                    modules.push(ModuleType::MaliciousPackageDetection);
+                // API security if we have source code
+                if !project.metadata.languages.is_empty() {
+                    modules.push(ModuleType::ApiSecurity);
                 }
-
-                // License compliance if we have dependencies
-                if !project.metadata.dependency_files.is_empty() {
-                    modules.push(ModuleType::LicenseCompliance);
-                }
-
-                // SBOM generation
-                modules.push(ModuleType::SBOM);
             }
         }
 

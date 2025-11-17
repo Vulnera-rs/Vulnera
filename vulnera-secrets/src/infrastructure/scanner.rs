@@ -136,5 +136,3 @@ impl DirectoryScanner {
         true
     }
 }
-
-

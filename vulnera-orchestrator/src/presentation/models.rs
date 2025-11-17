@@ -84,10 +84,14 @@ pub struct AnalysisResponse {
 #[derive(Serialize, ToSchema)]
 pub struct JobStatusResponse {
     pub job_id: Uuid,
+    pub project_id: String,
     pub status: String,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub started_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub modules_completed: usize,
+    pub modules_failed: usize,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error: Option<String>,
 }
 
 /// Final report response

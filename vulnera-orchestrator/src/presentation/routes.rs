@@ -19,7 +19,7 @@ use crate::presentation::{
         AuthAppState, create_api_key, list_api_keys, login, refresh_token, register, revoke_api_key,
     },
     controllers::{
-        OrchestratorState, analyze, analyze_dependencies,
+        OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
     },
     middleware::{
@@ -39,6 +39,7 @@ use axum::{
     paths(
         crate::presentation::controllers::analyze,
         crate::presentation::controllers::analyze_dependencies,
+        crate::presentation::controllers::jobs::get_job,
         crate::presentation::controllers::health::health_check,
         crate::presentation::controllers::health::metrics,
         crate::presentation::auth::controller::login,
@@ -52,6 +53,7 @@ use axum::{
         schemas(
             AnalysisRequest,
             FinalReportResponse,
+            JobStatusResponse,
             ErrorResponse,
             HealthResponse,
             BatchDependencyAnalysisRequest,
@@ -81,6 +83,7 @@ use axum::{
     ),
     tags(
         (name = "analysis", description = "Vulnerability analysis endpoints using job-based orchestration"),
+        (name = "jobs", description = "Job retrieval and status endpoints"),
         (name = "dependencies", description = "Dependency analysis endpoints optimized for LSP/IDE extensions"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
         (name = "auth", description = "Authentication and authorization endpoints")
@@ -143,6 +146,11 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Orchestrator job-based analysis route
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
+        .route("/analyze/repository", post(analyze_repository))
+        .route(
+            "/jobs/:id",
+            get(crate::presentation::controllers::jobs::get_job),
+        )
         .route("/dependencies/analyze", post(analyze_dependencies))
         .merge(auth_routes);
 

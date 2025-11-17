@@ -12,7 +12,8 @@ use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
 use vulnera_orchestrator::infrastructure::{
-    FileSystemProjectDetector, ModuleRegistry, RuleBasedModuleSelector,
+    DragonflyJobStore, FileSystemProjectDetector, GitService, GitServiceConfig, ModuleRegistry,
+    RuleBasedModuleSelector,
 };
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 use vulnera_orchestrator::presentation::routes::create_router;
@@ -25,16 +26,24 @@ use vulnera_core::application::auth::use_cases::{
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
-    api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, osv::OsvClient},
+    api_clients::{
+        circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
+        osv::OsvClient,
+    },
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
     repositories::AggregatingVulnerabilityRepository,
+    repository_source::github_client::GitHubRepositoryClient,
     resilience::{CircuitBreaker, CircuitBreakerConfig},
 };
 use vulnera_deps::{
-    AnalyzeDependenciesUseCase, services::version_resolution::VersionResolutionServiceImpl,
+    AnalyzeDependenciesUseCase,
+    services::{
+        repository_analysis::{RepositoryAnalysisService, RepositoryAnalysisServiceImpl},
+        version_resolution::VersionResolutionServiceImpl,
+    },
     types::VersionResolutionService,
 };
 
@@ -87,9 +96,19 @@ pub async fn create_app(
             e
         })?,
     );
-    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache));
+    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(
+        dragonfly_cache.clone(),
+    ));
 
-    // Initialize API clients
+    let git_service = Arc::new(GitService::new(GitServiceConfig::default())?);
+
+    let job_store: Arc<dyn vulnera_orchestrator::infrastructure::job_store::JobStore> =
+        Arc::new(DragonflyJobStore::new(
+            dragonfly_cache.clone(),
+            std::time::Duration::from_secs(3600), // 1 hour TTL for job replay data
+        ));
+
+    // Initialize API clients with circuit breakers and retries
     let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
         failure_threshold: 5,
         recovery_timeout: std::time::Duration::from_secs(60),
@@ -111,14 +130,81 @@ pub async fn create_app(
         osv_retry_config,
     ));
 
-    // Create vulnerability repository (simplified - you'd add NVD and GHSA clients too)
+    // NVD client with config-driven circuit breaker
+    let nvd_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.nvd.circuit_breaker.to_circuit_breaker_config(),
+    ));
+    let nvd_client_inner = Arc::new(NvdClient::new(
+        config.apis.nvd.base_url.clone(),
+        config.apis.nvd.api_key.clone(),
+    ));
+    let nvd_client = Arc::new(CircuitBreakerApiClient::new(
+        nvd_client_inner,
+        nvd_circuit_breaker,
+        config.apis.nvd.retry.to_retry_config(),
+    ));
+
+    // GHSA client with config-driven circuit breaker
+    let ghsa_token = config
+        .apis
+        .ghsa
+        .token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .unwrap_or_default();
+    let ghsa_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.ghsa.circuit_breaker.to_circuit_breaker_config(),
+    ));
+    let ghsa_client_inner = Arc::new(
+        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone()).map_err(|e| {
+            tracing::error!("Failed to initialize GHSA client: {}", e);
+            e
+        })?,
+    );
+    let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
+        ghsa_client_inner,
+        ghsa_circuit_breaker,
+        config.apis.ghsa.retry.to_retry_config(),
+    ));
+
+    // Create vulnerability repository with all three sources
     let vulnerability_repository =
         Arc::new(AggregatingVulnerabilityRepository::new_with_concurrency(
             osv_client.clone(),
-            osv_client.clone(), // Placeholder
-            osv_client.clone(), // Placeholder
+            nvd_client.clone(),
+            ghsa_client.clone(),
             config.analysis.max_concurrent_api_calls,
         ));
+
+    // Initialize GitHub repository client for repository analysis (reuse GHSA token when configured)
+    let github_repo_token = config
+        .apis
+        .github
+        .token
+        .clone()
+        .or_else(|| {
+            if config.apis.github.reuse_ghsa_token {
+                config.apis.ghsa.token.clone()
+            } else {
+                None
+            }
+        })
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .filter(|token| !token.trim().is_empty());
+
+    let github_repository_client = Arc::new(
+        GitHubRepositoryClient::from_token(
+            github_repo_token,
+            Some(config.apis.github.base_url.clone()),
+            config.apis.github.timeout_seconds,
+            config.apis.github.reuse_ghsa_token,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to initialize GitHub repository client");
+            e
+        })?,
+    );
 
     // Initialize parser factory
     let parser_factory = Arc::new(ParserFactory::new());
@@ -142,6 +228,15 @@ pub async fn create_app(
         config.analysis.max_concurrent_packages,
         config.analysis.max_concurrent_registry_queries,
     ));
+
+    // Create repository analysis service
+    let repository_analysis_service: Arc<dyn RepositoryAnalysisService> =
+        Arc::new(RepositoryAnalysisServiceImpl::new(
+            github_repository_client,
+            vulnerability_repository.clone(),
+            parser_factory.clone(),
+            config_arc.clone(),
+        ));
 
     // Create dependency analyzer module
     let deps_module = Arc::new(DependencyAnalyzerModule::new(
@@ -169,7 +264,7 @@ pub async fn create_app(
     module_registry.register(api_module);
 
     // Create orchestrator use cases
-    let project_detector = Arc::new(FileSystemProjectDetector);
+    let project_detector = Arc::new(FileSystemProjectDetector::new(git_service.clone()));
     let module_selector = Arc::new(RuleBasedModuleSelector);
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
         project_detector,
@@ -228,10 +323,13 @@ pub async fn create_app(
         create_job_use_case,
         execute_job_use_case,
         aggregate_results_use_case,
+        git_service: git_service.clone(),
+        job_store,
         cache_service,
         report_service,
         vulnerability_repository,
         dependency_analysis_use_case,
+        repository_analysis_service,
         version_resolution_service,
         db_pool,
         user_repository,

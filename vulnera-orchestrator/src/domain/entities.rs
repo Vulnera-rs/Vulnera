@@ -27,6 +27,8 @@ pub struct ProjectMetadata {
     pub dependency_files: Vec<String>,
     /// Project root path (for directory-based sources)
     pub root_path: Option<String>,
+    /// Git revision (HEAD commit) when the source comes from a repository clone
+    pub git_revision: Option<String>,
 }
 
 /// Analysis job tracking overall analysis

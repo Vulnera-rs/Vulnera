@@ -1,6 +1,7 @@
 //! Benchmarks for parsers
-
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+// cspell:ignore vulnera pytest
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use vulnera_core::infrastructure::parsers::traits::ParserFactory;
 
 fn bench_npm_parser(c: &mut Criterion) {

@@ -1,6 +1,8 @@
 //! Orchestrator API controllers
 
 pub mod health;
+pub mod jobs;
+pub mod repository;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -19,6 +21,8 @@ use vulnera_deps::types::VersionResolutionService;
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use crate::infrastructure::git::GitService;
+use crate::infrastructure::job_store::{JobSnapshot, JobStore};
 use crate::presentation::auth::extractors::{AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
@@ -35,7 +39,10 @@ use vulnera_core::domain::vulnerability::{
     entities::{AnalysisReport, Package, Vulnerability},
     value_objects::Ecosystem,
 };
-use vulnera_deps::{AnalyzeDependenciesUseCase, DependencyGraph};
+use vulnera_deps::{
+    AnalyzeDependenciesUseCase, DependencyGraph,
+    services::repository_analysis::RepositoryAnalysisService,
+};
 
 /// Application state for orchestrator
 #[derive(Clone)]
@@ -44,6 +51,8 @@ pub struct OrchestratorState {
     pub create_job_use_case: Arc<CreateAnalysisJobUseCase>,
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
+    pub git_service: Arc<GitService>,
+    pub job_store: Arc<dyn JobStore>,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -52,6 +61,9 @@ pub struct OrchestratorState {
 
     // Dependency analysis use case
     pub dependency_analysis_use_case: Arc<AnalyzeDependenciesUseCase<CacheServiceImpl>>,
+
+    // Repository analysis service
+    pub repository_analysis_service: Arc<dyn RepositoryAnalysisService>,
 
     // Version resolution service
     pub version_resolution_service: Arc<dyn VersionResolutionService>,
@@ -98,30 +110,58 @@ pub async fn analyze(
     let analysis_depth = request.parse_analysis_depth()?;
 
     // Create job
-    let mut job = state
+    let (mut job, project) = state
         .create_job_use_case
         .execute(source_type, request.source_uri.clone(), analysis_depth)
         .await
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
-    // Execute job
-    let module_results = state
-        .execute_job_use_case
-        .execute(&mut job, request.source_uri)
-        .await
-        .map_err(|e| format!("Failed to execute job: {}", e))?;
+    let project_id = project.id.clone();
 
-    // Aggregate results
-    let report = state
-        .aggregate_results_use_case
-        .execute(&job, module_results);
+    let response = async {
+        let module_results = state
+            .execute_job_use_case
+            .execute(&mut job, &project)
+            .await
+            .map_err(|e| format!("Failed to execute job: {}", e))?;
 
-    Ok(Json(FinalReportResponse {
-        job_id: report.job_id,
-        status: format!("{:?}", report.status),
-        summary: report.summary,
-        findings: report.findings,
-    }))
+        let report = state
+            .aggregate_results_use_case
+            .execute(&job, module_results.clone());
+
+        // Persist snapshot for replay
+        let snapshot = JobSnapshot {
+            job_id: job.job_id,
+            project_id: job.project_id.clone(),
+            status: job.status.clone(),
+            module_results,
+            project_metadata: project.metadata.clone(),
+            created_at: job.created_at.to_rfc3339(),
+            started_at: job.started_at.map(|t| t.to_rfc3339()),
+            completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+            error: job.error.clone(),
+            module_configs: std::collections::HashMap::new(),
+        };
+        if let Err(e) = state.job_store.save_snapshot(snapshot).await {
+            error!(
+                job_id = %job.job_id,
+                error = %e,
+                "Failed to save job snapshot"
+            );
+        }
+
+        Ok(Json(FinalReportResponse {
+            job_id: report.job_id,
+            status: format!("{:?}", report.status),
+            summary: report.summary,
+            findings: report.findings,
+        }))
+    }
+    .await;
+
+    state.git_service.cleanup_project(&project_id).await;
+
+    response
 }
 
 /// Query parameters for dependency analysis endpoint
@@ -159,7 +199,7 @@ impl DetailLevel {
 }
 
 /// Convert Vulnerability entity to VulnerabilityDto
-fn vulnerability_to_dto(vuln: &Vulnerability) -> VulnerabilityDto {
+pub(super) fn vulnerability_to_dto(vuln: &Vulnerability) -> VulnerabilityDto {
     VulnerabilityDto {
         id: vuln.id.as_str().to_string(),
         summary: vuln.summary.clone(),
@@ -249,7 +289,7 @@ fn dependency_graph_to_dto(graph: &DependencyGraph) -> DependencyGraphDto {
 }
 
 /// Convert VersionRecommendation to VersionRecommendationDto
-fn version_recommendation_to_dto(
+pub(super) fn version_recommendation_to_dto(
     package: &Package,
     recommendation: &vulnera_deps::types::VersionRecommendation,
 ) -> VersionRecommendationDto {
@@ -637,3 +677,6 @@ pub async fn analyze_dependencies(
 
 // Re-export health controllers
 pub use health::*;
+
+// Re-export repository controller(s)
+pub use repository::analyze_repository;

@@ -1,11 +1,10 @@
 # Cargo configuration for test execution
 
 [build]
-# Use all available cores for building (0 means use all cores, but Cargo doesn't support 0)
+# Use all available cores for building (0 means use all cores)
 
 [test]
 # Test configuration
-# Note: nextest handles most test execution, but this configures cargo test
 
 [target.'cfg(test)']
 # Test-specific target configuration
