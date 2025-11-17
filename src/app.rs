@@ -12,7 +12,7 @@ use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
 use vulnera_orchestrator::infrastructure::{
-    FileSystemProjectDetector, GitService, GitServiceConfig, ModuleRegistry,
+    DragonflyJobStore, FileSystemProjectDetector, GitService, GitServiceConfig, ModuleRegistry,
     RuleBasedModuleSelector,
 };
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
@@ -26,7 +26,7 @@ use vulnera_core::application::auth::use_cases::{
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
-    api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, osv::OsvClient},
+    api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::CacheServiceImpl,
     parsers::ParserFactory,
@@ -88,11 +88,17 @@ pub async fn create_app(
             e
         })?,
     );
-    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache));
+    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache.clone()));
 
     let git_service = Arc::new(GitService::new(GitServiceConfig::default())?);
 
-    // Initialize API clients
+    let job_store: Arc<dyn vulnera_orchestrator::infrastructure::job_store::JobStore> =
+        Arc::new(DragonflyJobStore::new(
+            dragonfly_cache.clone(),
+            std::time::Duration::from_secs(3600), // 1 hour TTL for job replay data
+        ));
+
+    // Initialize API clients with circuit breakers and retries
     let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
         failure_threshold: 5,
         recovery_timeout: std::time::Duration::from_secs(60),
@@ -114,12 +120,50 @@ pub async fn create_app(
         osv_retry_config,
     ));
 
-    // Create vulnerability repository (simplified - you'd add NVD and GHSA clients too)
+    // NVD client with config-driven circuit breaker
+    let nvd_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.nvd.circuit_breaker.to_circuit_breaker_config(),
+    ));
+    let nvd_client_inner = Arc::new(NvdClient::new(
+        config.apis.nvd.base_url.clone(),
+        config.apis.nvd.api_key.clone(),
+    ));
+    let nvd_client = Arc::new(CircuitBreakerApiClient::new(
+        nvd_client_inner,
+        nvd_circuit_breaker,
+        config.apis.nvd.retry.to_retry_config(),
+    ));
+
+    // GHSA client with config-driven circuit breaker
+    let ghsa_token = config
+        .apis
+        .ghsa
+        .token
+        .clone()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .unwrap_or_default();
+    let ghsa_circuit_breaker = Arc::new(CircuitBreaker::new(
+        config.apis.ghsa.circuit_breaker.to_circuit_breaker_config(),
+    ));
+    let ghsa_client_inner = Arc::new(
+        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone())
+            .map_err(|e| {
+                tracing::error!("Failed to initialize GHSA client: {}", e);
+                e
+            })?,
+    );
+    let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
+        ghsa_client_inner,
+        ghsa_circuit_breaker,
+        config.apis.ghsa.retry.to_retry_config(),
+    ));
+
+    // Create vulnerability repository with all three sources
     let vulnerability_repository =
         Arc::new(AggregatingVulnerabilityRepository::new_with_concurrency(
             osv_client.clone(),
-            osv_client.clone(), // Placeholder
-            osv_client.clone(), // Placeholder
+            nvd_client.clone(),
+            ghsa_client.clone(),
             config.analysis.max_concurrent_api_calls,
         ));
 
@@ -232,6 +276,7 @@ pub async fn create_app(
         execute_job_use_case,
         aggregate_results_use_case,
         git_service: git_service.clone(),
+        job_store,
         cache_service,
         report_service,
         vulnerability_repository,

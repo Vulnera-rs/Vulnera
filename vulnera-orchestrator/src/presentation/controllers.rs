@@ -1,6 +1,7 @@
 //! Orchestrator API controllers
 
 pub mod health;
+pub mod jobs;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,6 +21,7 @@ use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
 use crate::infrastructure::git::GitService;
+use crate::infrastructure::job_store::{JobSnapshot, JobStore};
 use crate::presentation::auth::extractors::{AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
@@ -46,6 +48,7 @@ pub struct OrchestratorState {
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
     pub git_service: Arc<GitService>,
+    pub job_store: Arc<dyn JobStore>,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -117,7 +120,28 @@ pub async fn analyze(
 
         let report = state
             .aggregate_results_use_case
-            .execute(&job, module_results);
+            .execute(&job, module_results.clone());
+
+        // Persist snapshot for replay
+        let snapshot = JobSnapshot {
+            job_id: job.job_id,
+            project_id: job.project_id.clone(),
+            status: job.status.clone(),
+            module_results,
+            project_metadata: project.metadata.clone(),
+            created_at: job.created_at.to_rfc3339(),
+            started_at: job.started_at.map(|t| t.to_rfc3339()),
+            completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+            error: job.error.clone(),
+            module_configs: std::collections::HashMap::new(),
+        };
+        if let Err(e) = state.job_store.save_snapshot(snapshot).await {
+            error!(
+                job_id = %job.job_id,
+                error = %e,
+                "Failed to save job snapshot"
+            );
+        }
 
         Ok(Json(FinalReportResponse {
             job_id: report.job_id,
