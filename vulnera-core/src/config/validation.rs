@@ -4,7 +4,6 @@ use crate::config::{
     AnalysisConfig, ApiConfig, ApiSecurityConfig, AuthConfig, CacheConfig, DatabaseConfig,
     GhsaConfig, GitHubConfig, NvdConfig, SecretDetectionConfig, ServerConfig,
 };
-use std::path::Path;
 
 /// Trait for validating configuration sections
 pub trait Validate {
@@ -446,15 +445,16 @@ mod tests {
 
     #[test]
     fn test_cache_config_validation() {
-        // Valid config with existing directory (using tempdir)
-        let temp_dir = tempfile::tempdir().unwrap();
         let valid = CacheConfig {
-            directory: temp_dir.path().to_path_buf(),
             ttl_hours: 24,
             l1_cache_size_mb: 100,
             l1_cache_ttl_seconds: 300,
             enable_cache_compression: true,
             compression_threshold_bytes: 10240,
+            dragonfly_enabled: true,
+            dragonfly_url: "redis://127.0.0.1:6379".to_string(),
+            dragonfly_connection_pool_size: Some(16),
+            dragonfly_connection_timeout_seconds: 5,
         };
         assert!(valid.validate().is_ok());
 

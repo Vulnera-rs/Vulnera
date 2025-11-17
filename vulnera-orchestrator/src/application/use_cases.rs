@@ -8,7 +8,7 @@ use vulnera_core::domain::module::{
     FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult,
 };
 
-use crate::domain::entities::{AggregatedReport, AnalysisJob, ReportSummary};
+use crate::domain::entities::{AggregatedReport, AnalysisJob, Project, ReportSummary};
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
@@ -35,7 +35,7 @@ impl CreateAnalysisJobUseCase {
         source_type: SourceType,
         source_uri: String,
         analysis_depth: AnalysisDepth,
-    ) -> Result<AnalysisJob, ProjectDetectionError> {
+    ) -> Result<(AnalysisJob, Project), ProjectDetectionError> {
         // Detect project characteristics
         let project = self
             .project_detector
@@ -48,7 +48,8 @@ impl CreateAnalysisJobUseCase {
             .select_modules(&project, &analysis_depth);
 
         // Create job
-        Ok(AnalysisJob::new(project.id, modules_to_run, analysis_depth))
+        let job = AnalysisJob::new(project.id.clone(), modules_to_run, analysis_depth);
+        Ok((job, project))
     }
 }
 
@@ -62,15 +63,21 @@ impl ExecuteAnalysisJobUseCase {
         Self { module_registry }
     }
 
-    #[instrument(skip(self, job, source_uri), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
+    #[instrument(skip(self, job, project), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
     pub async fn execute(
         &self,
         job: &mut AnalysisJob,
-        source_uri: String,
+        project: &Project,
     ) -> Result<Vec<ModuleResult>, ModuleExecutionError> {
         let start_time = std::time::Instant::now();
         job.status = JobStatus::Running;
         job.started_at = Some(chrono::Utc::now());
+
+        let effective_source_uri = project
+            .metadata
+            .root_path
+            .clone()
+            .unwrap_or_else(|| project.source_uri.clone());
 
         info!(
             job_id = %job.job_id,
@@ -89,7 +96,7 @@ impl ExecuteAnalysisJobUseCase {
                 let config = ModuleConfig {
                     job_id: job.job_id,
                     project_id: job.project_id.clone(),
-                    source_uri: source_uri.clone(),
+                    source_uri: effective_source_uri.clone(),
                     config: std::collections::HashMap::new(),
                 };
                 let module_type_clone = module_type.clone();

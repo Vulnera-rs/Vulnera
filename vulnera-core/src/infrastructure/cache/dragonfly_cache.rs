@@ -1,8 +1,8 @@
-//! Dragonfly DB cache implementation
+//! Dragonfly database cache implementation
 //!
-//! This module provides a Redis-compatible cache implementation using Dragonfly DB.
-//! Dragonfly DB is a high-performance, multi-threaded in-memory data store that
-//! is compatible with Redis protocol (RESP2/RESP3).
+//! This module provides a Redis-compatible cache implementation using the Dragonfly database.
+//! Dragonfly is a high-performance, multi-threaded in-memory data store that
+// cspell:ignore Dragonfly GzEncoder GzDecoder flate
 
 use async_trait::async_trait;
 use redis::Client;
@@ -14,7 +14,9 @@ use tracing::{debug, error, warn};
 use crate::application::errors::{ApplicationError, CacheError};
 use crate::application::vulnerability::services::CacheService;
 
-/// Cache entry metadata wrapper for compatibility with existing cache structure
+const COMPRESSION_MARKER: &[u8; 4] = b"GZIP";
+
+/// Cache entry metadata wrapper
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CacheEntry<T> {
     data: T,
@@ -24,7 +26,7 @@ struct CacheEntry<T> {
     compressed: bool,
 }
 
-/// Dragonfly DB cache implementation
+/// Dragonfly database cache implementation
 pub struct DragonflyCache {
     connection_manager: Arc<ConnectionManager>,
     enable_compression: bool,
@@ -40,7 +42,7 @@ impl DragonflyCache {
     /// * `compression_threshold_bytes` - Minimum size in bytes to trigger compression
     ///
     /// # Errors
-    /// Returns an error if the connection to Dragonfly DB cannot be established
+    /// Returns an error if the connection to the Dragonfly database cannot be established
     pub async fn new(
         url: &str,
         enable_compression: bool,
@@ -50,7 +52,7 @@ impl DragonflyCache {
             error!("Failed to create Redis client: {}", e);
             ApplicationError::Cache(CacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
-                format!("Failed to connect to Dragonfly DB: {}", e),
+                format!("Failed to connect to the Dragonfly database: {}", e),
             )))
         })?;
 
@@ -58,7 +60,7 @@ impl DragonflyCache {
             error!("Failed to create connection manager: {}", e);
             ApplicationError::Cache(CacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
-                format!("Failed to establish connection to Dragonfly DB: {}", e),
+                format!("Failed to establish connection to the Dragonfly database: {}", e),
             )))
         })?;
 
@@ -68,14 +70,14 @@ impl DragonflyCache {
             .query_async::<String>(&mut conn)
             .await
             .map_err(|e| {
-                error!("Failed to ping Dragonfly DB: {}", e);
+                error!("Failed to ping the Dragonfly database: {}", e);
                 ApplicationError::Cache(CacheError::Io(std::io::Error::new(
                     std::io::ErrorKind::ConnectionRefused,
-                    format!("Failed to ping Dragonfly DB: {}", e),
+                    format!("Failed to ping the Dragonfly database: {}", e),
                 )))
             })?;
 
-        debug!("Successfully connected to Dragonfly DB at {}", url);
+        debug!("Successfully connected to the Dragonfly database at {}", url);
 
         Ok(Self {
             connection_manager: Arc::new(connection_manager),
@@ -121,7 +123,7 @@ impl DragonflyCache {
         Ok(decompressed)
     }
 
-    /// Get current timestamp in seconds since UNIX epoch
+    /// Get current timestamp in seconds since Unix epoch
     fn current_timestamp() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -166,9 +168,11 @@ impl CacheService for DragonflyCache {
             }
         };
 
-        // Check if data is compressed (starts with CMP\0 marker)
-        let decompressed = if value.len() > 4 && &value[0..4] == b"CMP\0" {
-            self.decompress_data(&value[4..])?
+        // Check if data is compressed (starts with COMPRESSION_MARKER marker)
+        let decompressed = if value.len() > COMPRESSION_MARKER.len()
+            && &value[0..COMPRESSION_MARKER.len()] == COMPRESSION_MARKER.as_slice()
+        {
+            self.decompress_data(&value[COMPRESSION_MARKER.len()..])?
         } else {
             value
         };
@@ -234,7 +238,7 @@ impl CacheService for DragonflyCache {
         // Compress if needed
         let final_data = if should_compress {
             let compressed = self.compress_data(&serialized_entry)?;
-            let mut result = b"CMP\0".to_vec();
+            let mut result = COMPRESSION_MARKER.to_vec();
             result.extend_from_slice(&compressed);
             result
         } else {
@@ -295,11 +299,11 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    // Note: These tests require a running Dragonfly DB instance
+    // Note: These tests require a running Dragonfly database instance
     // They should be run as integration tests with a test container
 
     #[tokio::test]
-    #[ignore] // Ignore by default, requires Dragonfly DB instance
+    #[ignore] // Ignore by default, requires Dragonfly database instance
     async fn test_dragonfly_cache_set_get() {
         let cache = DragonflyCache::new("redis://127.0.0.1:6379", false, 0)
             .await

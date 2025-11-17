@@ -12,7 +12,8 @@ use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
 use vulnera_orchestrator::infrastructure::{
-    FileSystemProjectDetector, ModuleRegistry, RuleBasedModuleSelector,
+    FileSystemProjectDetector, GitService, GitServiceConfig, ModuleRegistry,
+    RuleBasedModuleSelector,
 };
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 use vulnera_orchestrator::presentation::routes::create_router;
@@ -88,6 +89,8 @@ pub async fn create_app(
         })?,
     );
     let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache));
+
+    let git_service = Arc::new(GitService::new(GitServiceConfig::default())?);
 
     // Initialize API clients
     let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
@@ -169,7 +172,7 @@ pub async fn create_app(
     module_registry.register(api_module);
 
     // Create orchestrator use cases
-    let project_detector = Arc::new(FileSystemProjectDetector);
+    let project_detector = Arc::new(FileSystemProjectDetector::new(git_service.clone()));
     let module_selector = Arc::new(RuleBasedModuleSelector);
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
         project_detector,
@@ -228,6 +231,7 @@ pub async fn create_app(
         create_job_use_case,
         execute_job_use_case,
         aggregate_results_use_case,
+        git_service: git_service.clone(),
         cache_service,
         report_service,
         vulnerability_repository,

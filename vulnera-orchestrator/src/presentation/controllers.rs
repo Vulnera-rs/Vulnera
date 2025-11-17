@@ -19,6 +19,7 @@ use vulnera_deps::types::VersionResolutionService;
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use crate::infrastructure::git::GitService;
 use crate::presentation::auth::extractors::{AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
@@ -44,6 +45,7 @@ pub struct OrchestratorState {
     pub create_job_use_case: Arc<CreateAnalysisJobUseCase>,
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
+    pub git_service: Arc<GitService>,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -98,30 +100,37 @@ pub async fn analyze(
     let analysis_depth = request.parse_analysis_depth()?;
 
     // Create job
-    let mut job = state
+    let (mut job, project) = state
         .create_job_use_case
         .execute(source_type, request.source_uri.clone(), analysis_depth)
         .await
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
-    // Execute job
-    let module_results = state
-        .execute_job_use_case
-        .execute(&mut job, request.source_uri)
-        .await
-        .map_err(|e| format!("Failed to execute job: {}", e))?;
+    let project_id = project.id.clone();
 
-    // Aggregate results
-    let report = state
-        .aggregate_results_use_case
-        .execute(&job, module_results);
+    let response = async {
+        let module_results = state
+            .execute_job_use_case
+            .execute(&mut job, &project)
+            .await
+            .map_err(|e| format!("Failed to execute job: {}", e))?;
 
-    Ok(Json(FinalReportResponse {
-        job_id: report.job_id,
-        status: format!("{:?}", report.status),
-        summary: report.summary,
-        findings: report.findings,
-    }))
+        let report = state
+            .aggregate_results_use_case
+            .execute(&job, module_results);
+
+        Ok(Json(FinalReportResponse {
+            job_id: report.job_id,
+            status: format!("{:?}", report.status),
+            summary: report.summary,
+            findings: report.findings,
+        }))
+    }
+    .await;
+
+    state.git_service.cleanup_project(&project_id).await;
+
+    response
 }
 
 /// Query parameters for dependency analysis endpoint
