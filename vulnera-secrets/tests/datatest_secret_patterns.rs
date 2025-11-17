@@ -1,6 +1,5 @@
 //! Data-driven tests for secret patterns
-
-use datatest_stable::harness;
+// cspell:ignore datatest
 use std::fs;
 use std::path::Path;
 
@@ -14,8 +13,6 @@ fn test_secret_pattern_with_file(path: &Path) -> datatest_stable::Result<()> {
     Ok(())
 }
 
-harness!(
-    test_secret_pattern_with_file,
-    "tests/data/secrets",
-    r".*\.(env|txt|key|pem)$"
-);
+datatest_stable::harness! {
+    { test = test_secret_pattern_with_file, root = "tests/data/secrets", pattern = r".*\.(env|txt|key|pem)$" },
+}

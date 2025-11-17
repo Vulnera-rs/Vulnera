@@ -249,10 +249,16 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
     };
 
     if let Some(token) = ghsa_token {
-        // Scope the token for the lifetime of this request using task-local storage
-        vulnera_core::infrastructure::api_clients::ghsa::with_request_ghsa_token(token, async {
-            next.run(request).await
-        })
+        let git_token = token.clone();
+        vulnera_core::infrastructure::api_clients::ghsa::with_request_ghsa_token(
+            token,
+            async move {
+                crate::infrastructure::git::with_request_git_token(git_token, async move {
+                    next.run(request).await
+                })
+                .await
+            },
+        )
         .await
     } else {
         next.run(request).await

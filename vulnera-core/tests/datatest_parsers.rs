@@ -1,6 +1,6 @@
 //! Data-driven tests for parsers
+// cspell:ignore datatest vulnera
 
-use datatest_stable::harness;
 use std::fs;
 use std::path::Path;
 use vulnera_core::infrastructure::parsers::traits::ParserFactory;
@@ -29,8 +29,6 @@ fn test_parser_with_file(path: &Path) -> datatest_stable::Result<()> {
     Ok(())
 }
 
-harness!(
-    test_parser_with_file,
-    "tests/data/parsers",
-    r".*\.(json|txt|toml|xml|mod)$"
-);
+datatest_stable::harness! {
+    { test = test_parser_with_file, root = "tests/data/parsers", pattern = r".*\.(json|txt|toml|xml|mod)$" },
+}

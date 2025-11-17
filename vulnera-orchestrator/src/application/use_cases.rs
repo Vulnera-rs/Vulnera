@@ -1,5 +1,6 @@
 //! Orchestrator use cases
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::task::JoinSet;
@@ -8,10 +9,38 @@ use vulnera_core::domain::module::{
     FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult,
 };
 
-use crate::domain::entities::{AggregatedReport, AnalysisJob, ReportSummary};
+use crate::domain::entities::{AggregatedReport, AnalysisJob, Project, ReportSummary};
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
+
+/// Infer ecosystem from dependency file path.
+fn infer_ecosystem_from_path(path: &str) -> Option<&'static str> {
+    let lower = path.to_lowercase();
+    if lower.ends_with("package.json")
+        || lower.ends_with("package-lock.json")
+        || lower.ends_with("yarn.lock")
+    {
+        Some("npm")
+    } else if lower.ends_with("requirements.txt")
+        || lower.ends_with("pipfile")
+        || lower.ends_with("pyproject.toml")
+        || lower.ends_with("poetry.lock")
+        || lower.ends_with("uv.lock")
+    {
+        Some("pypi")
+    } else if lower.ends_with("cargo.toml") || lower.ends_with("cargo.lock") {
+        Some("cargo")
+    } else if lower.ends_with("go.mod") || lower.ends_with("go.sum") {
+        Some("go")
+    } else if lower.ends_with("pom.xml") || lower.ends_with("build.gradle") {
+        Some("maven")
+    } else if lower.ends_with("composer.json") || lower.ends_with("composer.lock") {
+        Some("packagist")
+    } else {
+        None
+    }
+}
 
 /// Use case for creating a new analysis job
 pub struct CreateAnalysisJobUseCase {
@@ -35,7 +64,7 @@ impl CreateAnalysisJobUseCase {
         source_type: SourceType,
         source_uri: String,
         analysis_depth: AnalysisDepth,
-    ) -> Result<AnalysisJob, ProjectDetectionError> {
+    ) -> Result<(AnalysisJob, Project), ProjectDetectionError> {
         // Detect project characteristics
         let project = self
             .project_detector
@@ -48,7 +77,8 @@ impl CreateAnalysisJobUseCase {
             .select_modules(&project, &analysis_depth);
 
         // Create job
-        Ok(AnalysisJob::new(project.id, modules_to_run, analysis_depth))
+        let job = AnalysisJob::new(project.id.clone(), modules_to_run, analysis_depth);
+        Ok((job, project))
     }
 }
 
@@ -62,15 +92,21 @@ impl ExecuteAnalysisJobUseCase {
         Self { module_registry }
     }
 
-    #[instrument(skip(self, job, source_uri), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
+    #[instrument(skip(self, job, project), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
     pub async fn execute(
         &self,
         job: &mut AnalysisJob,
-        source_uri: String,
+        project: &Project,
     ) -> Result<Vec<ModuleResult>, ModuleExecutionError> {
         let start_time = std::time::Instant::now();
         job.status = JobStatus::Running;
         job.started_at = Some(chrono::Utc::now());
+
+        let effective_source_uri = project
+            .metadata
+            .root_path
+            .clone()
+            .unwrap_or_else(|| project.source_uri.clone());
 
         info!(
             job_id = %job.job_id,
@@ -86,11 +122,51 @@ impl ExecuteAnalysisJobUseCase {
         // Spawn all module execution tasks concurrently
         for module_type in &job.modules_to_run {
             if let Some(module) = self.module_registry.get_module(module_type) {
+                let mut config_map = std::collections::HashMap::new();
+
+                // For DependencyAnalyzer, load manifest content from metadata
+                if *module_type == vulnera_core::domain::module::ModuleType::DependencyAnalyzer {
+                    if let Some(manifest_path) = project.metadata.dependency_files.first() {
+                        match tokio::fs::read_to_string(manifest_path).await {
+                            Ok(content) => {
+                                config_map.insert(
+                                    "file_content".to_string(),
+                                    serde_json::Value::String(content),
+                                );
+                                config_map.insert(
+                                    "filename".to_string(),
+                                    serde_json::Value::String(
+                                        PathBuf::from(manifest_path)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("unknown")
+                                            .to_string(),
+                                    ),
+                                );
+                                if let Some(ecosystem) = infer_ecosystem_from_path(manifest_path) {
+                                    config_map.insert(
+                                        "ecosystem".to_string(),
+                                        serde_json::Value::String(ecosystem.to_string()),
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                warn!(
+                                    job_id = %job.job_id,
+                                    manifest = %manifest_path,
+                                    error = %e,
+                                    "Failed to load dependency manifest"
+                                );
+                            }
+                        }
+                    }
+                }
+
                 let config = ModuleConfig {
                     job_id: job.job_id,
                     project_id: job.project_id.clone(),
-                    source_uri: source_uri.clone(),
-                    config: std::collections::HashMap::new(),
+                    source_uri: effective_source_uri.clone(),
+                    config: config_map,
                 };
                 let module_type_clone = module_type.clone();
                 let module_arc = Arc::clone(&module);
