@@ -2,6 +2,7 @@
 
 pub mod health;
 pub mod jobs;
+pub mod repository;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -38,7 +39,10 @@ use vulnera_core::domain::vulnerability::{
     entities::{AnalysisReport, Package, Vulnerability},
     value_objects::Ecosystem,
 };
-use vulnera_deps::{AnalyzeDependenciesUseCase, DependencyGraph};
+use vulnera_deps::{
+    AnalyzeDependenciesUseCase, DependencyGraph,
+    services::repository_analysis::RepositoryAnalysisService,
+};
 
 /// Application state for orchestrator
 #[derive(Clone)]
@@ -57,6 +61,9 @@ pub struct OrchestratorState {
 
     // Dependency analysis use case
     pub dependency_analysis_use_case: Arc<AnalyzeDependenciesUseCase<CacheServiceImpl>>,
+
+    // Repository analysis service
+    pub repository_analysis_service: Arc<dyn RepositoryAnalysisService>,
 
     // Version resolution service
     pub version_resolution_service: Arc<dyn VersionResolutionService>,
@@ -192,7 +199,7 @@ impl DetailLevel {
 }
 
 /// Convert Vulnerability entity to VulnerabilityDto
-fn vulnerability_to_dto(vuln: &Vulnerability) -> VulnerabilityDto {
+pub(super) fn vulnerability_to_dto(vuln: &Vulnerability) -> VulnerabilityDto {
     VulnerabilityDto {
         id: vuln.id.as_str().to_string(),
         summary: vuln.summary.clone(),
@@ -282,7 +289,7 @@ fn dependency_graph_to_dto(graph: &DependencyGraph) -> DependencyGraphDto {
 }
 
 /// Convert VersionRecommendation to VersionRecommendationDto
-fn version_recommendation_to_dto(
+pub(super) fn version_recommendation_to_dto(
     package: &Package,
     recommendation: &vulnera_deps::types::VersionRecommendation,
 ) -> VersionRecommendationDto {
@@ -670,3 +677,6 @@ pub async fn analyze_dependencies(
 
 // Re-export health controllers
 pub use health::*;
+
+// Re-export repository controller(s)
+pub use repository::analyze_repository;

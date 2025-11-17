@@ -19,7 +19,7 @@ use crate::presentation::{
         AuthAppState, create_api_key, list_api_keys, login, refresh_token, register, revoke_api_key,
     },
     controllers::{
-        OrchestratorState, analyze, analyze_dependencies,
+        OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
     },
     middleware::{
@@ -146,7 +146,11 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Orchestrator job-based analysis route
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
-        .route("/jobs/:id", get(crate::presentation::controllers::jobs::get_job))
+        .route("/analyze/repository", post(analyze_repository))
+        .route(
+            "/jobs/:id",
+            get(crate::presentation::controllers::jobs::get_job),
+        )
         .route("/dependencies/analyze", post(analyze_dependencies))
         .merge(auth_routes);
 

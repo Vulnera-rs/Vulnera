@@ -26,16 +26,24 @@ use vulnera_core::application::auth::use_cases::{
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
-    api_clients::{circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient, osv::OsvClient},
+    api_clients::{
+        circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
+        osv::OsvClient,
+    },
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
     repositories::AggregatingVulnerabilityRepository,
+    repository_source::github_client::GitHubRepositoryClient,
     resilience::{CircuitBreaker, CircuitBreakerConfig},
 };
 use vulnera_deps::{
-    AnalyzeDependenciesUseCase, services::version_resolution::VersionResolutionServiceImpl,
+    AnalyzeDependenciesUseCase,
+    services::{
+        repository_analysis::{RepositoryAnalysisService, RepositoryAnalysisServiceImpl},
+        version_resolution::VersionResolutionServiceImpl,
+    },
     types::VersionResolutionService,
 };
 
@@ -88,7 +96,9 @@ pub async fn create_app(
             e
         })?,
     );
-    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(dragonfly_cache.clone()));
+    let cache_service = Arc::new(CacheServiceImpl::new_with_dragonfly(
+        dragonfly_cache.clone(),
+    ));
 
     let git_service = Arc::new(GitService::new(GitServiceConfig::default())?);
 
@@ -146,11 +156,10 @@ pub async fn create_app(
         config.apis.ghsa.circuit_breaker.to_circuit_breaker_config(),
     ));
     let ghsa_client_inner = Arc::new(
-        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone())
-            .map_err(|e| {
-                tracing::error!("Failed to initialize GHSA client: {}", e);
-                e
-            })?,
+        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone()).map_err(|e| {
+            tracing::error!("Failed to initialize GHSA client: {}", e);
+            e
+        })?,
     );
     let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
         ghsa_client_inner,
@@ -166,6 +175,36 @@ pub async fn create_app(
             ghsa_client.clone(),
             config.analysis.max_concurrent_api_calls,
         ));
+
+    // Initialize GitHub repository client for repository analysis (reuse GHSA token when configured)
+    let github_repo_token = config
+        .apis
+        .github
+        .token
+        .clone()
+        .or_else(|| {
+            if config.apis.github.reuse_ghsa_token {
+                config.apis.ghsa.token.clone()
+            } else {
+                None
+            }
+        })
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .filter(|token| !token.trim().is_empty());
+
+    let github_repository_client = Arc::new(
+        GitHubRepositoryClient::from_token(
+            github_repo_token,
+            Some(config.apis.github.base_url.clone()),
+            config.apis.github.timeout_seconds,
+            config.apis.github.reuse_ghsa_token,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to initialize GitHub repository client");
+            e
+        })?,
+    );
 
     // Initialize parser factory
     let parser_factory = Arc::new(ParserFactory::new());
@@ -189,6 +228,15 @@ pub async fn create_app(
         config.analysis.max_concurrent_packages,
         config.analysis.max_concurrent_registry_queries,
     ));
+
+    // Create repository analysis service
+    let repository_analysis_service: Arc<dyn RepositoryAnalysisService> =
+        Arc::new(RepositoryAnalysisServiceImpl::new(
+            github_repository_client,
+            vulnerability_repository.clone(),
+            parser_factory.clone(),
+            config_arc.clone(),
+        ));
 
     // Create dependency analyzer module
     let deps_module = Arc::new(DependencyAnalyzerModule::new(
@@ -281,6 +329,7 @@ pub async fn create_app(
         report_service,
         vulnerability_repository,
         dependency_analysis_use_case,
+        repository_analysis_service,
         version_resolution_service,
         db_pool,
         user_repository,

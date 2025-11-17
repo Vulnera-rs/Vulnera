@@ -60,7 +60,10 @@ impl DragonflyCache {
             error!("Failed to create connection manager: {}", e);
             ApplicationError::Cache(CacheError::Io(std::io::Error::new(
                 std::io::ErrorKind::ConnectionRefused,
-                format!("Failed to establish connection to the Dragonfly database: {}", e),
+                format!(
+                    "Failed to establish connection to the Dragonfly database: {}",
+                    e
+                ),
             )))
         })?;
 
@@ -77,7 +80,10 @@ impl DragonflyCache {
                 )))
             })?;
 
-        debug!("Successfully connected to the Dragonfly database at {}", url);
+        debug!(
+            "Successfully connected to the Dragonfly database at {}",
+            url
+        );
 
         Ok(Self {
             connection_manager: Arc::new(connection_manager),

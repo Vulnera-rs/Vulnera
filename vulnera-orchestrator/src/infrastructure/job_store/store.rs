@@ -49,7 +49,9 @@ impl JobStore for DragonflyJobStore {
         let key = Self::job_key(snapshot.job_id);
 
         // Use CacheService generic set - it handles serialization internally
-        self.cache.set(&key, &snapshot, self.ttl).await
+        self.cache
+            .set(&key, &snapshot, self.ttl)
+            .await
             .map_err(|e| JobStoreError::Cache(e.to_string()))?;
 
         tracing::info!(
@@ -65,7 +67,10 @@ impl JobStore for DragonflyJobStore {
         let key = Self::job_key(job_id);
 
         // Use CacheService generic get - it handles deserialization internally
-        let snapshot: Option<JobSnapshot> = self.cache.get(&key).await
+        let snapshot: Option<JobSnapshot> = self
+            .cache
+            .get(&key)
+            .await
             .map_err(|e| JobStoreError::Cache(e.to_string()))?;
 
         if snapshot.is_some() {
@@ -81,7 +86,9 @@ impl JobStore for DragonflyJobStore {
         let key = Self::job_key(job_id);
 
         // Use CacheService invalidate method
-        self.cache.invalidate(&key).await
+        self.cache
+            .invalidate(&key)
+            .await
             .map_err(|e| JobStoreError::Cache(e.to_string()))?;
 
         tracing::info!(job_id = %job_id, "Job snapshot deleted from Dragonfly");

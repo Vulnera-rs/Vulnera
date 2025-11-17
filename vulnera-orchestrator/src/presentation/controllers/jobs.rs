@@ -1,4 +1,8 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::Json,
+};
 use tracing::error;
 use uuid::Uuid;
 
@@ -29,8 +33,16 @@ pub async fn get_job(
                 job_id: snapshot.job_id,
                 project_id: snapshot.project_id,
                 status: format!("{:?}", snapshot.status),
-                modules_completed: snapshot.module_results.iter().filter(|r| r.error.is_none()).count(),
-                modules_failed: snapshot.module_results.iter().filter(|r| r.error.is_some()).count(),
+                modules_completed: snapshot
+                    .module_results
+                    .iter()
+                    .filter(|r| r.error.is_none())
+                    .count(),
+                modules_failed: snapshot
+                    .module_results
+                    .iter()
+                    .filter(|r| r.error.is_some())
+                    .count(),
                 created_at: snapshot.created_at,
                 started_at: snapshot.started_at,
                 completed_at: snapshot.completed_at,
