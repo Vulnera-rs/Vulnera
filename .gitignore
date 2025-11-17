@@ -156,4 +156,4 @@ criterion/
 /doc/
 
 # Cache directories
-.vulnera_cache/
+/.vulnera_data
