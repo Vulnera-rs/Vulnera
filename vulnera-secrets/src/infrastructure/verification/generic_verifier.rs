@@ -60,5 +60,3 @@ impl SecretVerifier for GenericVerifier {
         }
     }
 }
-
-

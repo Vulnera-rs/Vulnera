@@ -54,5 +54,3 @@ impl SecretVerifier for GitHubVerifier {
         }
     }
 }
-
-

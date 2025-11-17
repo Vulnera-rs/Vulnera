@@ -68,5 +68,3 @@ impl OAuthAnalyzer {
         findings
     }
 }
-
-

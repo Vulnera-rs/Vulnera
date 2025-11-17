@@ -1,6 +1,5 @@
 //! Data-driven tests for SAST rules
-
-use datatest_stable::harness;
+// cspell:ignore datatest
 use std::fs;
 use std::path::Path;
 
@@ -14,8 +13,6 @@ fn test_sast_rule_with_file(path: &Path) -> datatest_stable::Result<()> {
     Ok(())
 }
 
-harness!(
-    test_sast_rule_with_file,
-    "tests/data/sast",
-    r".*\.(py|js|rs)$"
-);
+datatest_stable::harness! {
+    { test = test_sast_rule_with_file, root = "tests/data/sast", pattern = r".*\.(py|js|rs)$" },
+}
