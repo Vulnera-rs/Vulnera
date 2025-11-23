@@ -2,7 +2,6 @@
 
 use crate::domain::value_objects::*;
 use serde_json::Value as JsonValue;
-use std::io::Cursor;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
@@ -44,7 +43,7 @@ impl OpenApiParser {
             })?
         } else {
             // YAML format
-            serde_yaml::from_str(content).map_err(|e| {
+            serde_yml::from_str(content).map_err(|e| {
                 error!(
                     error = %e,
                     file = %file_path.display(),
@@ -66,19 +65,35 @@ impl OpenApiParser {
         let oauth_token_urls = Self::extract_oauth_token_urls(&raw_spec);
 
         // Parse using oas3 crate for the rest of the spec
-        let cursor = Cursor::new(content.as_bytes());
-        let spec = oas3::from_reader(cursor).map_err(|e| {
-            error!(
-                error = %e,
-                file = %file_path.display(),
-                "Failed to parse OpenAPI specification with oas3 crate"
-            );
-            ParseError::ParseError {
-                message: format!("OpenAPI parse error: {}", e),
-                file: file_path.display().to_string(),
-                line: None,
-            }
-        })?;
+        let spec = if content.trim_start().starts_with('{') {
+            // JSON format
+            oas3::from_json(content).map_err(|e| {
+                error!(
+                    error = %e,
+                    file = %file_path.display(),
+                    "Failed to parse OpenAPI specification with oas3 crate"
+                );
+                ParseError::ParseError {
+                    message: format!("OpenAPI parse error: {}", e),
+                    file: file_path.display().to_string(),
+                    line: None,
+                }
+            })?
+        } else {
+            // YAML format
+            oas3::from_yaml(content).map_err(|e| {
+                error!(
+                    error = %e,
+                    file = %file_path.display(),
+                    "Failed to parse OpenAPI specification with oas3 crate"
+                );
+                ParseError::ParseError {
+                    message: format!("OpenAPI parse error: {}", e),
+                    file: file_path.display().to_string(),
+                    line: None,
+                }
+            })?
+        };
 
         // Validate OpenAPI version
         if !spec.openapi.starts_with("3.") {
@@ -111,12 +126,17 @@ impl OpenApiParser {
     ) -> Result<OpenApiSpec, ParseError> {
         debug!(
             version = %spec.openapi,
-            path_count = spec.paths.len(),
+            path_count = spec.paths.as_ref().map(|p| p.len()).unwrap_or(0),
             "Parsed OpenAPI specification"
         );
 
         // Convert oas3::Spec to our domain model
-        let paths = Self::parse_paths_with_security(&spec.paths, &path_securities);
+        let paths = Self::parse_paths_with_security(
+            spec.paths
+                .as_ref()
+                .unwrap_or(&std::collections::BTreeMap::new()),
+            &path_securities,
+        );
         let security_schemes =
             Self::parse_security_schemes_with_oauth_urls(&spec.components, &oauth_token_urls);
 
@@ -243,7 +263,12 @@ impl OpenApiParser {
                 }
             }
         });
-        let responses = Self::parse_responses(&operation.responses);
+        let responses = Self::parse_responses(
+            operation
+                .responses
+                .as_ref()
+                .unwrap_or(&std::collections::BTreeMap::new()),
+        );
 
         ApiOperation {
             method: method.to_string(),
@@ -262,22 +287,24 @@ impl OpenApiParser {
         for param_ref in params {
             match param_ref {
                 oas3::spec::ObjectOrReference::Object(param) => {
-                    let location = match param.location.as_str() {
-                        "query" => ParameterLocation::Query,
-                        "header" => ParameterLocation::Header,
-                        "path" => ParameterLocation::Path,
-                        "cookie" => ParameterLocation::Cookie,
-                        _ => {
-                            warn!(location = %param.location, "Unknown parameter location, defaulting to Query");
-                            ParameterLocation::Query
-                        }
+                    let location = match param.location {
+                        oas3::spec::ParameterIn::Query => ParameterLocation::Query,
+                        oas3::spec::ParameterIn::Header => ParameterLocation::Header,
+                        oas3::spec::ParameterIn::Path => ParameterLocation::Path,
+                        oas3::spec::ParameterIn::Cookie => ParameterLocation::Cookie,
                     };
 
                     api_params.push(ApiParameter {
                         name: param.name.clone(),
                         location,
                         required: param.required.unwrap_or(false),
-                        schema: param.schema.as_ref().map(|s| Self::parse_schema(s)),
+                        schema: param.schema.as_ref().and_then(|s| match s {
+                            oas3::spec::ObjectOrReference::Object(_) => Some(Self::parse_schema(s)),
+                            oas3::spec::ObjectOrReference::Ref { .. } => {
+                                warn!("Skipping schema reference in parameter");
+                                None
+                            }
+                        }),
                     });
                 }
                 oas3::spec::ObjectOrReference::Ref { .. } => {
@@ -340,8 +367,8 @@ impl OpenApiParser {
                         .schema
                         .as_ref()
                         .and_then(|schema_ref| match schema_ref {
-                            oas3::spec::ObjectOrReference::Object(schema) => {
-                                Some(Self::parse_schema(schema))
+                            oas3::spec::ObjectOrReference::Object(_) => {
+                                Some(Self::parse_schema(schema_ref))
                             }
                             oas3::spec::ObjectOrReference::Ref { .. } => {
                                 warn!("Skipping schema reference in media type");
@@ -372,7 +399,15 @@ impl OpenApiParser {
                     let schema = header
                         .schema
                         .as_ref()
-                        .map(|schema| Self::parse_schema(schema));
+                        .and_then(|schema_ref| match schema_ref {
+                            oas3::spec::ObjectOrReference::Object(_) => {
+                                Some(Self::parse_schema(schema_ref))
+                            }
+                            oas3::spec::ObjectOrReference::Ref { .. } => {
+                                warn!("Skipping schema reference in header");
+                                None
+                            }
+                        });
                     api_headers.push(ApiHeader {
                         name: name.clone(),
                         schema,
@@ -388,29 +423,42 @@ impl OpenApiParser {
         api_headers
     }
 
-    fn parse_schema(schema: &oas3::spec::Schema) -> ApiSchema {
-        let properties: Vec<ApiProperty> = schema
-            .properties
-            .iter()
-            .filter_map(|(name, prop_schema_ref)| match prop_schema_ref {
-                oas3::spec::ObjectOrReference::Object(prop_schema) => Some(ApiProperty {
-                    name: name.clone(),
-                    schema: Self::parse_schema(prop_schema),
-                }),
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    warn!(property_name = %name, "Skipping schema reference in property");
-                    None
+    fn parse_schema(schema: &oas3::spec::ObjectOrReference<oas3::spec::ObjectSchema>) -> ApiSchema {
+        match schema {
+            oas3::spec::ObjectOrReference::Object(obj_schema) => {
+                let properties: Vec<ApiProperty> = obj_schema
+                    .properties
+                    .iter()
+                    .filter_map(|(name, prop_schema_ref)| match prop_schema_ref {
+                        oas3::spec::ObjectOrReference::Object(_) => Some(ApiProperty {
+                            name: name.clone(),
+                            schema: Self::parse_schema(prop_schema_ref),
+                        }),
+                        oas3::spec::ObjectOrReference::Ref { .. } => {
+                            warn!(property_name = %name, "Skipping schema reference in property");
+                            None
+                        }
+                    })
+                    .collect();
+
+                let schema_type = obj_schema.schema_type.as_ref().map(|t| format!("{:?}", t));
+
+                ApiSchema {
+                    schema_type,
+                    format: obj_schema.format.clone(),
+                    properties,
+                    required: obj_schema.required.clone(),
                 }
-            })
-            .collect();
-
-        let schema_type = schema.schema_type.as_ref().map(|t| format!("{:?}", t));
-
-        ApiSchema {
-            schema_type,
-            format: schema.format.clone(),
-            properties,
-            required: schema.required.clone(),
+            }
+            oas3::spec::ObjectOrReference::Ref { .. } => {
+                warn!("Skipping schema reference");
+                ApiSchema {
+                    schema_type: None,
+                    format: None,
+                    properties: Vec::new(),
+                    required: Vec::new(),
+                }
+            }
         }
     }
 
@@ -431,6 +479,7 @@ impl OpenApiParser {
                             oas3::spec::SecurityScheme::ApiKey {
                                 location,
                                 name: key_name,
+                                description: _,
                             } => SecuritySchemeType::ApiKey {
                                 location: format!("{:?}", location),
                                 name: key_name.clone(),
@@ -438,11 +487,15 @@ impl OpenApiParser {
                             oas3::spec::SecurityScheme::Http {
                                 scheme: http_scheme,
                                 bearer_format,
+                                description: _,
                             } => SecuritySchemeType::Http {
                                 scheme: http_scheme.clone(),
-                                bearer_format: Some(bearer_format.clone()),
+                                bearer_format: bearer_format.clone(),
                             },
-                            oas3::spec::SecurityScheme::OAuth2 { flows } => {
+                            oas3::spec::SecurityScheme::OAuth2 {
+                                flows,
+                                description: _,
+                            } => {
                                 // Get token URLs for this scheme from extracted JSON
                                 let scheme_token_urls =
                                     oauth_token_urls.get(name).cloned().unwrap_or_default();
@@ -452,9 +505,15 @@ impl OpenApiParser {
                             }
                             oas3::spec::SecurityScheme::OpenIdConnect {
                                 open_id_connect_url,
+                                description: _,
                             } => SecuritySchemeType::OpenIdConnect {
                                 url: open_id_connect_url.clone(),
                             },
+                            oas3::spec::SecurityScheme::MutualTls { description: _ } => {
+                                // MutualTLS is not currently supported in our domain model
+                                warn!("MutualTLS security scheme is not supported, skipping");
+                                continue;
+                            }
                         };
 
                         schemes.push(SecurityScheme {
@@ -731,7 +790,7 @@ pub enum ParseError {
     Json(#[from] serde_json::Error),
 
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yml::Error),
 
     #[error("OpenAPI version validation failed: {version}")]
     InvalidVersion { version: String },

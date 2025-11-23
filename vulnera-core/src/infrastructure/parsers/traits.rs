@@ -27,7 +27,6 @@ pub trait PackageFileParser: Send + Sync {
     fn ecosystem(&self) -> Ecosystem;
 
     /// Get the priority of this parser (higher numbers = higher priority)
-    /// Used when multiple parsers support the same file
     fn priority(&self) -> u8 {
         0
     }

@@ -18,7 +18,7 @@ async-trait = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = "0.9"
+serde_yml = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -27,7 +27,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # OpenAPI parsing - using oas3 crate for OpenAPI 3.x support
-oas3 = "0.3"
+oas3 = { workspace = true, features = ["yaml-spec"] }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
@@ -35,4 +35,3 @@ insta = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
 futures = { workspace = true }
-
