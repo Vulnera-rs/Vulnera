@@ -47,13 +47,7 @@ impl EntropyDetector {
                         start_pos: mat.start(),
                         end_pos: mat.end(),
                     });
-                    // If matched as Base64, don't check Hex (Hex is a subset of Base64 chars)
-                    // unless we want to be very specific, but usually high entropy Base64 covers it.
-                    // However, existing logic checked both. Let's keep checking both but maybe prioritize?
-                    // Actually, if it's hex-like, it's also base64-like.
-                    // If we add it as Base64, we might duplicate if we also add as Hex.
-                    // Let's check Hex ONLY if it wasn't high enough entropy for Base64 OR if we want to classify it specifically.
-                    // But wait, the thresholds might differ.
+                    // Skip hex checking if Base64 threshold is met, to avoid duplicate matches (hex is a subset of Base64).
                     continue;
                 }
             }
