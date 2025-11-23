@@ -198,7 +198,7 @@ impl PackageLockParser {
                                 .and_then(|n| n.as_str())
                                 .map(|n| n.to_string())
                                 .ok_or_else(|| ParseError::MissingField {
-                                    field: "Root package missing required name field".to_string(),
+                                    field: "name".to_string(),
                                 })?
                         } else if let Some(stripped) = key.strip_prefix("node_modules/") {
                             // Regular package: strip the "node_modules/" prefix to get the actual package name
@@ -283,7 +283,7 @@ impl PackageLockParser {
                 }
 
                 // Recursively process nested dependencies (physical tree)
-                // This is only relevant for v1 lockfiles where dependencies are nested
+                // Skip for lockfileVersion 2/3 as they use a flat packages structure instead of nested dependencies
                 if !is_packages_section {
                     if let Some(nested_deps) = dep_info.get("dependencies") {
                         // Check if values are objects (nested deps)
