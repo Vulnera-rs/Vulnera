@@ -29,6 +29,8 @@ dragonfly_connection_timeout_seconds = 5
 max_concurrent_packages = 3
 max_concurrent_registry_queries = 5
 max_concurrent_api_calls = 10
+job_queue_capacity = 64
+max_job_workers = 4
 
 [auth]
 # JWT secret key (must be at least 16 characters, 32+ recommended for production)

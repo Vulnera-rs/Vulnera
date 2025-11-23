@@ -21,13 +21,15 @@ use vulnera_deps::types::VersionResolutionService;
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
+use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
 use crate::infrastructure::job_store::{JobSnapshot, JobStore};
-use crate::presentation::auth::extractors::{AuthState, OptionalApiKeyAuth};
+use crate::presentation::auth::extractors::{ApiKeyAuth, AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
-    DependencyGraphEdgeDto, DependencyGraphNodeDto, FileAnalysisResult, FinalReportResponse,
+    DependencyGraphEdgeDto, DependencyGraphNodeDto, FileAnalysisResult, JobAcceptedResponse,
     PackageDto, SeverityBreakdownDto, VersionRecommendationDto, VulnerabilityDto,
 };
 use axum::extract::Query;
@@ -53,6 +55,7 @@ pub struct OrchestratorState {
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
     pub git_service: Arc<GitService>,
     pub job_store: Arc<dyn JobStore>,
+    pub job_queue: JobQueueHandle,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -95,7 +98,7 @@ pub struct OrchestratorState {
     path = "/api/v1/analyze/job",
     request_body = AnalysisRequest,
     responses(
-        (status = 200, description = "Analysis job created and executed", body = FinalReportResponse),
+        (status = 202, description = "Analysis job accepted for asynchronous execution", body = JobAcceptedResponse),
         (status = 400, description = "Invalid request"),
         (status = 500, description = "Internal server error")
     ),
@@ -103,8 +106,9 @@ pub struct OrchestratorState {
 )]
 pub async fn analyze(
     State(state): State<OrchestratorState>,
+    OptionalApiKeyAuth(api_key_auth): OptionalApiKeyAuth,
     Json(request): Json<AnalysisRequest>,
-) -> Result<Json<FinalReportResponse>, String> {
+) -> Result<(StatusCode, Json<JobAcceptedResponse>), String> {
     // Parse request
     let source_type = request.parse_source_type()?;
     let analysis_depth = request.parse_analysis_depth()?;
@@ -116,52 +120,61 @@ pub async fn analyze(
         .await
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
-    let project_id = project.id.clone();
+    let job_id = job.job_id;
+    let invocation_context = invocation_context_from_api_key(api_key_auth);
+    let callback_url = request.callback_url.clone();
 
-    let response = async {
-        let module_results = state
-            .execute_job_use_case
-            .execute(&mut job, &project)
-            .await
-            .map_err(|e| format!("Failed to execute job: {}", e))?;
-
-        let report = state
-            .aggregate_results_use_case
-            .execute(&job, module_results.clone());
-
-        // Persist snapshot for replay
-        let snapshot = JobSnapshot {
-            job_id: job.job_id,
-            project_id: job.project_id.clone(),
-            status: job.status.clone(),
-            module_results,
-            project_metadata: project.metadata.clone(),
-            created_at: job.created_at.to_rfc3339(),
-            started_at: job.started_at.map(|t| t.to_rfc3339()),
-            completed_at: job.completed_at.map(|t| t.to_rfc3339()),
-            error: job.error.clone(),
-            module_configs: std::collections::HashMap::new(),
-        };
-        if let Err(e) = state.job_store.save_snapshot(snapshot).await {
-            error!(
-                job_id = %job.job_id,
-                error = %e,
-                "Failed to save job snapshot"
-            );
-        }
-
-        Ok(Json(FinalReportResponse {
-            job_id: report.job_id,
-            status: format!("{:?}", report.status),
-            summary: report.summary,
-            findings: report.findings,
-        }))
+    let snapshot = JobSnapshot {
+        job_id,
+        project_id: job.project_id.clone(),
+        status: job.status.clone(),
+        module_results: Vec::new(),
+        project_metadata: project.metadata.clone(),
+        created_at: job.created_at.to_rfc3339(),
+        started_at: job.started_at.map(|t| t.to_rfc3339()),
+        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+        error: job.error.clone(),
+        module_configs: std::collections::HashMap::new(),
+        callback_url: callback_url.clone(),
+        invocation_context: invocation_context.clone(),
+        summary: None,
+        findings: None,
+    };
+    if let Err(e) = state.job_store.save_snapshot(snapshot).await {
+        error!(job_id = %job_id, error = %e, "Failed to persist pending job snapshot");
     }
-    .await;
 
-    state.git_service.cleanup_project(&project_id).await;
+    state
+        .job_queue
+        .enqueue(QueuedAnalysisJob {
+            job,
+            project,
+            callback_url: callback_url.clone(),
+            invocation_context,
+        })
+        .await
+        .map_err(|e| format!("Failed to enqueue job: {}", e))?;
 
-    response
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(JobAcceptedResponse {
+            job_id,
+            status: "queued".to_string(),
+            callback_url,
+            message: "Analysis job accepted for asynchronous execution".to_string(),
+        }),
+    ))
+}
+
+fn invocation_context_from_api_key(
+    api_key_auth: Option<ApiKeyAuth>,
+) -> Option<JobInvocationContext> {
+    api_key_auth.map(|auth| JobInvocationContext {
+        user_id: Some(auth.user_id),
+        email: Some(auth.email),
+        auth_strategy: Some(JobAuthStrategy::ApiKey),
+        api_key_id: Some(auth.api_key_id),
+    })
 }
 
 /// Query parameters for dependency analysis endpoint

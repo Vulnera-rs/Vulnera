@@ -7,7 +7,7 @@ use tracing::error;
 use uuid::Uuid;
 
 use crate::presentation::controllers::OrchestratorState;
-use crate::presentation::models::JobStatusResponse;
+use crate::presentation::models::{JobInvocationContextDto, JobStatusResponse};
 
 /// GET /api/v1/jobs/{id} - Retrieve job by ID
 #[utoipa::path(
@@ -29,24 +29,33 @@ pub async fn get_job(
 ) -> Result<Json<JobStatusResponse>, StatusCode> {
     match state.job_store.get_snapshot(id).await {
         Ok(Some(snapshot)) => {
+            let modules_completed = snapshot
+                .module_results
+                .iter()
+                .filter(|r| r.error.is_none())
+                .count();
+            let modules_failed = snapshot
+                .module_results
+                .iter()
+                .filter(|r| r.error.is_some())
+                .count();
+
             let response = JobStatusResponse {
                 job_id: snapshot.job_id,
                 project_id: snapshot.project_id,
                 status: format!("{:?}", snapshot.status),
-                modules_completed: snapshot
-                    .module_results
-                    .iter()
-                    .filter(|r| r.error.is_none())
-                    .count(),
-                modules_failed: snapshot
-                    .module_results
-                    .iter()
-                    .filter(|r| r.error.is_some())
-                    .count(),
+                modules_completed,
+                modules_failed,
                 created_at: snapshot.created_at,
                 started_at: snapshot.started_at,
                 completed_at: snapshot.completed_at,
                 error: snapshot.error,
+                callback_url: snapshot.callback_url,
+                invocation_context: snapshot
+                    .invocation_context
+                    .map(JobInvocationContextDto::from),
+                summary: snapshot.summary,
+                findings: snapshot.findings,
             };
             Ok(Json(response))
         }
