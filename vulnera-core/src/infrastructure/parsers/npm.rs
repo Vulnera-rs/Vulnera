@@ -176,11 +176,24 @@ impl PackageLockParser {
         let mut dependencies = Vec::new();
 
         if let Some(deps_obj) = deps.as_object() {
-            for (name, dep_info) in deps_obj {
+            for (key, dep_info) in deps_obj {
                 if let Some(version_str) = dep_info.get("version").and_then(|v| v.as_str()) {
                     let version = Version::parse(version_str).map_err(|_| ParseError::Version {
                         version: version_str.to_string(),
                     })?;
+
+                    // Handle root package in v2/v3 lockfiles (key is empty string)
+                    let name = if key.is_empty() {
+                        dep_info
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|n| n.to_string())
+                            .ok_or_else(|| ParseError::MissingField {
+                                field: "Package name cannot be empty".to_string(),
+                            })?
+                    } else {
+                        key.clone()
+                    };
 
                     let package = Package::new(name.clone(), version, Ecosystem::Npm)
                         .map_err(|e| ParseError::MissingField { field: e })?;
