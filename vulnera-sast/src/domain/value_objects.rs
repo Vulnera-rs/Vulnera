@@ -8,6 +8,9 @@ pub enum Language {
     Python,
     JavaScript,
     Rust,
+    Go,
+    C,
+    Cpp,
 }
 
 impl Language {
@@ -16,6 +19,9 @@ impl Language {
             "py" => Some(Language::Python),
             "js" | "jsx" | "ts" | "tsx" => Some(Language::JavaScript),
             "rs" => Some(Language::Rust),
+            "go" => Some(Language::Go),
+            "c" | "h" => Some(Language::C),
+            "cpp" | "hpp" | "cc" | "cxx" => Some(Language::Cpp),
             _ => None,
         }
     }
