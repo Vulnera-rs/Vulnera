@@ -29,6 +29,10 @@ tracing = { workspace = true }
 # OpenAPI parsing - using oas3 crate for OpenAPI 3.x support
 oas3 = { workspace = true, features = ["yaml-spec"] }
 
+[[test]]
+name = "unit"
+path = "tests/unit/mod.rs"
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 insta = { workspace = true }

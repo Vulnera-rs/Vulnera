@@ -1,0 +1,24 @@
+openapi: 3.0.0
+info:
+  title: Insecure API
+  version: 1.0.0
+  description: API with no authentication
+paths:
+  /users:
+    get:
+      summary: Get all users
+      responses:
+        '200':
+          description: List of users
+  /users/{id}:
+    get:
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User details
