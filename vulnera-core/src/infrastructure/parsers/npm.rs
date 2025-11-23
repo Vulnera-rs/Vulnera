@@ -242,11 +242,23 @@ impl PackageLockParser {
                     // But we need to distinguish from v1 'dependencies' which are objects.
                     if let Some(deps_val) = dep_info.get("dependencies") {
                         if let Some(deps_obj) = deps_val.as_object() {
-                            // Check if values are strings (logical deps) or objects (nested deps)
-                            // If first value is string, assume logical deps
-                            if let Some((_, val)) = deps_obj.iter().next() {
-                                if val.is_string() {
-                                    extract_edges_from("dependencies");
+                            // Instead of checking only the first value, iterate over all values.
+                            for (dep_name, dep_ver_val) in deps_obj {
+                                if let Some(dep_req) = dep_ver_val.as_str() {
+                                    // This is a logical dependency edge
+                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                                    if let Ok(dep_pkg) = Package::new(
+                                        dep_name.clone(),
+                                        dep_pkg_version,
+                                        Ecosystem::Npm,
+                                    ) {
+                                        dependencies.push(Dependency::new(
+                                            package.clone(),
+                                            dep_pkg,
+                                            dep_req.to_string(),
+                                            false,
+                                        ));
+                                    }
                                 }
                             }
                         }
