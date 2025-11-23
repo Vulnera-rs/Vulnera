@@ -1,9 +1,9 @@
 //! Node.js ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
+    entities::{Dependency, Package},
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
@@ -28,8 +28,9 @@ impl NpmParser {
         &self,
         json: &Value,
         dep_type: &str,
-    ) -> Result<Vec<Package>, ParseError> {
+    ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let dependencies = Vec::new(); // NpmParser doesn't extract edges, so this will remain empty
 
         if let Some(deps) = json.get(dep_type).and_then(|d| d.as_object()) {
             for (name, version_value) in deps {
@@ -54,7 +55,10 @@ impl NpmParser {
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 
     /// Clean npm version string by removing prefixes and ranges
@@ -119,17 +123,28 @@ impl PackageFileParser for NpmParser {
         filename == "package.json"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let json: Value = serde_json::from_str(content)?;
-        let mut packages = Vec::new();
+        let mut result = ParseResult::default();
 
         // Extract different types of dependencies
-        packages.extend(self.extract_dependencies(&json, "dependencies")?);
-        packages.extend(self.extract_dependencies(&json, "devDependencies")?);
-        packages.extend(self.extract_dependencies(&json, "peerDependencies")?);
-        packages.extend(self.extract_dependencies(&json, "optionalDependencies")?);
+        let deps = self.extract_dependencies(&json, "dependencies")?;
+        result.packages.extend(deps.packages);
+        result.dependencies.extend(deps.dependencies);
 
-        Ok(packages)
+        let dev_deps = self.extract_dependencies(&json, "devDependencies")?;
+        result.packages.extend(dev_deps.packages);
+        result.dependencies.extend(dev_deps.dependencies);
+
+        let peer_deps = self.extract_dependencies(&json, "peerDependencies")?;
+        result.packages.extend(peer_deps.packages);
+        result.dependencies.extend(peer_deps.dependencies);
+
+        let opt_deps = self.extract_dependencies(&json, "optionalDependencies")?;
+        result.packages.extend(opt_deps.packages);
+        result.dependencies.extend(opt_deps.dependencies);
+
+        Ok(result)
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -155,9 +170,10 @@ impl PackageLockParser {
         Self
     }
 
-    /// Extract packages from lockfile dependencies
-    fn extract_lockfile_packages(deps: &Value) -> Result<Vec<Package>, ParseError> {
+    /// Extract packages and dependencies from lockfile
+    fn extract_lockfile_data(deps: &Value) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         if let Some(deps_obj) = deps.as_object() {
             for (name, dep_info) in deps_obj {
@@ -169,17 +185,81 @@ impl PackageLockParser {
                     let package = Package::new(name.clone(), version, Ecosystem::Npm)
                         .map_err(|e| ParseError::MissingField { field: e })?;
 
-                    packages.push(package);
+                    packages.push(package.clone());
+
+                    // Extract dependencies from 'requires' (v1) or 'dependencies' (v2/v3 packages)
+                    // Note: In v1 'dependencies' is the nested tree, 'requires' is the logical deps.
+                    // In v2/v3 'packages' entries, 'dependencies' is the logical deps.
+                    // We check both 'requires' and 'dependencies' here but treat them as logical deps if they are simple key-value pairs
+                    // However, 'dependencies' in v1 is nested objects, so we need to be careful.
+                    // A simple heuristic: if the value is a string, it's a version requirement (logical dep).
+                    // If it's an object, it's a nested dependency (physical tree).
+
+                    let mut extract_edges_from = |key: &str| {
+                        if let Some(reqs) = dep_info.get(key).and_then(|r| r.as_object()) {
+                            for (dep_name, dep_ver_val) in reqs {
+                                if let Some(dep_req) = dep_ver_val.as_str() {
+                                    // This is a logical dependency edge
+                                    // We create a dependency edge. The 'to' package version is not fully known here
+                                    // without resolving it against the whole tree, but we can create a placeholder
+                                    // or just use the requirement.
+                                    // For now, we'll use 0.0.0 as a placeholder for the 'to' package version if it's a range,
+                                    // effectively saying "depends on package X with requirement Y".
+
+                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                                    if let Ok(dep_pkg) = Package::new(
+                                        dep_name.clone(),
+                                        dep_pkg_version,
+                                        Ecosystem::Npm,
+                                    ) {
+                                        dependencies.push(Dependency::new(
+                                            package.clone(),
+                                            dep_pkg,
+                                            dep_req.to_string(),
+                                            false,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    };
+
+                    extract_edges_from("requires");
+                    // For v2/v3 'packages' entries, 'dependencies' lists logical deps as strings
+                    // But we need to distinguish from v1 'dependencies' which are objects.
+                    if let Some(deps_val) = dep_info.get("dependencies") {
+                        if let Some(deps_obj) = deps_val.as_object() {
+                            // Check if values are strings (logical deps) or objects (nested deps)
+                            // If first value is string, assume logical deps
+                            if let Some((_, val)) = deps_obj.iter().next() {
+                                if val.is_string() {
+                                    extract_edges_from("dependencies");
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // Recursively process nested dependencies
+                // Recursively process nested dependencies (physical tree)
                 if let Some(nested_deps) = dep_info.get("dependencies") {
-                    packages.extend(Self::extract_lockfile_packages(nested_deps)?);
+                    // Check if values are objects (nested deps)
+                    if let Some(deps_obj) = nested_deps.as_object() {
+                        if let Some((_, val)) = deps_obj.iter().next() {
+                            if val.is_object() {
+                                let nested_result = Self::extract_lockfile_data(nested_deps)?;
+                                packages.extend(nested_result.packages);
+                                dependencies.extend(nested_result.dependencies);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 }
 
@@ -189,21 +269,25 @@ impl PackageFileParser for PackageLockParser {
         filename == "package-lock.json"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let json: Value = serde_json::from_str(content)?;
-        let mut packages = Vec::new();
+        let mut result = ParseResult::default();
 
         // Extract from dependencies section
         if let Some(deps) = json.get("dependencies") {
-            packages.extend(Self::extract_lockfile_packages(deps)?);
+            let res = Self::extract_lockfile_data(deps)?;
+            result.packages.extend(res.packages);
+            result.dependencies.extend(res.dependencies);
         }
 
         // Extract from packages section (npm v7+)
         if let Some(pkgs) = json.get("packages") {
-            packages.extend(Self::extract_lockfile_packages(pkgs)?);
+            let res = Self::extract_lockfile_data(pkgs)?;
+            result.packages.extend(res.packages);
+            result.dependencies.extend(res.dependencies);
         }
 
-        Ok(packages)
+        Ok(result)
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -230,64 +314,140 @@ impl YarnLockParser {
     }
 
     /// Parse yarn.lock format which is a custom format
-    fn parse_yarn_lock(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    fn parse_yarn_lock(&self, content: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
-        let mut current_package: Option<String> = None;
+        let mut dependencies = Vec::new();
+
+        let mut current_package_names: Vec<String> = Vec::new();
         let mut current_version: Option<String> = None;
+        let mut current_dependencies: Vec<(String, String)> = Vec::new();
+        let mut in_dependencies = false;
 
         for line in content.lines() {
-            let line = line.trim();
+            let line_trim = line.trim();
 
             // Skip comments and empty lines
-            if line.is_empty() || line.starts_with('#') {
+            if line_trim.is_empty() || line_trim.starts_with('#') {
                 continue;
             }
 
-            // Package declaration line (starts with package name)
-            if !line.starts_with(' ') && line.contains('@') && line.ends_with(':') {
-                // Save previous package if exists
-                if let (Some(name), Some(version)) = (&current_package, &current_version) {
+            // Indentation check
+            let indent = line.len() - line.trim_start().len();
+
+            if indent == 0 {
+                // New entry
+                // Save previous
+                if let Some(version) = &current_version {
                     if let Ok(parsed_version) = Version::parse(version) {
-                        if let Ok(package) =
-                            Package::new(name.clone(), parsed_version, Ecosystem::Npm)
-                        {
-                            packages.push(package);
+                        for name in &current_package_names {
+                            // Name might be "pkg@range", extract just name
+                            let pkg_name = if let Some(at_pos) = name.rfind('@') {
+                                if at_pos > 0 { &name[..at_pos] } else { name }
+                            } else {
+                                name
+                            };
+
+                            if let Ok(package) = Package::new(
+                                pkg_name.to_string(),
+                                parsed_version.clone(),
+                                Ecosystem::Npm,
+                            ) {
+                                packages.push(package.clone());
+
+                                // Add dependencies
+                                for (dep_name, dep_req) in &current_dependencies {
+                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                                    if let Ok(dep_pkg) = Package::new(
+                                        dep_name.clone(),
+                                        dep_pkg_version,
+                                        Ecosystem::Npm,
+                                    ) {
+                                        dependencies.push(Dependency::new(
+                                            package.clone(),
+                                            dep_pkg,
+                                            dep_req.clone(),
+                                            false,
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
-                // Parse new package name
-                let package_line = &line[..line.len() - 1]; // Remove trailing ':'
-                if let Some(at_pos) = package_line.rfind('@') {
-                    current_package = Some(package_line[..at_pos].to_string());
-                } else {
-                    current_package = Some(package_line.to_string());
-                }
+                // Reset
+                current_package_names.clear();
                 current_version = None;
-            }
-            // Version line
-            else if line.starts_with("version ") {
-                let version_str = if let Some(rest) = line.strip_prefix("version ") {
-                    rest.strip_prefix('"')
-                        .and_then(|v| v.strip_suffix('"'))
-                        .unwrap_or(rest)
-                } else {
-                    line
-                };
-                current_version = Some(version_str.to_string());
-            }
-        }
+                current_dependencies.clear();
+                in_dependencies = false;
 
-        // Don't forget the last package
-        if let (Some(name), Some(version)) = (current_package, current_version) {
-            if let Ok(parsed_version) = Version::parse(&version) {
-                if let Ok(package) = Package::new(name, parsed_version, Ecosystem::Npm) {
-                    packages.push(package);
+                // Parse names (comma separated)
+                // "pkg-a@^1.0.0, pkg-a@^1.1.0:"
+                let line_no_colon = line_trim.trim_end_matches(':');
+                for part in line_no_colon.split(',') {
+                    let part = part.trim();
+                    let part = part.trim_matches('"');
+                    current_package_names.push(part.to_string());
+                }
+            } else if indent == 2 {
+                if line_trim.starts_with("version ") {
+                    let version_str = line_trim
+                        .trim_start_matches("version ")
+                        .trim()
+                        .trim_matches('"');
+                    current_version = Some(version_str.to_string());
+                    in_dependencies = false;
+                } else if line_trim.starts_with("dependencies:") {
+                    in_dependencies = true;
+                } else if in_dependencies {
+                    // Dependency entry: "dep-name" "range"
+                    // or "dep-name" "range"
+                    // split by space
+                    if let Some(space_pos) = line_trim.find(' ') {
+                        let name = line_trim[..space_pos].trim_matches('"');
+                        let req = line_trim[space_pos..].trim().trim_matches('"');
+                        current_dependencies.push((name.to_string(), req.to_string()));
+                    }
                 }
             }
         }
 
-        Ok(packages)
+        // Save last
+        if let Some(version) = &current_version {
+            if let Ok(parsed_version) = Version::parse(version) {
+                for name in &current_package_names {
+                    let pkg_name = if let Some(at_pos) = name.rfind('@') {
+                        if at_pos > 0 { &name[..at_pos] } else { name }
+                    } else {
+                        name
+                    };
+
+                    if let Ok(package) =
+                        Package::new(pkg_name.to_string(), parsed_version.clone(), Ecosystem::Npm)
+                    {
+                        packages.push(package.clone());
+                        for (dep_name, dep_req) in &current_dependencies {
+                            let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                            if let Ok(dep_pkg) =
+                                Package::new(dep_name.clone(), dep_pkg_version, Ecosystem::Npm)
+                            {
+                                dependencies.push(Dependency::new(
+                                    package.clone(),
+                                    dep_pkg,
+                                    dep_req.clone(),
+                                    false,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 }
 
@@ -297,7 +457,7 @@ impl PackageFileParser for YarnLockParser {
         filename == "yarn.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         self.parse_yarn_lock(content)
     }
 
@@ -331,12 +491,17 @@ mod tests {
         }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let express_pkg = packages.iter().find(|p| p.name == "express").unwrap();
+        let express_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "express")
+            .unwrap();
         assert_eq!(express_pkg.version, Version::parse("4.17.1").unwrap());
         assert_eq!(express_pkg.ecosystem, Ecosystem::Npm);
+        assert_eq!(result.dependencies.len(), 0); // package.json doesn't define dependency edges
     }
 
     #[tokio::test]
@@ -359,10 +524,14 @@ mod tests {
         }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2);
 
-        let express_pkg = packages.iter().find(|p| p.name == "express").unwrap();
+        let express_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "express")
+            .unwrap();
         assert_eq!(express_pkg.version, Version::parse("4.17.1").unwrap());
     }
 
@@ -381,10 +550,14 @@ lodash@~4.17.21:
   resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz"
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2);
 
-        let express_pkg = packages.iter().find(|p| p.name == "express").unwrap();
+        let express_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "express")
+            .unwrap();
         assert_eq!(express_pkg.version, Version::parse("4.17.1").unwrap());
     }
 

@@ -33,6 +33,7 @@ chrono = { workspace = true }
 
 # Version parsing
 semver = { workspace = true }
+petgraph = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

@@ -1,8 +1,18 @@
 //! Traits for package file parsers
 
 use crate::application::errors::ParseError;
-use crate::domain::vulnerability::{entities::Package, value_objects::Ecosystem};
+use crate::domain::vulnerability::{
+    entities::{Dependency, Package},
+    value_objects::Ecosystem,
+};
 use async_trait::async_trait;
+
+/// Result of parsing a package file
+#[derive(Debug, Clone, Default)]
+pub struct ParseResult {
+    pub packages: Vec<Package>,
+    pub dependencies: Vec<Dependency>,
+}
 
 /// Trait for parsing dependency files
 #[async_trait]
@@ -10,8 +20,8 @@ pub trait PackageFileParser: Send + Sync {
     /// Check if this parser supports the given filename
     fn supports_file(&self, filename: &str) -> bool;
 
-    /// Parse the file content and extract packages
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError>;
+    /// Parse the file content and extract packages and dependencies
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError>;
 
     /// Get the ecosystem this parser handles
     fn ecosystem(&self) -> Ecosystem;

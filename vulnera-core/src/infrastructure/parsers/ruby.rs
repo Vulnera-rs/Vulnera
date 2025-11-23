@@ -10,10 +10,10 @@
 //!   normalized to the numeric base (e.g., "1.14.0") to satisfy semver parsing.
 //! - Gemfile lines with only git/path constraints default to "0.0.0" for version.
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
+    entities::{Dependency, Package},
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
@@ -85,6 +85,9 @@ static RE_QUOTED_STRING: Lazy<Regex> = Lazy::new(|| Regex::new(r#""([^"]+)"|'([^
 
 static RE_SPEC_LINE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"^\s{4}([A-Za-z0-9_\-\.]+)\s+\(([^)]+)\)"#).unwrap());
+
+static RE_DEP_LINE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r#"^\s{6}([A-Za-z0-9_\-\.]+)\s*(?:\(([^)]+)\))?"#).unwrap());
 
 /// Parse a Gemfile `gem` declaration line to (name, version-like-string).
 /// Returns None if the line is not a valid `gem` line.
@@ -163,8 +166,12 @@ impl PackageFileParser for GemfileParser {
         filename == "Gemfile"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.parse_gemfile_content(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.parse_gemfile_content(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -190,15 +197,17 @@ impl GemfileLockParser {
         Self
     }
 
-    fn parse_gemfile_lock_content(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    fn parse_gemfile_lock_content(&self, content: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         // We only parse the "GEM -> specs" section. Lines look like:
         // "    some_gem (1.2.3)"
+        // "      dependency (>= 1.0)"
         // "    nokogiri (1.14.0-x86_64-linux)"
-        // Dependencies of a spec are further-indented; we ignore those.
         let mut in_gem_section = false;
         let mut in_specs = false;
+        let mut current_package: Option<Package> = None;
 
         for line in content.lines() {
             let trimmed = line.trim();
@@ -218,6 +227,7 @@ impl GemfileLockParser {
                 // We are exiting specs section implicitly
                 in_gem_section = false;
                 in_specs = false;
+                current_package = None;
             }
 
             if in_gem_section && trimmed == "specs:" {
@@ -232,14 +242,17 @@ impl GemfileLockParser {
             // A blank line typically ends the specs area (or next section header as above)
             if trimmed.is_empty() {
                 in_specs = false;
+                current_package = None;
                 continue;
             }
 
+            // Check for package definition (indentation 4 spaces)
             if let Some(caps) = RE_SPEC_LINE.captures(line) {
                 let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
                 let raw_version = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim();
 
                 if name.is_empty() || raw_version.is_empty() {
+                    current_package = None;
                     continue;
                 }
 
@@ -250,11 +263,39 @@ impl GemfileLockParser {
 
                 let package = Package::new(name.to_string(), version, Ecosystem::RubyGems)
                     .map_err(|e| ParseError::MissingField { field: e })?;
-                packages.push(package);
+                packages.push(package.clone());
+                current_package = Some(package);
+                continue;
+            }
+
+            // Check for dependency definition (indentation 6 spaces)
+            if let Some(pkg) = &current_package {
+                if let Some(caps) = RE_DEP_LINE.captures(line) {
+                    let dep_name = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+                    let dep_req = caps.get(2).map(|m| m.as_str()).unwrap_or("*").trim();
+
+                    if !dep_name.is_empty() {
+                        // Create a placeholder package for the dependency target
+                        let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                        if let Ok(dep_pkg) =
+                            Package::new(dep_name.to_string(), dep_pkg_version, Ecosystem::RubyGems)
+                        {
+                            dependencies.push(Dependency::new(
+                                pkg.clone(),
+                                dep_pkg,
+                                dep_req.to_string(),
+                                false,
+                            ));
+                        }
+                    }
+                }
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 }
 
@@ -264,7 +305,7 @@ impl PackageFileParser for GemfileLockParser {
         filename == "Gemfile.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         self.parse_gemfile_lock_content(content)
     }
 
@@ -294,19 +335,27 @@ gem "dotenv-rails"
 gem "octokit", "~> 5.0", ">= 5.1" # multiple constraints, we take the first
 "#;
 
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
         // rails, puma, dotenv-rails, octokit
-        assert_eq!(pkgs.len(), 4);
-        let rails = pkgs.iter().find(|p| p.name == "rails").unwrap();
+        assert_eq!(result.packages.len(), 4);
+        let rails = result.packages.iter().find(|p| p.name == "rails").unwrap();
         assert_eq!(rails.version, Version::parse("6.1.0").unwrap());
 
-        let puma = pkgs.iter().find(|p| p.name == "puma").unwrap();
+        let puma = result.packages.iter().find(|p| p.name == "puma").unwrap();
         assert_eq!(puma.version, Version::parse("5.0.0").unwrap());
 
-        let dotenv = pkgs.iter().find(|p| p.name == "dotenv-rails").unwrap();
+        let dotenv = result
+            .packages
+            .iter()
+            .find(|p| p.name == "dotenv-rails")
+            .unwrap();
         assert_eq!(dotenv.version, Version::parse("0.0.0").unwrap());
 
-        let octo = pkgs.iter().find(|p| p.name == "octokit").unwrap();
+        let octo = result
+            .packages
+            .iter()
+            .find(|p| p.name == "octokit")
+            .unwrap();
         assert_eq!(octo.version, Version::parse("5.0.0").unwrap());
     }
 
@@ -331,16 +380,31 @@ DEPENDENCIES
   rake
 "#;
 
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
         // We parse specs: actionmailer, rake, nokogiri -> 3
-        assert_eq!(pkgs.len(), 3);
+        assert_eq!(result.packages.len(), 3);
 
-        let rake = pkgs.iter().find(|p| p.name == "rake").unwrap();
+        let rake = result.packages.iter().find(|p| p.name == "rake").unwrap();
         assert_eq!(rake.version, Version::parse("13.0.1").unwrap());
 
-        let nok = pkgs.iter().find(|p| p.name == "nokogiri").unwrap();
+        let nok = result
+            .packages
+            .iter()
+            .find(|p| p.name == "nokogiri")
+            .unwrap();
         // Cleaned from "1.14.0-x86_64-linux" to "1.14.0"
         assert_eq!(nok.version, Version::parse("1.14.0").unwrap());
+
+        // Check dependencies
+        let deps: Vec<_> = result
+            .dependencies
+            .iter()
+            .filter(|d| d.from.name == "actionmailer")
+            .collect();
+        assert_eq!(deps.len(), 2);
+
+        let actionpack_dep = deps.iter().find(|d| d.to.name == "actionpack").unwrap();
+        assert_eq!(actionpack_dep.requirement, "= 6.1.7.1");
     }
 
     #[test]
