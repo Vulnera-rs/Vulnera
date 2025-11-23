@@ -92,6 +92,44 @@ pub struct JobStatusResponse {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub error: Option<String>,
+    pub callback_url: Option<String>,
+    pub invocation_context: Option<JobInvocationContextDto>,
+    pub summary: Option<crate::domain::entities::ReportSummary>,
+    pub findings: Option<Vec<vulnera_core::domain::module::Finding>>,
+}
+
+/// Response returned when a job is accepted for asynchronous processing
+#[derive(Serialize, ToSchema)]
+pub struct JobAcceptedResponse {
+    pub job_id: Uuid,
+    pub status: String,
+    pub callback_url: Option<String>,
+    pub message: String,
+}
+
+/// Sanitized view of the invocation context for API responses
+#[derive(Serialize, ToSchema)]
+pub struct JobInvocationContextDto {
+    pub user_id: Option<String>,
+    pub email: Option<String>,
+    pub auth_strategy: Option<String>,
+    pub api_key_id: Option<String>,
+}
+
+impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContextDto {
+    fn from(context: crate::domain::entities::JobInvocationContext) -> Self {
+        use crate::domain::entities::JobAuthStrategy;
+
+        Self {
+            user_id: context.user_id.map(|id| id.as_str()),
+            email: context.email.map(|email| email.into_string()),
+            auth_strategy: context.auth_strategy.map(|strategy| match strategy {
+                JobAuthStrategy::Jwt => "jwt".to_string(),
+                JobAuthStrategy::ApiKey => "api_key".to_string(),
+            }),
+            api_key_id: context.api_key_id.map(|id| id.as_str()),
+        }
+    }
 }
 
 /// Final report response

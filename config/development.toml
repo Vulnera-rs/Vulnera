@@ -20,6 +20,13 @@ ttl_hours = 1
 dragonfly_url = "redis://127.0.0.1:6379"
 dragonfly_connection_timeout_seconds = 5
 
+[analysis]
+max_concurrent_packages = 3
+max_concurrent_registry_queries = 5
+max_concurrent_api_calls = 10
+job_queue_capacity = 16
+max_job_workers = 2
+
 [auth]
 # Development: shorter TTL for easier testing
 jwt_secret = "development-secret-key-change-in-production"

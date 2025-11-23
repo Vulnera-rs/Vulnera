@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId};
 use vulnera_core::domain::module::{Finding, ModuleResult};
 
 use super::value_objects::{AnalysisDepth, JobStatus, SourceType};
@@ -16,6 +17,23 @@ pub struct Project {
     pub source_type: SourceType,
     pub source_uri: String,
     pub metadata: ProjectMetadata,
+}
+
+/// How the job request was authenticated
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum JobAuthStrategy {
+    Jwt,
+    ApiKey,
+}
+
+/// Optional metadata describing who triggered the job
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct JobInvocationContext {
+    pub user_id: Option<UserId>,
+    pub email: Option<Email>,
+    pub auth_strategy: Option<JobAuthStrategy>,
+    pub api_key_id: Option<ApiKeyId>,
 }
 
 /// Project metadata

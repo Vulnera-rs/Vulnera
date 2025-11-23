@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
 use vulnera_core::application::errors::ApplicationError;
-use vulnera_core::domain::auth::value_objects::{Email, UserId, UserRole};
+use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
 
 use crate::presentation::middleware::application_error_to_response;
 
@@ -43,6 +43,7 @@ pub struct Auth {
     pub email: Email,
     pub roles: Vec<UserRole>,
     pub auth_method: AuthMethod,
+    pub api_key_id: Option<ApiKeyId>,
 }
 
 /// State for authentication extractors
@@ -153,7 +154,7 @@ where
             })?;
 
         // Validate API key
-        let user_id = auth_state
+        let validation = auth_state
             .validate_api_key
             .execute(&api_key)
             .await
@@ -161,6 +162,7 @@ where
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(e),
             })?;
+        let user_id = validation.user_id;
 
         // Get user to get email
         let user = auth_state
@@ -181,11 +183,10 @@ where
             })?;
 
         // For API key auth, we don't have the api_key_id in the extractor
-        // We'll use a placeholder - in practice, you might want to return it from ValidateApiKeyUseCase
         Ok(ApiKeyAuth {
             user_id,
             email: user.email,
-            api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId::generate(), // Placeholder
+            api_key_id: validation.api_key_id,
         })
     }
 }
@@ -224,6 +225,7 @@ where
                             email,
                             roles,
                             auth_method: AuthMethod::Jwt,
+                            api_key_id: None,
                         });
                     }
                     Err(_) => {
@@ -235,7 +237,8 @@ where
             // Try API key from Authorization header
             if let Some(api_key) = header.strip_prefix("ApiKey ") {
                 match auth_state.validate_api_key.execute(api_key).await {
-                    Ok(user_id) => {
+                    Ok(validation) => {
+                        let user_id = validation.user_id;
                         let user = auth_state
                             .user_repository
                             .find_by_id(&user_id)
@@ -258,6 +261,7 @@ where
                             email: user.email,
                             roles: user.roles,
                             auth_method: AuthMethod::ApiKey,
+                            api_key_id: Some(validation.api_key_id),
                         });
                     }
                     Err(_) => {
@@ -270,7 +274,8 @@ where
         // Try X-API-Key header
         if let Some(api_key) = parts.headers.get("X-API-Key").and_then(|h| h.to_str().ok()) {
             match auth_state.validate_api_key.execute(api_key).await {
-                Ok(user_id) => {
+                Ok(validation) => {
+                    let user_id = validation.user_id;
                     let user = auth_state
                         .user_repository
                         .find_by_id(&user_id)
@@ -293,6 +298,7 @@ where
                         email: user.email,
                         roles: user.roles,
                         auth_method: AuthMethod::ApiKey,
+                        api_key_id: Some(validation.api_key_id),
                     });
                 }
                 Err(e) => {
@@ -359,7 +365,7 @@ where
         };
 
         // Validate API key
-        let user_id = auth_state
+        let validation = auth_state
             .validate_api_key
             .execute(&api_key)
             .await
@@ -369,6 +375,7 @@ where
                     vulnera_core::domain::auth::errors::AuthError::ApiKeyInvalid,
                 ),
             })?;
+        let user_id = validation.user_id;
 
         // Get user to get email
         let user = auth_state
@@ -391,7 +398,7 @@ where
         Ok(OptionalApiKeyAuth(Some(ApiKeyAuth {
             user_id,
             email: user.email,
-            api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId::generate(), // Placeholder
+            api_key_id: validation.api_key_id,
         })))
     }
 }
