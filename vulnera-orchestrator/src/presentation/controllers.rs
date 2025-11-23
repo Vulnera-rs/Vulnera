@@ -114,7 +114,7 @@ pub async fn analyze(
     let analysis_depth = request.parse_analysis_depth()?;
 
     // Create job
-    let (mut job, project) = state
+    let (job, project) = state
         .create_job_use_case
         .execute(source_type, request.source_uri.clone(), analysis_depth)
         .await
