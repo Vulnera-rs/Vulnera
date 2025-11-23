@@ -174,7 +174,7 @@ impl PackageLockParser {
     /// 
     /// # Arguments
     /// * `deps` - The JSON value containing package data
-    /// * `is_packages_section` - True if processing "packages" section (v2/v3), false for "dependencies" section (v1)
+    /// * `is_packages_section` - True if processing "packages" section (lockfileVersion 2/3), false for "dependencies" section (v1)
     fn extract_lockfile_data(deps: &Value, is_packages_section: bool) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
@@ -198,7 +198,7 @@ impl PackageLockParser {
                                 .and_then(|n| n.as_str())
                                 .map(|n| n.to_string())
                                 .ok_or_else(|| ParseError::MissingField {
-                                    field: "Package name cannot be empty".to_string(),
+                                    field: "Root package missing required name field".to_string(),
                                 })?
                         } else if let Some(stripped) = key.strip_prefix("node_modules/") {
                             // Regular package: strip the "node_modules/" prefix to get the actual package name
