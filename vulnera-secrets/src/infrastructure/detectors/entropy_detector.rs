@@ -19,7 +19,8 @@ impl EntropyDetector {
             hex_threshold,
             // Match sequences of potential secret characters (Base64/Hex/URL-safe)
             // Minimum length 20 to avoid noise
-            candidate_regex: Regex::new(r"[A-Za-z0-9+/=_-]{20,}").expect("Failed to compile entropy candidate regex"),
+            candidate_regex: Regex::new(r"[A-Za-z0-9+/=_-]{20,}")
+                .expect("Failed to compile entropy candidate regex"),
         }
     }
 
@@ -29,7 +30,7 @@ impl EntropyDetector {
 
         for mat in self.candidate_regex.find_iter(content) {
             let word = mat.as_str();
-            
+
             // Check Base64-like strings
             if Entropy::is_base64_like(word) {
                 let entropy = Entropy::shannon_entropy(word);
@@ -53,7 +54,7 @@ impl EntropyDetector {
                     // If we add it as Base64, we might duplicate if we also add as Hex.
                     // Let's check Hex ONLY if it wasn't high enough entropy for Base64 OR if we want to classify it specifically.
                     // But wait, the thresholds might differ.
-                    continue; 
+                    continue;
                 }
             }
 

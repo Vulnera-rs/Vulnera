@@ -16,7 +16,7 @@ proptest! {
         // Ensure length is multiple of 4 for valid base64 check
         let pad_len = (4 - (s.len() % 4)) % 4;
         let padded = format!("{}{}", s, "=".repeat(pad_len));
-        
+
         prop_assert!(Entropy::is_base64_like(&padded));
     }
 
@@ -25,10 +25,10 @@ proptest! {
         // Ensure length is multiple of 4 for valid base64 check
         let pad_len = (4 - (s.len() % 4)) % 4;
         let padded = format!("{}{}", s, "=".repeat(pad_len));
-        
+
         prop_assert!(Entropy::is_base64_like(&padded));
     }
-    
+
     #[test]
     fn test_hex_like_detection(s in "[a-fA-F0-9]{20,100}") {
         prop_assert!(Entropy::is_hex_like(&s));

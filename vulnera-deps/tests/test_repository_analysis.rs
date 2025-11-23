@@ -1,6 +1,6 @@
+use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use async_trait::async_trait;
 use vulnera_core::Config;
 use vulnera_core::application::errors::{ApplicationError, VulnerabilityError};
 use vulnera_core::domain::vulnerability::entities::{Package, Vulnerability};
@@ -8,10 +8,11 @@ use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
 use vulnera_core::domain::vulnerability::value_objects::VulnerabilityId;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_core::infrastructure::repository_source::{
-    FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceResult, RepositorySourceError
+    FetchedFileContent, RepositoryFile, RepositorySourceClient, RepositorySourceError,
+    RepositorySourceResult,
 };
 use vulnera_deps::services::repository_analysis::{
-    RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl
+    RepositoryAnalysisInput, RepositoryAnalysisService, RepositoryAnalysisServiceImpl,
 };
 
 // --- Mocks ---
@@ -38,7 +39,10 @@ impl MockRepositorySourceClient {
     }
 
     fn add_content(&self, path: &str, content: &str) {
-        self.contents.lock().unwrap().insert(path.to_string(), content.to_string());
+        self.contents
+            .lock()
+            .unwrap()
+            .insert(path.to_string(), content.to_string());
     }
 
     fn set_rate_limit(&self, active: bool) {
@@ -64,12 +68,18 @@ impl RepositorySourceClient for MockRepositorySourceClient {
         }
 
         let key = format!("{}/{}", owner, repo);
-        let files = self.files.lock().unwrap().get(&key).cloned().unwrap_or_default();
-        
+        let files = self
+            .files
+            .lock()
+            .unwrap()
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
+
         if files.len() > max_files as usize {
-             // Simulate truncation logic if needed, but usually the client handles it or returns partial
-             // For this mock, let's just return what we have, or slice it
-             return Ok(files.into_iter().take(max_files as usize).collect());
+            // Simulate truncation logic if needed, but usually the client handles it or returns partial
+            // For this mock, let's just return what we have, or slice it
+            return Ok(files.into_iter().take(max_files as usize).collect());
         }
 
         Ok(files)
@@ -96,7 +106,7 @@ impl RepositorySourceClient for MockRepositorySourceClient {
 
         for file in files {
             if file.size > single_file_max_bytes {
-                // Skip or error? The real client might skip or error. 
+                // Skip or error? The real client might skip or error.
                 // The service logic filters before calling this, but let's be safe.
                 continue;
             }
@@ -144,20 +154,35 @@ async fn test_analyze_repository_success() {
     // Setup repo data
     let owner = "test-owner";
     let repo = "test-repo";
-    
-    mock_client.add_repo(owner, repo, vec![
-        RepositoryFile { path: "Cargo.toml".to_string(), size: 100, is_text: true },
-        RepositoryFile { path: "src/main.rs".to_string(), size: 500, is_text: true }, // Should be ignored by parsers
-    ]);
 
-    mock_client.add_content("Cargo.toml", r#"
+    mock_client.add_repo(
+        owner,
+        repo,
+        vec![
+            RepositoryFile {
+                path: "Cargo.toml".to_string(),
+                size: 100,
+                is_text: true,
+            },
+            RepositoryFile {
+                path: "src/main.rs".to_string(),
+                size: 500,
+                is_text: true,
+            }, // Should be ignored by parsers
+        ],
+    );
+
+    mock_client.add_content(
+        "Cargo.toml",
+        r#"
         [package]
         name = "test-pkg"
         version = "0.1.0"
         
         [dependencies]
         serde = "1.0"
-    "#);
+    "#,
+    );
 
     let service = RepositoryAnalysisServiceImpl::new(
         Arc::new(mock_client),
@@ -177,7 +202,10 @@ async fn test_analyze_repository_success() {
         return_packages: true,
     };
 
-    let result = service.analyze_repository(input).await.expect("Analysis failed");
+    let result = service
+        .analyze_repository(input)
+        .await
+        .expect("Analysis failed");
 
     assert_eq!(result.owner, owner);
     assert_eq!(result.repo, repo);
@@ -192,7 +220,7 @@ async fn test_analyze_repository_success() {
 async fn test_analyze_repository_rate_limit() {
     let mock_client = MockRepositorySourceClient::new();
     mock_client.set_rate_limit(true);
-    
+
     let mock_vuln_repo = Arc::new(MockVulnerabilityRepository);
     let config = Arc::new(Config::default());
     let parser_factory = Arc::new(ParserFactory::default());
@@ -216,7 +244,7 @@ async fn test_analyze_repository_rate_limit() {
     };
 
     let result = service.analyze_repository(input).await;
-    
+
     match result {
         Err(ApplicationError::RateLimited { .. }) => (), // Expected
         _ => panic!("Expected RateLimited error, got {:?}", result),
@@ -229,16 +257,24 @@ async fn test_analyze_repository_file_size_limit() {
     let mock_vuln_repo = Arc::new(MockVulnerabilityRepository);
     let mut config = Config::default();
     // Set a small file size limit
-    config.apis.github.max_single_file_bytes = 50; 
-    
+    config.apis.github.max_single_file_bytes = 50;
+
     let parser_factory = Arc::new(ParserFactory::default());
 
     let owner = "test-owner";
     let repo = "test-repo";
-    
-    mock_client.add_repo(owner, repo, vec![
-        RepositoryFile { path: "Cargo.toml".to_string(), size: 100, is_text: true }, // Too big
-    ]);
+
+    mock_client.add_repo(
+        owner,
+        repo,
+        vec![
+            RepositoryFile {
+                path: "Cargo.toml".to_string(),
+                size: 100,
+                is_text: true,
+            }, // Too big
+        ],
+    );
 
     let service = RepositoryAnalysisServiceImpl::new(
         Arc::new(mock_client),
@@ -258,7 +294,10 @@ async fn test_analyze_repository_file_size_limit() {
         return_packages: true,
     };
 
-    let result = service.analyze_repository(input).await.expect("Analysis failed");
+    let result = service
+        .analyze_repository(input)
+        .await
+        .expect("Analysis failed");
 
     // Should be skipped because of size
     assert_eq!(result.analyzed_files, 0);
@@ -274,16 +313,16 @@ async fn test_analyze_repository_max_files_truncation() {
 
     let owner = "test-owner";
     let repo = "test-repo";
-    
+
     // Add 5 files
     let files: Vec<RepositoryFile> = (0..5)
-        .map(|i| RepositoryFile { 
-            path: format!("package{}.json", i), 
-            size: 10, 
-            is_text: true 
+        .map(|i| RepositoryFile {
+            path: format!("package{}.json", i),
+            size: 10,
+            is_text: true,
         })
         .collect();
-    
+
     mock_client.add_repo(owner, repo, files);
 
     let service = RepositoryAnalysisServiceImpl::new(
@@ -304,14 +343,17 @@ async fn test_analyze_repository_max_files_truncation() {
         return_packages: true,
     };
 
-    let result = service.analyze_repository(input).await.expect("Analysis failed");
+    let result = service
+        .analyze_repository(input)
+        .await
+        .expect("Analysis failed");
 
-    // The service asks the client for `max_files`. 
+    // The service asks the client for `max_files`.
     // Our mock respects that and returns 3 files.
     // The service then processes those 3.
-    // The `truncated` flag in result depends on logic: 
+    // The `truncated` flag in result depends on logic:
     // `truncated: (filtered.len() as u32) >= max_files`
-    
+
     assert_eq!(result.total_files_scanned, 3);
     assert!(result.truncated);
 }

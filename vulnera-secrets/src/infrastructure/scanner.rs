@@ -49,7 +49,7 @@ impl DirectoryScanner {
         let mut skipped_size_count = 0;
 
         let walker = walkdir::WalkDir::new(root).max_depth(self.max_depth);
-        
+
         // Use filter_entry to skip excluded directories efficiently
         let it = walker.into_iter().filter_entry(|e| {
             if e.file_type().is_dir() {
@@ -76,7 +76,7 @@ impl DirectoryScanner {
                     continue;
                 }
             };
-            
+
             let path = entry.path();
 
             if entry.file_type().is_file() {
@@ -88,7 +88,7 @@ impl DirectoryScanner {
                         continue;
                     }
                 };
-                
+
                 let file_size = metadata.len();
 
                 if file_size > self.max_file_size {

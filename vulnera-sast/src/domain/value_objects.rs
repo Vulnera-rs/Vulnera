@@ -30,7 +30,7 @@ impl Language {
         std::path::Path::new(filename)
             .extension()
             .and_then(|ext| ext.to_str())
-            .and_then(|ext| Self::from_extension(ext))
+            .and_then(Self::from_extension)
     }
 }
 

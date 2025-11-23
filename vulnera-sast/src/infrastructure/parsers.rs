@@ -113,6 +113,12 @@ impl Parser for JavaScriptParser {
 /// Rust parser using syn
 pub struct RustParser;
 
+impl Default for RustParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustParser {
     pub fn new() -> Self {
         Self
@@ -242,7 +248,7 @@ fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
             }
         }
         syn::Expr::MethodCall(method_call) => {
-            let mut children = vec![convert_syn_expr(&method_call.receiver, source)];
+            let children = vec![convert_syn_expr(&method_call.receiver, source)];
             AstNode {
                 node_type: "call".to_string(),
                 start_byte: 0,

@@ -14,6 +14,12 @@ use tracing::debug;
 /// Rule engine for matching security patterns
 pub struct RuleEngine;
 
+impl Default for RuleEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RuleEngine {
     pub fn new() -> Self {
         Self
