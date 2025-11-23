@@ -7,9 +7,7 @@ use axum::{
 };
 use std::sync::Arc;
 
-use vulnera_core::application::auth::use_cases::{
-    ValidateApiKeyUseCase, ValidateTokenUseCase,
-};
+use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
 
