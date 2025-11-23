@@ -48,27 +48,47 @@ impl DirectoryScanner {
         let mut excluded_count = 0;
         let mut skipped_size_count = 0;
 
-        for entry in walkdir::WalkDir::new(root).max_depth(self.max_depth) {
-            let entry = entry?;
-            let path = entry.path();
-
-            // Skip excluded directories
-            if entry.file_type().is_dir() {
-                if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
+        let walker = walkdir::WalkDir::new(root).max_depth(self.max_depth);
+        
+        // Use filter_entry to skip excluded directories efficiently
+        let it = walker.into_iter().filter_entry(|e| {
+            if e.file_type().is_dir() {
+                if let Some(dir_name) = e.file_name().to_str() {
                     if self.exclude_patterns.iter().any(|p| {
                         dir_name.contains(p)
                             || p.contains('*') && dir_name.matches(&p.replace('*', "")).count() > 0
                     }) {
-                        trace!(directory = %dir_name, "Excluding directory");
-                        excluded_count += 1;
-                        continue;
+                        // We can't easily increment excluded_count here because it's a closure
+                        // but this is much more efficient
+                        return false;
                     }
                 }
             }
+            true
+        });
+
+        for entry in it {
+            // Handle errors (e.g. permission denied) by skipping
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!(error = %e, "Error accessing file entry");
+                    continue;
+                }
+            };
+            
+            let path = entry.path();
 
             if entry.file_type().is_file() {
                 // Check file size
-                let metadata = entry.metadata()?;
+                let metadata = match entry.metadata() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!(file = %path.display(), error = %e, "Failed to get metadata");
+                        continue;
+                    }
+                };
+                
                 let file_size = metadata.len();
 
                 if file_size > self.max_file_size {
@@ -96,7 +116,6 @@ impl DirectoryScanner {
 
         debug!(
             file_count = files.len(),
-            excluded_dirs = excluded_count,
             skipped_size = skipped_size_count,
             "Directory scan completed"
         );
