@@ -45,7 +45,6 @@ impl DirectoryScanner {
     #[instrument(skip(self), fields(root = %root.display(), max_depth = self.max_depth))]
     pub fn scan(&self, root: &Path) -> Result<Vec<ScanFile>, std::io::Error> {
         let mut files = Vec::new();
-        let excluded_count = 0;
         let mut skipped_size_count = 0;
 
         let walker = walkdir::WalkDir::new(root).max_depth(self.max_depth);
@@ -58,8 +57,6 @@ impl DirectoryScanner {
                         dir_name.contains(p)
                             || p.contains('*') && dir_name.matches(&p.replace('*', "")).count() > 0
                     }) {
-                        // We can't easily increment excluded_count here because it's a closure
-                        // but this is much more efficient
                         return false;
                     }
                 }

@@ -414,6 +414,10 @@ pub struct AnalysisConfig {
     pub max_concurrent_registry_queries: usize,
     /// Maximum concurrent API calls per source
     pub max_concurrent_api_calls: usize,
+    /// Maximum number of jobs buffered before back-pressure is applied
+    pub job_queue_capacity: usize,
+    /// Maximum number of concurrent background workers processing jobs
+    pub max_job_workers: usize,
 }
 
 impl Default for AnalysisConfig {
@@ -422,6 +426,8 @@ impl Default for AnalysisConfig {
             max_concurrent_packages: 3,
             max_concurrent_registry_queries: 5,
             max_concurrent_api_calls: 10,
+            job_queue_capacity: 32,
+            max_job_workers: 4,
         }
     }
 }
@@ -696,6 +702,8 @@ impl Default for Config {
                 max_concurrent_packages: 3,
                 max_concurrent_registry_queries: 5,
                 max_concurrent_api_calls: 10,
+                job_queue_capacity: 32,
+                max_job_workers: 4,
             },
             sast: SastConfig::default(),
             secret_detection: SecretDetectionConfig::default(),

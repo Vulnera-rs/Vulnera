@@ -53,6 +53,8 @@ use axum::{
         schemas(
             AnalysisRequest,
             FinalReportResponse,
+            JobAcceptedResponse,
+            JobInvocationContextDto,
             JobStatusResponse,
             ErrorResponse,
             HealthResponse,
