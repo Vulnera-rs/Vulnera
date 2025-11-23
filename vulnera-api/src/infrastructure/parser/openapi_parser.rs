@@ -305,16 +305,7 @@ impl OpenApiParser {
 
         let parameters = Self::parse_parameters(&operation.parameters, schema_resolver);
         let request_body = Self::parse_request_body(
-            operation
-                .request_body
-                .as_ref()
-                .unwrap_or(&oas3::spec::ObjectOrReference::Object(
-                    oas3::spec::RequestBody {
-                        description: None,
-                        content: std::collections::BTreeMap::new(),
-                        required: None,
-                    },
-                )),
+            operation.request_body.as_ref(),
             schema_resolver,
         );
         let responses = Self::parse_responses(
@@ -376,22 +367,23 @@ impl OpenApiParser {
     }
 
     fn parse_request_body(
-        rb_ref: &oas3::spec::ObjectOrReference<oas3::spec::RequestBody>,
+        rb_ref: Option<&oas3::spec::ObjectOrReference<oas3::spec::RequestBody>>,
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Option<ApiRequestBody> {
         match rb_ref {
-            oas3::spec::ObjectOrReference::Object(rb) => {
+            Some(oas3::spec::ObjectOrReference::Object(rb)) => {
                 let content = Self::parse_content(&Some(rb.content.clone()), schema_resolver);
                 Some(ApiRequestBody {
                     required: rb.required.unwrap_or(false),
                     content,
                 })
             }
-            oas3::spec::ObjectOrReference::Ref { .. } => {
+            Some(oas3::spec::ObjectOrReference::Ref { .. }) => {
                 // We could resolve request body refs here too if we extracted them
                 warn!("Skipping request body reference");
                 None
             }
+            None => None,
         }
     }
 
