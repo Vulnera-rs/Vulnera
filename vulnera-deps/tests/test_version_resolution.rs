@@ -2,16 +2,16 @@
 
 use std::collections::HashMap;
 use vulnera_core::domain::vulnerability::value_objects::{Ecosystem, Version};
-use vulnera_deps::domain::{DependencyGraph, PackageId, PackageNode, VersionConstraint, DependencyEdge};
-use vulnera_deps::services::resolution_algorithms::{
-    BacktrackingResolver, LexicographicOptimizer, ResolutionResult,
+use vulnera_deps::domain::{
+    DependencyEdge, DependencyGraph, PackageId, PackageNode, VersionConstraint,
 };
+use vulnera_deps::services::resolution_algorithms::{BacktrackingResolver, LexicographicOptimizer};
 
 fn create_version(v: &str) -> Version {
     Version::parse(v).unwrap()
 }
 
-fn create_package_id(name: &str) -> PackageId {
+fn _create_package_id(name: &str, _version: &str) -> PackageId {
     PackageId::new("npm".to_string(), name.to_string())
 }
 
@@ -82,20 +82,21 @@ fn test_backtracking_resolver_basic() {
         "a".to_string(),
         create_version("1.0.0"),
         Ecosystem::Npm,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     let node_a = PackageNode::new(pkg_a);
     let id_a = node_a.id.clone();
     graph.add_node(node_a);
 
     let mut available_versions = HashMap::new();
-    available_versions.insert(id_a.clone(), vec![
-        create_version("1.0.0"),
-        create_version("1.1.0"),
-    ]);
+    available_versions.insert(
+        id_a.clone(),
+        vec![create_version("1.0.0"), create_version("1.1.0")],
+    );
 
     let result = BacktrackingResolver::resolve(&graph, &available_versions);
-    
+
     assert!(result.conflicts.is_empty());
     assert_eq!(result.resolved.get(&id_a), Some(&create_version("1.1.0"))); // Should pick latest
 }
@@ -107,8 +108,9 @@ fn test_backtracking_resolver_conflict() {
         "a".to_string(),
         create_version("1.0.0"),
         Ecosystem::Npm,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     let node_a = PackageNode::new(pkg_a);
     let id_a = node_a.id.clone();
     graph.add_node(node_a);
@@ -117,7 +119,7 @@ fn test_backtracking_resolver_conflict() {
     let available_versions = HashMap::new();
 
     let result = BacktrackingResolver::resolve(&graph, &available_versions);
-    
+
     assert!(!result.conflicts.is_empty());
     assert_eq!(result.conflicts[0].package, id_a);
 }
@@ -130,21 +132,23 @@ fn test_backtracking_resolver_with_dependencies() {
         "a".to_string(),
         create_version("1.0.0"),
         Ecosystem::Npm,
-    ).unwrap();
+    )
+    .unwrap();
     let pkg_b = vulnera_core::domain::vulnerability::entities::Package::new(
         "b".to_string(),
         create_version("1.0.0"),
         Ecosystem::Npm,
-    ).unwrap();
-    
+    )
+    .unwrap();
+
     let node_a = PackageNode::new(pkg_a);
     let node_b = PackageNode::new(pkg_b);
     let id_a = node_a.id.clone();
     let id_b = node_b.id.clone();
-    
+
     graph.add_node(node_a);
     graph.add_node(node_b);
-    
+
     graph.add_edge(DependencyEdge::new(
         id_a.clone(),
         id_b.clone(),
@@ -157,7 +161,7 @@ fn test_backtracking_resolver_with_dependencies() {
     available_versions.insert(id_b.clone(), vec![create_version("2.0.0")]);
 
     let result = BacktrackingResolver::resolve(&graph, &available_versions);
-    
+
     assert!(result.conflicts.is_empty());
     assert_eq!(result.resolved.get(&id_a), Some(&create_version("1.0.0")));
     assert_eq!(result.resolved.get(&id_b), Some(&create_version("2.0.0")));

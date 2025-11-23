@@ -178,10 +178,10 @@ async fn test_analyze_dependencies_cache_hit() {
     let mock_repo = Arc::new(MockVulnerabilityRepository::new());
     let mock_cache = Arc::new(MockCacheService::new());
 
-    let use_case =
+    let _use_case =
         AnalyzeDependenciesUseCase::new(parser_factory, mock_repo, mock_cache.clone(), 10);
 
-    let content = r#"
+    let _content = r#"
         [package]
         name = "test-pkg"
         version = "0.1.0"
@@ -223,7 +223,7 @@ async fn test_analyze_dependencies_cache_hit() {
     // The caching logic is hard to test without controlling the file system or `AnalysisContext`.
 
     let (report, _) = use_case_with_ctx
-        .execute(content, Ecosystem::Cargo, Some("Cargo.toml"))
+        .execute(_content, Ecosystem::Cargo, Some("Cargo.toml"))
         .await
         .expect("Analysis failed");
     assert_eq!(report.metadata.total_packages, 1);
@@ -237,7 +237,7 @@ async fn test_analyze_dependencies_empty() {
 
     let use_case = AnalyzeDependenciesUseCase::new(parser_factory, mock_repo, mock_cache, 10);
 
-    let content = ""; // Empty content
+    let _content = ""; // Empty content
     // Cargo parser might fail on empty content, so let's use a valid but empty manifest
     let content = r#"
         [package]

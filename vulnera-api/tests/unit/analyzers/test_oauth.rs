@@ -2,8 +2,7 @@
 
 use vulnera_api::domain::entities::FindingSeverity;
 use vulnera_api::domain::value_objects::{
-    ApiOperation, ApiPath, ApiVulnerabilityType, OAuthFlow, OAuthFlowType, OAuthScope, OpenApiSpec,
-    SecurityScheme, SecuritySchemeType,
+    ApiVulnerabilityType, OAuthFlow, OAuthFlowType, OpenApiSpec, SecurityScheme, SecuritySchemeType,
 };
 use vulnera_api::infrastructure::analyzers::OAuthAnalyzer;
 

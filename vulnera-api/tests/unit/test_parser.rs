@@ -313,3 +313,45 @@ paths:
     assert_eq!(operation.parameters[1].name, "filter");
     assert!(!operation.parameters[1].required);
 }
+
+#[test]
+fn test_parse_schema_references() {
+    let content = include_str!("../fixtures/schema_refs.yaml");
+    let result = OpenApiParser::parse(content, Path::new("test.yaml"));
+
+    assert!(
+        result.is_ok(),
+        "Failed to parse spec with schema references"
+    );
+    let spec = result.unwrap();
+
+    // Should have 2 paths
+    assert_eq!(spec.paths.len(), 2);
+
+    // Check that response schemas are present (not empty due to unresolved refs)
+    let get_users = &spec.paths[0].operations[0];
+    assert!(!get_users.responses.is_empty());
+    assert!(!get_users.responses[0].content.is_empty());
+
+    // The schema should be resolved (not empty)
+    let response_schema = &get_users.responses[0].content[0].schema;
+    assert!(
+        response_schema.is_some(),
+        "Response schema should be resolved"
+    );
+}
+
+#[test]
+fn test_circular_references_handled() {
+    let content = include_str!("../fixtures/circular_refs.yaml");
+    let result = OpenApiParser::parse(content, Path::new("test.yaml"));
+
+    // Should not panic on circular references
+    assert!(
+        result.is_ok(),
+        "Should handle circular references gracefully"
+    );
+    let spec = result.unwrap();
+
+    assert_eq!(spec.paths.len(), 1);
+}
