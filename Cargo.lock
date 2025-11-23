@@ -5197,6 +5197,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-javascript",
  "tree-sitter-python",
+ "uuid",
  "vulnera-core",
  "walkdir",
 ]

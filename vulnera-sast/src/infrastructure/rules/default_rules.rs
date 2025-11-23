@@ -59,7 +59,7 @@ pub fn null_pointer_rule() -> Rule {
         description: "Potential null pointer dereference".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::Rust], // More relevant for Rust
-        pattern: RulePattern::AstNodeType("unwrap".to_string()),
+        pattern: RulePattern::FunctionCall("unwrap".to_string()),
     }
 }
 
