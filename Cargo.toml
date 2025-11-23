@@ -110,13 +110,6 @@ hex = "0.4.3"
 moka = { version = "0.12", features = ["future"] }
 flate2 = "1.0"
 
-# Redis client for Dragonfly DB
-redis = { version = "0.32.7", features = [
-    "tokio-comp",
-    "connection-manager",
-    "aio",
-] }
-
 # Authentication and security
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 bcrypt = "0.17.1"
@@ -165,9 +158,8 @@ proptest = "1.5.1"
 mockall = "0.13.1"
 criterion = { version = "0.7.0", features = ["html_reports", "async_tokio"] }
 insta = { version = "1.40.0", features = ["redactions", "json"] }
-snapbox = "0.6.23"
 datatest-stable = "0.3.3"
-testcontainers = { version = "0.25.2", features = ["postgres", "async"] }
+testcontainers = { version = "0.25.2" }
 wiremock = "0.6.0"
 rstest = "0.26.1"
 axum-test = "18.1"

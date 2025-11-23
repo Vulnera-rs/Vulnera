@@ -1,15 +1,32 @@
 //! Integration tests for cache system
 
 use std::time::Duration;
+use testcontainers::{GenericImage, core::WaitFor, runners::AsyncRunner};
 use vulnera_core::application::vulnerability::services::CacheService;
 use vulnera_core::infrastructure::cache::DragonflyCache;
 
+async fn start_redis() -> (testcontainers::ContainerAsync<GenericImage>, String) {
+    let container = GenericImage::new("redis", "7-alpine")
+        .with_wait_for(WaitFor::message_on_stdout("Ready to accept connections"))
+        .start()
+        .await
+        .expect("Failed to start Redis container");
+
+    let port = container
+        .get_host_port_ipv4(6379)
+        .await
+        .expect("Failed to get port");
+    let url = format!("redis://127.0.0.1:{}", port);
+
+    (container, url)
+}
+
 /// Integration test for DragonflyCache
-/// Requires a running Dragonfly DB instance at redis://127.0.0.1:6379
 #[tokio::test]
-#[ignore] // Ignore by default, requires Dragonfly DB instance
 async fn test_dragonfly_cache_integration() {
-    let cache = DragonflyCache::new("redis://127.0.0.1:6379", false, 0)
+    let (_container, url) = start_redis().await;
+
+    let cache = DragonflyCache::new(&url, false, 0)
         .await
         .expect("Failed to create DragonflyCache");
 
@@ -36,9 +53,10 @@ async fn test_dragonfly_cache_integration() {
 
 /// Integration test for DragonflyCache with compression
 #[tokio::test]
-#[ignore]
 async fn test_dragonfly_cache_compression_integration() {
-    let cache = DragonflyCache::new("redis://127.0.0.1:6379", true, 100)
+    let (_container, url) = start_redis().await;
+
+    let cache = DragonflyCache::new(&url, true, 100)
         .await
         .expect("Failed to create DragonflyCache");
 
@@ -64,9 +82,10 @@ async fn test_dragonfly_cache_compression_integration() {
 
 /// Integration test for DragonflyCache TTL expiration
 #[tokio::test]
-#[ignore]
 async fn test_dragonfly_cache_ttl_integration() {
-    let cache = DragonflyCache::new("redis://127.0.0.1:6379", false, 0)
+    let (_container, url) = start_redis().await;
+
+    let cache = DragonflyCache::new(&url, false, 0)
         .await
         .expect("Failed to create DragonflyCache");
 

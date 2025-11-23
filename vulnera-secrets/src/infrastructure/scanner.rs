@@ -45,7 +45,7 @@ impl DirectoryScanner {
     #[instrument(skip(self), fields(root = %root.display(), max_depth = self.max_depth))]
     pub fn scan(&self, root: &Path) -> Result<Vec<ScanFile>, std::io::Error> {
         let mut files = Vec::new();
-        let mut excluded_count = 0;
+        let excluded_count = 0;
         let mut skipped_size_count = 0;
 
         let walker = walkdir::WalkDir::new(root).max_depth(self.max_depth);
