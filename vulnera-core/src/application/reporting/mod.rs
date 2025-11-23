@@ -1,7 +1,7 @@
 //! Reporting module for vulnerability analysis reports
 //!
 //! This module provides services for generating and formatting vulnerability analysis reports
-//! in various output formats (JSON, HTML, text).
+//! in JSON and plaintext formats.
 
 pub mod formats;
 pub mod models;
