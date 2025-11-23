@@ -188,7 +188,7 @@ impl PackageLockParser {
 
                     // Extract the actual package name based on the lockfile format
                     let name = if is_packages_section {
-                        // In v2/v3 lockfiles, the "packages" section uses:
+                        // In lockfileVersion 2/3 (npm v7+), the "packages" section uses:
                         // - "" (empty string) for the root package
                         // - "node_modules/package-name" for other packages
                         if key.is_empty() {
@@ -217,9 +217,9 @@ impl PackageLockParser {
 
                     packages.push(package.clone());
 
-                    // Extract dependencies from 'requires' (v1) or 'dependencies' (v2/v3 packages)
+                    // Extract dependencies from 'requires' (v1) or 'dependencies' (lockfileVersion 2/3 packages)
                     // Note: In v1 'dependencies' is the nested tree, 'requires' is the logical deps.
-                    // In v2/v3 'packages' entries, 'dependencies' is the logical deps.
+                    // In lockfileVersion 2/3 'packages' entries, 'dependencies' is the logical deps.
                     // We check both 'requires' and 'dependencies' here but treat them as logical deps if they are simple key-value pairs
                     // However, 'dependencies' in v1 is nested objects, so we need to be careful.
                     // A simple heuristic: if the value is a string, it's a version requirement (logical dep).
@@ -255,7 +255,7 @@ impl PackageLockParser {
                     };
 
                     extract_edges_from("requires");
-                    // For v2/v3 'packages' entries, 'dependencies' lists logical deps as strings
+                    // For lockfileVersion 2/3 'packages' entries, 'dependencies' lists logical deps as strings
                     // But we need to distinguish from v1 'dependencies' which are objects.
                     if let Some(deps_val) = dep_info.get("dependencies") {
                         if let Some(deps_obj) = deps_val.as_object() {
@@ -325,7 +325,7 @@ impl PackageFileParser for PackageLockParser {
             result.dependencies.extend(res.dependencies);
         }
 
-        // Extract from packages section (npm v2/v3 lockfiles, npm v7+)
+        // Extract from packages section (lockfileVersion 2/3, npm v7+)
         if let Some(pkgs) = json.get("packages") {
             let res = Self::extract_lockfile_data(pkgs, true)?;
             result.packages.extend(res.packages);
