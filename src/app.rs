@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
+use tokio::sync::mpsc;
 use vulnera_api::ApiSecurityModule;
 use vulnera_core::Config;
 use vulnera_deps::DependencyAnalyzerModule;
@@ -12,8 +13,8 @@ use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
 use vulnera_orchestrator::infrastructure::{
-    DragonflyJobStore, FileSystemProjectDetector, GitService, GitServiceConfig, ModuleRegistry,
-    RuleBasedModuleSelector,
+    DragonflyJobStore, FileSystemProjectDetector, GitService, GitServiceConfig, JobQueueHandle,
+    JobWorkerContext, ModuleRegistry, RuleBasedModuleSelector, spawn_job_worker_pool,
 };
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 use vulnera_orchestrator::presentation::routes::create_router;
@@ -273,6 +274,17 @@ pub async fn create_app(
     let execute_job_use_case = Arc::new(ExecuteAnalysisJobUseCase::new(Arc::new(module_registry)));
     let aggregate_results_use_case = Arc::new(AggregateResultsUseCase::new());
 
+    // Initialize background job queue and worker pool
+    let (job_tx, job_rx) = mpsc::channel(config.analysis.job_queue_capacity);
+    let job_queue_handle = JobQueueHandle::new(job_tx);
+    let worker_context = JobWorkerContext {
+        execute_job_use_case: execute_job_use_case.clone(),
+        aggregate_results_use_case: aggregate_results_use_case.clone(),
+        job_store: job_store.clone(),
+        git_service: git_service.clone(),
+    };
+    spawn_job_worker_pool(job_rx, worker_context, config.analysis.max_job_workers);
+
     // Initialize auth repositories
     let user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository> =
         Arc::new(SqlxUserRepository::new(db_pool.clone()));
@@ -325,6 +337,7 @@ pub async fn create_app(
         aggregate_results_use_case,
         git_service: git_service.clone(),
         job_store,
+        job_queue: job_queue_handle.clone(),
         cache_service,
         report_service,
         vulnerability_repository,
