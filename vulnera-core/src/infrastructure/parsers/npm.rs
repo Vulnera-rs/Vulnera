@@ -171,7 +171,11 @@ impl PackageLockParser {
     }
 
     /// Extract packages and dependencies from lockfile
-    fn extract_lockfile_data(deps: &Value) -> Result<ParseResult, ParseError> {
+    /// 
+    /// # Arguments
+    /// * `deps` - The JSON value containing package data
+    /// * `is_packages_section` - True if processing "packages" section (v2/v3), false for "dependencies" section (v1)
+    fn extract_lockfile_data(deps: &Value, is_packages_section: bool) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
 
@@ -182,16 +186,29 @@ impl PackageLockParser {
                         version: version_str.to_string(),
                     })?;
 
-                    // Handle root package in v2/v3 lockfiles (key is empty string)
-                    let name = if key.is_empty() {
-                        dep_info
-                            .get("name")
-                            .and_then(|n| n.as_str())
-                            .map(|n| n.to_string())
-                            .ok_or_else(|| ParseError::MissingField {
-                                field: "Package name cannot be empty".to_string(),
-                            })?
+                    // Extract the actual package name based on the lockfile format
+                    let name = if is_packages_section {
+                        // In v2/v3 lockfiles, the "packages" section uses:
+                        // - "" (empty string) for the root package
+                        // - "node_modules/package-name" for other packages
+                        if key.is_empty() {
+                            // Root package: extract name from the "name" field
+                            dep_info
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .map(|n| n.to_string())
+                                .ok_or_else(|| ParseError::MissingField {
+                                    field: "Package name cannot be empty".to_string(),
+                                })?
+                        } else if let Some(stripped) = key.strip_prefix("node_modules/") {
+                            // Regular package: strip the "node_modules/" prefix to get the actual package name
+                            stripped.to_string()
+                        } else {
+                            // Fallback: use the key as-is (shouldn't happen in well-formed lockfiles)
+                            key.clone()
+                        }
                     } else {
+                        // In v1 lockfiles, the "dependencies" section uses package names directly as keys
                         key.clone()
                     };
 
@@ -266,14 +283,17 @@ impl PackageLockParser {
                 }
 
                 // Recursively process nested dependencies (physical tree)
-                if let Some(nested_deps) = dep_info.get("dependencies") {
-                    // Check if values are objects (nested deps)
-                    if let Some(deps_obj) = nested_deps.as_object() {
-                        if let Some((_, val)) = deps_obj.iter().next() {
-                            if val.is_object() {
-                                let nested_result = Self::extract_lockfile_data(nested_deps)?;
-                                packages.extend(nested_result.packages);
-                                dependencies.extend(nested_result.dependencies);
+                // This is only relevant for v1 lockfiles where dependencies are nested
+                if !is_packages_section {
+                    if let Some(nested_deps) = dep_info.get("dependencies") {
+                        // Check if values are objects (nested deps)
+                        if let Some(deps_obj) = nested_deps.as_object() {
+                            if let Some((_, val)) = deps_obj.iter().next() {
+                                if val.is_object() {
+                                    let nested_result = Self::extract_lockfile_data(nested_deps, false)?;
+                                    packages.extend(nested_result.packages);
+                                    dependencies.extend(nested_result.dependencies);
+                                }
                             }
                         }
                     }
@@ -298,16 +318,16 @@ impl PackageFileParser for PackageLockParser {
         let json: Value = serde_json::from_str(content)?;
         let mut result = ParseResult::default();
 
-        // Extract from dependencies section
+        // Extract from dependencies section (v1 lockfiles)
         if let Some(deps) = json.get("dependencies") {
-            let res = Self::extract_lockfile_data(deps)?;
+            let res = Self::extract_lockfile_data(deps, false)?;
             result.packages.extend(res.packages);
             result.dependencies.extend(res.dependencies);
         }
 
-        // Extract from packages section (npm v7+)
+        // Extract from packages section (npm v2/v3 lockfiles, npm v7+)
         if let Some(pkgs) = json.get("packages") {
-            let res = Self::extract_lockfile_data(pkgs)?;
+            let res = Self::extract_lockfile_data(pkgs, true)?;
             result.packages.extend(res.packages);
             result.dependencies.extend(res.dependencies);
         }
@@ -614,5 +634,87 @@ lodash@~4.17.21:
 
         assert!(yarn_parser.supports_file("yarn.lock"));
         assert!(!yarn_parser.supports_file("package.json"));
+    }
+
+    #[tokio::test]
+    async fn test_package_lock_v3_with_root_package() {
+        let parser = PackageLockParser::new();
+        let content = r#"
+        {
+            "name": "my-app",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": {
+                "": {
+                    "name": "my-app",
+                    "version": "1.0.0",
+                    "dependencies": {
+                        "express": "^4.17.1"
+                    }
+                },
+                "node_modules/express": {
+                    "version": "4.17.1",
+                    "resolved": "https://registry.npmjs.org/express/-/express-4.17.1.tgz",
+                    "dependencies": {
+                        "accepts": "~1.3.7"
+                    }
+                },
+                "node_modules/accepts": {
+                    "version": "1.3.7",
+                    "resolved": "https://registry.npmjs.org/accepts/-/accepts-1.3.7.tgz"
+                }
+            }
+        }
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+        
+        // Should have 3 packages: my-app, express, and accepts
+        assert_eq!(result.packages.len(), 3);
+
+        // Verify the root package is correctly named
+        let root_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "my-app")
+            .unwrap();
+        assert_eq!(root_pkg.version, Version::parse("1.0.0").unwrap());
+
+        // Verify express package name is stripped of node_modules/ prefix
+        let express_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "express")
+            .unwrap();
+        assert_eq!(express_pkg.version, Version::parse("4.17.1").unwrap());
+
+        // Verify accepts package name is stripped of node_modules/ prefix
+        let accepts_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "accepts")
+            .unwrap();
+        assert_eq!(accepts_pkg.version, Version::parse("1.3.7").unwrap());
+
+        // Verify dependencies are correctly formed
+        // Should have 2 dependency edges: my-app->express and express->accepts
+        assert_eq!(result.dependencies.len(), 2);
+
+        // Verify the root package depends on express
+        let root_dep = result
+            .dependencies
+            .iter()
+            .find(|d| d.from.name == "my-app" && d.to.name == "express")
+            .expect("Root package should depend on express");
+        assert_eq!(root_dep.requirement, "^4.17.1");
+
+        // Verify express depends on accepts
+        let express_dep = result
+            .dependencies
+            .iter()
+            .find(|d| d.from.name == "express" && d.to.name == "accepts")
+            .expect("Express should depend on accepts");
+        assert_eq!(express_dep.requirement, "~1.3.7");
     }
 }
