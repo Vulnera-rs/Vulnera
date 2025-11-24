@@ -80,22 +80,34 @@ pub struct AnalysisResponse {
     pub pagination: PaginationDto,
 }
 
+/// Module execution result
+#[derive(Serialize, ToSchema)]
+pub struct ModuleResultDto {
+    pub module_type: String,
+    pub status: String,
+    pub files_scanned: usize,
+    pub duration_ms: u64,
+    pub findings_count: usize,
+    pub metadata: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 /// Job status response
 #[derive(Serialize, ToSchema)]
 pub struct JobStatusResponse {
     pub job_id: Uuid,
     pub project_id: String,
     pub status: String,
-    pub modules_completed: usize,
-    pub modules_failed: usize,
+    pub summary: crate::domain::entities::Summary,
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub error: Option<String>,
     pub callback_url: Option<String>,
     pub invocation_context: Option<JobInvocationContextDto>,
-    pub summary: Option<crate::domain::entities::ReportSummary>,
-    pub findings: Option<Vec<vulnera_core::domain::module::Finding>>,
+
+    pub modules: Vec<ModuleResultDto>,
+    pub findings_by_type: crate::domain::entities::FindingsByType,
 }
 
 /// Response returned when a job is accepted for asynchronous processing
@@ -137,8 +149,8 @@ impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContex
 pub struct FinalReportResponse {
     pub job_id: Uuid,
     pub status: String,
-    pub summary: crate::domain::entities::ReportSummary,
-    pub findings: Vec<vulnera_core::domain::module::Finding>,
+    pub summary: crate::domain::entities::Summary,
+    pub findings_by_type: crate::domain::entities::FindingsByType,
 }
 
 impl AnalysisRequest {

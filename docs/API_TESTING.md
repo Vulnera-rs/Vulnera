@@ -170,7 +170,7 @@ curl -H "Authorization: Bearer <access_token>" \
   http://localhost:3000/api/v1/jobs/550e8400-e29b-41d4-a716-446655440000
 ```
 
-When the background workers finish, `GET /api/v1/jobs/{id}` includes the aggregated `summary`, `findings`, and the API key/user metadata used to launch the scan. Provide a `callback_url` in the original request to receive future webhook deliveries once transport code is wired up.
+When the background workers finish, `GET /api/v1/jobs/{id}` includes the aggregated `summary`, `modules`, and `findings_by_type` (grouped by SAST, Secrets, Dependencies). Provide a `callback_url` in the original request to receive future webhook deliveries once transport code is wired up.
 
 ## Error Testing
 

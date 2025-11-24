@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use vulnera_core::domain::module::{Finding, ModuleResult};
+use vulnera_core::domain::module::ModuleResult;
 
-use crate::domain::entities::{JobInvocationContext, ProjectMetadata, ReportSummary};
+use crate::domain::entities::{FindingsByType, JobInvocationContext, ProjectMetadata, Summary};
 use crate::domain::value_objects::JobStatus;
 
 /// Snapshot of job execution state for replay and retrieval.
@@ -22,6 +22,6 @@ pub struct JobSnapshot {
     pub module_configs: HashMap<String, serde_json::Value>,
     pub callback_url: Option<String>,
     pub invocation_context: Option<JobInvocationContext>,
-    pub summary: Option<ReportSummary>,
-    pub findings: Option<Vec<Finding>>,
+    pub summary: Option<Summary>,
+    pub findings_by_type: Option<FindingsByType>,
 }

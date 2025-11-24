@@ -138,7 +138,7 @@ pub async fn analyze(
         callback_url: callback_url.clone(),
         invocation_context: invocation_context.clone(),
         summary: None,
-        findings: None,
+        findings_by_type: None,
     };
     if let Err(e) = state.job_store.save_snapshot(snapshot).await {
         error!(job_id = %job_id, error = %e, "Failed to persist pending job snapshot");

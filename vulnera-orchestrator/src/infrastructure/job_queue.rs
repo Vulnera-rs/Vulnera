@@ -190,7 +190,7 @@ async fn process_job(
                     callback_url: payload.callback_url.clone(),
                     invocation_context: payload.invocation_context.clone(),
                     summary: Some(report.summary.clone()),
-                    findings: Some(report.findings.clone()),
+                    findings_by_type: Some(report.findings_by_type.clone()),
                 },
             )
             .await?;
@@ -226,7 +226,7 @@ async fn process_job(
                     callback_url: payload.callback_url.clone(),
                     invocation_context: payload.invocation_context.clone(),
                     summary: None,
-                    findings: None,
+                    findings_by_type: None,
                 },
             )
             .await?;
