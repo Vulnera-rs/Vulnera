@@ -3,6 +3,212 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.3.1] - 2025-11-24
+
+### Added
+
+- **Asynchronous Job Processing with Persistent Queue:**
+  - Implemented background job queue with Redis/Dragonfly persistence
+  - `JobQueueHandle` for enqueuing analysis jobs asynchronously
+  - `JobWorkerContext` for managing worker pool execution
+  - Worker pool spawns with configurable concurrency via `VULNERA__ANALYSIS__MAX_JOB_WORKERS`
+  - Jobs persist across service restarts (no data loss on crash)
+  - Horizontal scalability support (multiple workers can poll same queue)
+  - Job status tracking and snapshot persistence via `DragonflyJobStore`
+  - Added `lpush` and `brpop` methods to `DragonflyCache` for queue operations
+  - Queue key: `vulnera:orchestrator:job_queue` with 5-second blocking timeout
+  - Job serialization/deserialization support via serde
+
+- **Enhanced Project Detection:**
+  - Expanded framework detection (Django, React, Docker)
+  - Added `frameworks` field to `ProjectMetadata` for storing detected frameworks
+  - Added `detected_config_files` field to `ProjectMetadata` for tracking configuration files
+  - Increased directory traversal depth from 3 to 5 levels
+  - Intelligent directory filtering (skips `node_modules`, `target`, `vendor`, `venv`, `__pycache__`, hidden dirs)
+  - Enhanced language detection for JavaScript, TypeScript, Python, Rust, Go, Java, PHP
+  - Framework-specific file detection:
+    - Django: `manage.py` detection
+    - React: Filename-based detection
+    - Docker: `Dockerfile`, `docker-compose.yml`, `docker-compose.yaml`
+  - Configuration file tracking for package managers: `package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`, `composer.json`
+
+- **Intelligent Module Selection:**
+  - Rule-based module selector now leverages framework metadata
+  - API Security module activated conditionally for Django, FastAPI, Spring frameworks
+  - IaC (Infrastructure as Code) module activated for Docker configurations
+  - Context-aware security scanning based on detected project characteristics
+
+- **Enhanced Parser Support:**
+  - **Go Parser:** Improved `go.mod` parsing with better dependency extraction and graph building
+  - **C/C++ Parser:** Added tree-sitter-based parsing for C and C++ with AST conversion
+  - **Rust Parser:** Enhanced with detailed AST conversion via `syn` crate for comprehensive code analysis
+  - **NPM Parser:** Improved `package-lock.json` handling for v2/v3 lockfiles, root package name extraction
+  - **Dependency Graph Extraction:** All ecosystem parsers now extract dependency edges and relationships
+  - Added `ParseResult` struct to capture both packages and their dependency graph
+  - Integration with `petgraph` crate for advanced graph operations
+
+- **OpenAPI Parser Enhancements:**
+  - Schema reference resolver with circular reference detection
+  - Schema caching for improved performance
+  - Enhanced `ApiSchema` and `ApiProperty` with additional metadata fields
+  - Support for both JSON and YAML OpenAPI specifications via `oas3` crate
+  - Comprehensive unit tests for parser and analyzers
+
+- **SAST Module Improvements:**
+  - Added security rules for Go, C/C++, Python, JavaScript, and Rust
+  - Comprehensive integration tests for multi-language SAST scanning
+  - Improved pattern matching and confidence scoring
+  - Language-specific security anti-patterns detection
+
+- **Secrets Detection Enhancements:**
+  - Improved entropy detection logic for high-entropy string identification
+  - Enhanced GitHub and GitLab token verifiers with comprehensive testing
+  - Added test fixtures for AWS, generic secrets, and various credential types
+  - Property-based testing for entropy calculations using `proptest`
+
+- **Comprehensive Test Coverage:**
+  - OpenAPI parser unit tests with multiple test fixtures (circular refs, OAuth flows, schema refs)
+  - Authentication/OAuth analyzer unit tests
+  - Dependency resolution integration tests for NPM and Cargo ecosystems
+  - Repository analysis integration tests with rate limiting and file size constraints
+  - Version resolution service integration tests
+  - SAST integration tests for all supported languages
+  - Secret detection unit and property-based tests
+  - Cache integration tests with improved assertions
+
+### Changed
+
+- **Job Processing Architecture:**
+  - Migrated from in-memory `mpsc` channel to Dragonfly-backed persistent queue
+  - Removed synchronous job execution in favor of asynchronous background processing
+  - `QueuedAnalysisJob` now includes `AnalysisJob`, `Project`, `callback_url`, and `invocation_context`
+  - Job workers continuously poll queue with semaphore-based concurrency control
+  - Application wiring in `app.rs` updated to initialize new job queue architecture
+
+- **Dependency Analysis:**
+  - `BacktrackingResolver` improved to handle cases with no available versions
+  - Added appropriate conflict messages for dependency resolution failures
+  - Manifest and lockfile graph building enhanced for NPM and Cargo
+
+- **Code Quality and Formatting:**
+  - Cleaned up code formatting across test files and modules
+  - Fixed import statement formatting in `extractors.rs`
+  - Removed unused `excluded_count` variable in `DirectoryScanner`
+  - Removed mutable reference for job creation in analyze function
+  - Simplified `RequestBody` parsing to accept `Option` parameter
+
+- **Configuration:**
+  - Migrated from `serde_yaml` to `serde_yml` for consistency
+  - Updated OpenAPI parser configuration to use `oas3` crate
+  - Enhanced cache configuration with additional validation
+
+### Removed
+
+- **HTML Report Generation:**
+  - Removed HTML report generation code and related module (`formats/html.rs`)
+  - Cleaned up HTML-specific dependencies and report service methods
+  - Focus shifted to JSON/SARIF formats for programmatic consumption
+
+### Fixed
+
+- Import statement formatting issues in authentication extractors
+- Unused variable warnings in directory scanner
+- Mutable reference issues in job creation flow
+- NPM parser root package name handling in lockfile v2/v3
+- Cache integration test assertions and reliability
+
+### Configuration
+
+New environment variables for job queue and enhanced detection:
+
+```bash
+# Job Queue Configuration
+VULNERA__ANALYSIS__MAX_JOB_WORKERS=4  # Maximum concurrent job workers
+
+# Queue is stored in Dragonfly/Redis at key: vulnera:orchestrator:job_queue
+# Ensure Dragonfly is running and configured via:
+VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
+```
+
+### Testing
+
+Added comprehensive test suites:
+- 95 files changed, 6858 insertions, 803 deletions
+- New test fixtures for OpenAPI validation scenarios
+- Integration tests for dependency resolution across ecosystems
+- Property-based tests for entropy detection
+- Multi-language SAST integration tests
+- Secret detection verifier tests
+
+### Technical Details
+
+- **Job Queue Implementation:**
+  - Uses Redis `LPUSH` for enqueuing (left push to queue)
+  - Uses Redis `BRPOP` with 5-second timeout for dequeuing (blocking right pop)
+  - Serializes job payloads to JSON via `serde_json`
+  - Worker pool respects `max_concurrent_jobs` configuration via `tokio::sync::Semaphore`
+  - Job snapshots persist to Dragonfly with 1-hour TTL for replay/debugging
+
+- **Project Detection Implementation:**
+  - `FileSystemProjectDetector` uses `walkdir` with depth-first traversal
+  - Filter function allows root directory (depth 0) for temp directory handling
+  - Comprehensive file extension and filename pattern matching
+  - Framework detection via heuristics (e.g., `manage.py` → Django)
+
+- **Parser Enhancements:**
+  - Dependency graph extraction uses `petgraph` for relationship modeling
+  - Tree-sitter integration for C/C++ provides robust AST parsing
+  - Syn crate integration for Rust enables proc-macro-based analysis
+
+### Performance Improvements
+
+- Schema caching in OpenAPI parser reduces redundant parsing
+- Dependency graph pre-allocation optimizes memory usage
+- Concurrent job processing via worker pool improves throughput
+- Persistent queue eliminates job re-processing on restart
+
+### Breaking Changes
+
+- **Job API Behavior Change:** Jobs are now processed asynchronously in background workers
+  - `POST /api/v1/analyze/job` immediately returns job ID without waiting for completion
+  - Clients must poll job status or use webhooks (via `callback_url`) for completion notification
+  - Previous synchronous behavior removed in favor of scalable async architecture
+
+### Migration Guide
+
+For upgrading from 0.3.0 to 0.3.1:
+
+1. **Ensure Dragonfly/Redis is running:**
+   ```bash
+   # Docker example
+   docker run -p 6379:6379 docker.dragonflydb.io/dragonflydb/dragonfly
+   ```
+
+2. **Update environment variables:**
+   ```bash
+   VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
+   VULNERA__ANALYSIS__MAX_JOB_WORKERS=4
+   ```
+
+3. **Update API client code:**
+   - Job submission now returns immediately with `job_id`
+   - Implement job status polling or webhook handling
+   - Example:
+     ```bash
+     # Submit job (returns immediately)
+     JOB_ID=$(curl -X POST .../analyze/job ... | jq -r .job_id)
+     
+     # Poll for completion
+     curl -X GET .../jobs/$JOB_ID
+     ```
+
+4. **No database migrations required** - all changes are in-memory or cache-based
+
+### Contributors
+
+- Only and the only one Khaled Alam
+---
+
 ## [0.3.0] - 2025-11-09
 
 ### Added

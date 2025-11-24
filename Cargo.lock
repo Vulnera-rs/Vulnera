@@ -5562,7 +5562,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vulnera-api"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -5582,7 +5582,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5640,7 +5640,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-deps"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -5663,7 +5663,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-orchestrator"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "axum",
@@ -5695,7 +5695,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-rust"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "axum",
  "dotenvy",
@@ -5714,7 +5714,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-sast"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "datatest-stable",
@@ -5746,7 +5746,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-secrets"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
