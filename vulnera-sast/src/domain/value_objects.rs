@@ -8,6 +8,9 @@ pub enum Language {
     Python,
     JavaScript,
     Rust,
+    Go,
+    C,
+    Cpp,
 }
 
 impl Language {
@@ -16,6 +19,9 @@ impl Language {
             "py" => Some(Language::Python),
             "js" | "jsx" | "ts" | "tsx" => Some(Language::JavaScript),
             "rs" => Some(Language::Rust),
+            "go" => Some(Language::Go),
+            "c" | "h" => Some(Language::C),
+            "cpp" | "hpp" | "cc" | "cxx" => Some(Language::Cpp),
             _ => None,
         }
     }
@@ -24,7 +30,7 @@ impl Language {
         std::path::Path::new(filename)
             .extension()
             .and_then(|ext| ext.to_str())
-            .and_then(|ext| Self::from_extension(ext))
+            .and_then(Self::from_extension)
     }
 }
 

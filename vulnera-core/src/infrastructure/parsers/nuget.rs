@@ -1,4 +1,4 @@
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
     entities::Package,
@@ -154,8 +154,12 @@ impl PackageFileParser for NuGetPackagesConfigParser {
         filename.eq_ignore_ascii_case("packages.config")
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.parse_packages_config(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.parse_packages_config(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -316,8 +320,12 @@ impl PackageFileParser for NuGetProjectXmlParser {
         f.ends_with(".csproj") || f.ends_with(".fsproj") || f.ends_with(".vbproj")
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.parse_project_xml(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.parse_project_xml(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -345,16 +353,28 @@ mod tests {
 </packages>
 "#;
 
-        let pkgs = parser.parse_file(content).await.unwrap();
-        assert_eq!(pkgs.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let nj = pkgs.iter().find(|p| p.name == "Newtonsoft.Json").unwrap();
+        let nj = result
+            .packages
+            .iter()
+            .find(|p| p.name == "Newtonsoft.Json")
+            .unwrap();
         assert_eq!(nj.version, Version::parse("12.0.3").unwrap());
 
-        let serilog = pkgs.iter().find(|p| p.name == "Serilog").unwrap();
+        let serilog = result
+            .packages
+            .iter()
+            .find(|p| p.name == "Serilog")
+            .unwrap();
         assert_eq!(serilog.version, Version::parse("2.10.0").unwrap());
 
-        let nov = pkgs.iter().find(|p| p.name == "NoVersion").unwrap();
+        let nov = result
+            .packages
+            .iter()
+            .find(|p| p.name == "NoVersion")
+            .unwrap();
         assert_eq!(nov.version, Version::parse("0.0.0").unwrap());
     }
 
@@ -373,16 +393,28 @@ mod tests {
 </Project>
 "#;
 
-        let pkgs = parser.parse_file(content).await.unwrap();
-        assert_eq!(pkgs.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let nj = pkgs.iter().find(|p| p.name == "Newtonsoft.Json").unwrap();
+        let nj = result
+            .packages
+            .iter()
+            .find(|p| p.name == "Newtonsoft.Json")
+            .unwrap();
         assert_eq!(nj.version, Version::parse("13.0.1").unwrap());
 
-        let serilog = pkgs.iter().find(|p| p.name == "Serilog").unwrap();
+        let serilog = result
+            .packages
+            .iter()
+            .find(|p| p.name == "Serilog")
+            .unwrap();
         assert_eq!(serilog.version, Version::parse("2.12.0").unwrap());
 
-        let weird = pkgs.iter().find(|p| p.name == "WeirdVersion").unwrap();
+        let weird = result
+            .packages
+            .iter()
+            .find(|p| p.name == "WeirdVersion")
+            .unwrap();
         assert_eq!(weird.version, Version::parse("1.2.3").unwrap());
     }
 

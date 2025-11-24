@@ -214,6 +214,18 @@ impl Validate for AnalysisConfig {
             ));
         }
 
+        if self.job_queue_capacity == 0 {
+            return Err(ValidationError::analysis(
+                "job_queue_capacity must be greater than 0".to_string(),
+            ));
+        }
+
+        if self.max_job_workers == 0 {
+            return Err(ValidationError::analysis(
+                "max_job_workers must be greater than 0".to_string(),
+            ));
+        }
+
         Ok(())
     }
 }
@@ -575,6 +587,8 @@ mod tests {
             max_concurrent_packages: 3,
             max_concurrent_registry_queries: 5,
             max_concurrent_api_calls: 10,
+            job_queue_capacity: 32,
+            max_job_workers: 4,
         };
         assert!(valid.validate().is_ok());
 
@@ -583,6 +597,8 @@ mod tests {
             max_concurrent_packages: 0,
             max_concurrent_registry_queries: 5,
             max_concurrent_api_calls: 10,
+            job_queue_capacity: 32,
+            max_job_workers: 4,
         };
         assert!(invalid.validate().is_err());
     }

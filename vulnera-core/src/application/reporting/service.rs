@@ -5,7 +5,6 @@ use async_trait::async_trait;
 use tracing::info;
 
 use crate::application::errors::ApplicationError;
-use crate::application::reporting::formats::html;
 use crate::application::reporting::{PackageSummary, ReportSummary, StructuredReport};
 use crate::domain::vulnerability::entities::{AnalysisMetadata, AnalysisReport, Vulnerability};
 use crate::domain::vulnerability::value_objects::Severity;
@@ -14,10 +13,6 @@ use crate::domain::vulnerability::value_objects::Severity;
 #[async_trait]
 pub trait ReportService: Send + Sync {
     async fn generate_report(&self, analysis: &AnalysisReport) -> Result<String, ApplicationError>;
-    async fn generate_html_report(
-        &self,
-        analysis: &AnalysisReport,
-    ) -> Result<String, ApplicationError>;
 }
 
 /// Report service implementation with advanced features
@@ -323,33 +318,6 @@ impl ReportService for ReportServiceImpl {
         let report = self.generate_text_report(&processed_analysis);
 
         info!("Generated text report ({} characters)", report.len());
-        Ok(report)
-    }
-
-    async fn generate_html_report(
-        &self,
-        analysis: &AnalysisReport,
-    ) -> Result<String, ApplicationError> {
-        info!("Generating HTML report for analysis: {}", analysis.id);
-
-        // Create a copy of the analysis with deduplicated vulnerabilities
-        let deduplicated_vulnerabilities =
-            self.deduplicate_vulnerabilities(analysis.vulnerabilities.clone());
-        let prioritized_vulnerabilities =
-            self.prioritize_vulnerabilities(deduplicated_vulnerabilities);
-
-        // Create a new analysis report with processed vulnerabilities
-        let processed_analysis = AnalysisReport {
-            id: analysis.id,
-            packages: analysis.packages.clone(),
-            vulnerabilities: prioritized_vulnerabilities,
-            metadata: analysis.metadata.clone(),
-            created_at: analysis.created_at,
-        };
-
-        let report = html::generate_html_report(&processed_analysis)?;
-
-        info!("Generated HTML report ({} characters)", report.len());
         Ok(report)
     }
 }

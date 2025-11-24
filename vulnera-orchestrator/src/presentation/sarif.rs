@@ -18,7 +18,10 @@ pub fn generate_sarif_report(report: &AggregatedReport) -> Result<String, serde_
                     "informationUri": "https://github.com/k5602/vulnera"
                 }
             },
-            "results": report.findings.iter().map(convert_finding_to_sarif_result).collect::<Vec<_>>(),
+            "results": report.module_results.iter()
+                .flat_map(|r| r.findings.iter())
+                .map(convert_finding_to_sarif_result)
+                .collect::<Vec<_>>(),
             "properties": {
                 "job_id": report.job_id.to_string(),
                 "project_id": report.project_id,

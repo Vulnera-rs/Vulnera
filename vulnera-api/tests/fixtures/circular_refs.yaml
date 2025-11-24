@@ -1,0 +1,23 @@
+openapi: 3.0.0
+info:
+  title: Circular Reference Test
+  version: 1.0.0
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        value:
+          type: string
+        next:
+          $ref: '#/components/schemas/Node'
+paths:
+  /nodes:
+    get:
+      responses:
+        '200':
+          description: Linked list node
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Node'

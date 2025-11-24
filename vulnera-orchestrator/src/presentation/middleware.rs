@@ -366,12 +366,12 @@ impl RateLimiterState {
                 interval.tick().await;
                 let mut buckets = buckets_clone.write().await;
 
-                // Remove buckets that haven't been accessed recently (older than 1 hour)
+                // Remove buckets that haven't been accessed recently (older than 24 hours to support daily limits)
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                let expire_time = 3600; // 1 hour
+                let expire_time = 86400; // 24 hours
 
                 buckets.retain(|_, bucket| {
                     let elapsed = now.saturating_sub(bucket.last_refill);
@@ -395,10 +395,23 @@ impl RateLimiterState {
     }
 
     /// Check if a request should be rate limited
-    async fn check_rate_limit(&self, key: &str) -> Result<(), (u64, u32, u32)> {
-        // Calculate refill rate per second based on requests per minute
-        let refill_rate = self.config.requests_per_minute as f64 / 60.0;
-        let capacity = self.config.requests_per_minute;
+    async fn check_rate_limit(
+        &self,
+        key: &str,
+        is_authenticated: bool,
+    ) -> Result<(), (u64, u32, u32)> {
+        // Determine capacity and refill rate based on authentication status
+        let (capacity, refill_rate) = if is_authenticated {
+            (
+                self.config.requests_per_minute,
+                self.config.requests_per_minute as f64 / 60.0,
+            )
+        } else {
+            (
+                self.config.unauthenticated_requests_per_day,
+                self.config.unauthenticated_requests_per_day as f64 / 86400.0,
+            )
+        };
 
         let mut buckets = self.buckets.write().await;
 
@@ -410,54 +423,80 @@ impl RateLimiterState {
             Ok(())
         } else {
             let retry_after = bucket.retry_after();
-            let limit = self.config.requests_per_minute;
+            let limit = capacity;
             let remaining = bucket.remaining();
             Err((retry_after, limit, remaining))
         }
     }
 
-    /// Get the rate limit key based on strategy
-    fn get_key(&self, request: &Request) -> String {
-        match self.config.strategy {
-            RateLimitStrategy::Ip => {
-                // Try to get IP from various headers (for proxied requests)
+    /// Extract IP address from request
+    fn extract_ip(&self, request: &Request) -> String {
+        request
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim().to_string())
+            .or_else(|| {
                 request
                     .headers()
-                    .get("x-forwarded-for")
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|s| s.split(',').next())
-                    .map(|s| s.trim().to_string())
-                    .or_else(|| {
-                        request
-                            .headers()
-                            .get("x-real-ip")
-                            .and_then(|h| h.to_str().ok())
-                            .map(|s| s.to_string())
-                    })
-                    .unwrap_or_else(|| "unknown-ip".to_string())
-            }
-            RateLimitStrategy::ApiKey => {
-                // Get API key from Authorization header or X-API-Key header
-                request
-                    .headers()
-                    .get("x-api-key")
+                    .get("x-real-ip")
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_string())
-                    .or_else(|| {
-                        request
-                            .headers()
-                            .get(axum::http::header::AUTHORIZATION)
-                            .and_then(|h| h.to_str().ok())
-                            .and_then(|s| {
-                                s.strip_prefix("Bearer ")
-                                    .or_else(|| s.strip_prefix("token "))
-                                    .map(|s| s.to_string())
-                            })
+            })
+            .unwrap_or_else(|| "unknown-ip".to_string())
+    }
+
+    /// Get the rate limit key and auth status based on strategy
+    fn get_key_and_auth(&self, request: &Request) -> (String, bool) {
+        // Check for API key first
+        let api_key = request
+            .headers()
+            .get("x-api-key")
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                request
+                    .headers()
+                    .get(axum::http::header::AUTHORIZATION)
+                    .and_then(|h| h.to_str().ok())
+                    .and_then(|s| {
+                        s.strip_prefix("Bearer ")
+                            .or_else(|| s.strip_prefix("token "))
+                            .map(|s| s.to_string())
                     })
-                    .unwrap_or_else(|| "no-api-key".to_string())
+            });
+
+        let is_authenticated = api_key.is_some();
+
+        let key = match self.config.strategy {
+            RateLimitStrategy::Ip => {
+                let ip = self.extract_ip(request);
+                if is_authenticated {
+                    format!("auth_ip:{}", ip)
+                } else {
+                    format!("unauth_ip:{}", ip)
+                }
             }
-            RateLimitStrategy::Global => "global".to_string(),
-        }
+            RateLimitStrategy::ApiKey => {
+                if let Some(k) = api_key {
+                    format!("apikey:{}", k)
+                } else {
+                    // Fallback to IP for unauthenticated users
+                    let ip = self.extract_ip(request);
+                    format!("unauth_ip:{}", ip)
+                }
+            }
+            RateLimitStrategy::Global => {
+                if is_authenticated {
+                    "global_auth".to_string()
+                } else {
+                    "global_unauth".to_string()
+                }
+            }
+        };
+
+        (key, is_authenticated)
     }
 }
 
@@ -468,34 +507,35 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Response {
     // Check rate limit
-    let key = state.get_key(&request);
-    match state.check_rate_limit(&key).await {
+    let (key, is_authenticated) = state.get_key_and_auth(&request);
+    match state.check_rate_limit(&key, is_authenticated).await {
         Ok(()) => {
             // Rate limit passed, continue with request
             let mut response = next.run(request).await;
 
             // Add rate limit headers to successful responses
+            let limit = if is_authenticated {
+                state.config.requests_per_minute
+            } else {
+                state.config.unauthenticated_requests_per_day
+            };
+
             let headers = response.headers_mut();
-            headers.insert(
-                "x-ratelimit-limit",
-                HeaderValue::from(state.config.requests_per_minute),
-            );
+            headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
 
             // Get current remaining tokens (approximate)
             let buckets = state.buckets.read().await;
-            let remaining = buckets
-                .get(&key)
-                .map(|b| b.remaining())
-                .unwrap_or(state.config.requests_per_minute);
+            let remaining = buckets.get(&key).map(|b| b.remaining()).unwrap_or(limit);
 
             headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
 
-            // Reset time is current time + 1 minute
+            // Reset time is current time + 1 minute (or 1 day for unauth)
+            let reset_duration = if is_authenticated { 60 } else { 86400 };
             let reset_time = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-                + 60;
+                + reset_duration;
 
             let reset_time_val = reset_time.to_string();
             if let Ok(val) = HeaderValue::from_str(&reset_time_val) {

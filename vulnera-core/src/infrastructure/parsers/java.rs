@@ -1,6 +1,6 @@
 //! Java ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
     entities::Package,
@@ -158,8 +158,12 @@ impl PackageFileParser for MavenParser {
         filename == "pom.xml"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.extract_maven_dependencies(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.extract_maven_dependencies(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -272,8 +276,12 @@ impl PackageFileParser for GradleParser {
         filename == "build.gradle" || filename == "build.gradle.kts"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.extract_gradle_dependencies(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.extract_gradle_dependencies(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -311,10 +319,11 @@ mod tests {
 </project>
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2);
 
-        let spring_pkg = packages
+        let spring_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "org.springframework:spring-core")
             .unwrap();
@@ -334,16 +343,18 @@ dependencies {
 }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 4);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 4);
 
-        let spring_pkg = packages
+        let spring_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "org.springframework:spring-core")
             .unwrap();
         assert_eq!(spring_pkg.version, Version::parse("5.3.21").unwrap());
 
-        let guava_pkg = packages
+        let guava_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "com.google.guava:guava")
             .unwrap();

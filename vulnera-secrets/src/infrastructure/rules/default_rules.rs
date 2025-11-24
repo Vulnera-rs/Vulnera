@@ -45,7 +45,7 @@ pub fn aws_access_key_rule() -> SecretRule {
         description: "AWS access key ID (AKIA...)".to_string(),
         secret_type: SecretType::AwsAccessKey,
         pattern: RulePattern::Regex(
-            r#"(?i)(?:aws|amazon)[\s_-]*(?:access|account)[\s_-]*(?:key|id)[\s_-]*[:=]\s*(AKIA[0-9A-Z]{16})"#.to_string(),
+            r#"(?i)(?:aws|amazon)[\s_-]*(?:access|account)[\s_-]*(?:key(?:_id)?|id)[\s_-]*[:=]\s*(AKIA[0-9A-Z]{16})"#.to_string(),
         ),
         keywords: vec!["aws".to_string(), "access".to_string(), "key".to_string()],
         entropy_threshold: None,

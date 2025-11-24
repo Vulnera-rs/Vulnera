@@ -1,8 +1,8 @@
 //! OpenAPI 3.x and Swagger 2.0 parser
 
 use crate::domain::value_objects::*;
+use crate::infrastructure::parser::SchemaMap;
 use serde_json::Value as JsonValue;
-use std::io::Cursor;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
 
@@ -44,7 +44,7 @@ impl OpenApiParser {
             })?
         } else {
             // YAML format
-            serde_yaml::from_str(content).map_err(|e| {
+            serde_yml::from_str(content).map_err(|e| {
                 error!(
                     error = %e,
                     file = %file_path.display(),
@@ -62,23 +62,42 @@ impl OpenApiParser {
         let global_security = Self::extract_security_from_json(&raw_spec, None);
         let path_securities = Self::extract_path_securities_from_json(&raw_spec);
 
-        // Extract OAuth flow token URLs from raw JSON (oas3 crate has private fields)
+        // Extract OAuth flow token URLs from raw JSON
         let oauth_token_urls = Self::extract_oauth_token_urls(&raw_spec);
 
+        // Extract component schemas for reference resolution
+        let schema_map = Self::extract_schemas_from_json(&raw_spec);
+
         // Parse using oas3 crate for the rest of the spec
-        let cursor = Cursor::new(content.as_bytes());
-        let spec = oas3::from_reader(cursor).map_err(|e| {
-            error!(
-                error = %e,
-                file = %file_path.display(),
-                "Failed to parse OpenAPI specification with oas3 crate"
-            );
-            ParseError::ParseError {
-                message: format!("OpenAPI parse error: {}", e),
-                file: file_path.display().to_string(),
-                line: None,
-            }
-        })?;
+        let spec = if content.trim_start().starts_with('{') {
+            // JSON format
+            oas3::from_json(content).map_err(|e| {
+                error!(
+                    error = %e,
+                    file = %file_path.display(),
+                    "Failed to parse OpenAPI specification with oas3 crate"
+                );
+                ParseError::ParseError {
+                    message: format!("OpenAPI parse error: {}", e),
+                    file: file_path.display().to_string(),
+                    line: None,
+                }
+            })?
+        } else {
+            // YAML format
+            oas3::from_yaml(content).map_err(|e| {
+                error!(
+                    error = %e,
+                    file = %file_path.display(),
+                    "Failed to parse OpenAPI specification with oas3 crate"
+                );
+                ParseError::ParseError {
+                    message: format!("OpenAPI parse error: {}", e),
+                    file: file_path.display().to_string(),
+                    line: None,
+                }
+            })?
+        };
 
         // Validate OpenAPI version
         if !spec.openapi.starts_with("3.") {
@@ -93,6 +112,7 @@ impl OpenApiParser {
             global_security,
             path_securities,
             oauth_token_urls,
+            schema_map,
         )
     }
 
@@ -108,15 +128,26 @@ impl OpenApiParser {
             String,
             std::collections::HashMap<String, String>,
         >,
+        schema_map: crate::infrastructure::parser::SchemaMap,
     ) -> Result<OpenApiSpec, ParseError> {
         debug!(
             version = %spec.openapi,
-            path_count = spec.paths.len(),
+            path_count = spec.paths.as_ref().map(|p| p.len()).unwrap_or(0),
             "Parsed OpenAPI specification"
         );
 
+        // Create schema resolver for reference resolution
+        use crate::infrastructure::parser::SchemaRefResolver;
+        let mut schema_resolver = SchemaRefResolver::new(schema_map);
+
         // Convert oas3::Spec to our domain model
-        let paths = Self::parse_paths_with_security(&spec.paths, &path_securities);
+        let paths = Self::parse_paths_with_security(
+            spec.paths
+                .as_ref()
+                .unwrap_or(&std::collections::BTreeMap::new()),
+            &path_securities,
+            &mut schema_resolver,
+        );
         let security_schemes =
             Self::parse_security_schemes_with_oauth_urls(&spec.components, &oauth_token_urls);
 
@@ -134,6 +165,7 @@ impl OpenApiParser {
             String,
             std::collections::HashMap<String, Vec<SecurityRequirement>>,
         >,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Vec<ApiPath> {
         let mut api_paths = Vec::new();
 
@@ -154,7 +186,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("get"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("GET", get, &op_security));
+                operations.push(Self::parse_operation(
+                    "GET",
+                    get,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref post) = path_item.post {
                 let op_security = path_securities
@@ -162,7 +199,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("post"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("POST", post, &op_security));
+                operations.push(Self::parse_operation(
+                    "POST",
+                    post,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref put) = path_item.put {
                 let op_security = path_securities
@@ -170,7 +212,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("put"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("PUT", put, &op_security));
+                operations.push(Self::parse_operation(
+                    "PUT",
+                    put,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref delete) = path_item.delete {
                 let op_security = path_securities
@@ -178,7 +225,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("delete"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("DELETE", delete, &op_security));
+                operations.push(Self::parse_operation(
+                    "DELETE",
+                    delete,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref patch) = path_item.patch {
                 let op_security = path_securities
@@ -186,7 +238,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("patch"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("PATCH", patch, &op_security));
+                operations.push(Self::parse_operation(
+                    "PATCH",
+                    patch,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref head) = path_item.head {
                 let op_security = path_securities
@@ -194,7 +251,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("head"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("HEAD", head, &op_security));
+                operations.push(Self::parse_operation(
+                    "HEAD",
+                    head,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref options) = path_item.options {
                 let op_security = path_securities
@@ -202,7 +264,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("options"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("OPTIONS", options, &op_security));
+                operations.push(Self::parse_operation(
+                    "OPTIONS",
+                    options,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
             if let Some(ref trace) = path_item.trace {
                 let op_security = path_securities
@@ -210,7 +277,12 @@ impl OpenApiParser {
                     .and_then(|ops| ops.get("trace"))
                     .cloned()
                     .unwrap_or_else(|| path_security.clone());
-                operations.push(Self::parse_operation("TRACE", trace, &op_security));
+                operations.push(Self::parse_operation(
+                    "TRACE",
+                    trace,
+                    &op_security,
+                    schema_resolver,
+                ));
             }
 
             api_paths.push(ApiPath {
@@ -226,27 +298,26 @@ impl OpenApiParser {
         method: &str,
         operation: &oas3::spec::Operation,
         security: &[crate::domain::value_objects::SecurityRequirement],
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> ApiOperation {
         // Security requirements are now passed in from the raw JSON/YAML parsing
         // Operation-level security overrides path-level security (handled in parse_paths_with_security)
 
-        let parameters = Self::parse_parameters(&operation.parameters);
-        let request_body = operation.request_body.as_ref().and_then(|rb| {
-            match rb {
-                oas3::spec::ObjectOrReference::Object(rb_obj) => {
-                    Some(Self::parse_request_body(rb_obj))
-                }
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    // Skip references for now - could be resolved later
-                    warn!("Skipping request body reference");
-                    None
-                }
-            }
-        });
-        let responses = Self::parse_responses(&operation.responses);
+        let parameters = Self::parse_parameters(&operation.parameters, schema_resolver);
+        let request_body = Self::parse_request_body(
+            operation.request_body.as_ref(),
+            schema_resolver,
+        );
+        let responses = Self::parse_responses(
+            operation
+                .responses
+                .as_ref()
+                .unwrap_or(&std::collections::BTreeMap::new()),
+            schema_resolver,
+        );
 
         ApiOperation {
-            method: method.to_string(),
+            method: method.to_uppercase(),
             security: security.to_vec(),
             parameters,
             request_body,
@@ -255,29 +326,34 @@ impl OpenApiParser {
     }
 
     fn parse_parameters(
-        params: &Vec<oas3::spec::ObjectOrReference<oas3::spec::Parameter>>,
+        parameters: &[oas3::spec::ObjectOrReference<oas3::spec::Parameter>],
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Vec<ApiParameter> {
         let mut api_params = Vec::new();
 
-        for param_ref in params {
+        for param_ref in parameters {
             match param_ref {
                 oas3::spec::ObjectOrReference::Object(param) => {
-                    let location = match param.location.as_str() {
-                        "query" => ParameterLocation::Query,
-                        "header" => ParameterLocation::Header,
-                        "path" => ParameterLocation::Path,
-                        "cookie" => ParameterLocation::Cookie,
-                        _ => {
-                            warn!(location = %param.location, "Unknown parameter location, defaulting to Query");
-                            ParameterLocation::Query
-                        }
+                    let location = match param.location {
+                        oas3::spec::ParameterIn::Query => ParameterLocation::Query,
+                        oas3::spec::ParameterIn::Header => ParameterLocation::Header,
+                        oas3::spec::ParameterIn::Path => ParameterLocation::Path,
+                        oas3::spec::ParameterIn::Cookie => ParameterLocation::Cookie,
                     };
 
                     api_params.push(ApiParameter {
                         name: param.name.clone(),
                         location,
                         required: param.required.unwrap_or(false),
-                        schema: param.schema.as_ref().map(|s| Self::parse_schema(s)),
+                        schema: param.schema.as_ref().and_then(|s| match s {
+                            oas3::spec::ObjectOrReference::Object(_) => {
+                                Some(Self::parse_schema(s, schema_resolver))
+                            }
+                            oas3::spec::ObjectOrReference::Ref { .. } => {
+                                warn!("Skipping schema reference in parameter");
+                                None
+                            }
+                        }),
                     });
                 }
                 oas3::spec::ObjectOrReference::Ref { .. } => {
@@ -290,11 +366,24 @@ impl OpenApiParser {
         api_params
     }
 
-    fn parse_request_body(rb: &oas3::spec::RequestBody) -> ApiRequestBody {
-        let content = Self::parse_content(&Some(rb.content.clone()));
-        ApiRequestBody {
-            required: rb.required.unwrap_or(false),
-            content,
+    fn parse_request_body(
+        rb_ref: Option<&oas3::spec::ObjectOrReference<oas3::spec::RequestBody>>,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> Option<ApiRequestBody> {
+        match rb_ref {
+            Some(oas3::spec::ObjectOrReference::Object(rb)) => {
+                let content = Self::parse_content(&Some(rb.content.clone()), schema_resolver);
+                Some(ApiRequestBody {
+                    required: rb.required.unwrap_or(false),
+                    content,
+                })
+            }
+            Some(oas3::spec::ObjectOrReference::Ref { .. }) => {
+                // We could resolve request body refs here too if we extracted them
+                warn!("Skipping request body reference");
+                None
+            }
+            None => None,
         }
     }
 
@@ -303,14 +392,16 @@ impl OpenApiParser {
             String,
             oas3::spec::ObjectOrReference<oas3::spec::Response>,
         >,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Vec<ApiResponse> {
         let mut api_responses = Vec::new();
 
         for (status_code, response_ref) in responses.iter() {
             match response_ref {
                 oas3::spec::ObjectOrReference::Object(response) => {
-                    let content = Self::parse_content(&Some(response.content.clone()));
-                    let headers = Self::parse_response_headers(&response.headers);
+                    let content =
+                        Self::parse_content(&Some(response.content.clone()), schema_resolver);
+                    let headers = Self::parse_response_headers(&response.headers, schema_resolver);
 
                     api_responses.push(ApiResponse {
                         status_code: status_code.clone(),
@@ -330,24 +421,23 @@ impl OpenApiParser {
 
     fn parse_content(
         content: &Option<std::collections::BTreeMap<String, oas3::spec::MediaType>>,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Vec<ApiContent> {
         let mut api_content = Vec::new();
 
         if let Some(content_map) = content {
             for (media_type, media_type_obj) in content_map.iter() {
-                let schema =
-                    media_type_obj
-                        .schema
-                        .as_ref()
-                        .and_then(|schema_ref| match schema_ref {
-                            oas3::spec::ObjectOrReference::Object(schema) => {
-                                Some(Self::parse_schema(schema))
-                            }
-                            oas3::spec::ObjectOrReference::Ref { .. } => {
-                                warn!("Skipping schema reference in media type");
-                                None
-                            }
-                        });
+                let schema = media_type_obj.schema.as_ref().and_then(|schema_ref| {
+                    match schema_ref {
+                        oas3::spec::ObjectOrReference::Object(_) => {
+                            Some(Self::parse_schema(schema_ref, schema_resolver))
+                        }
+                        oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                            // Use resolver to resolve the reference
+                            schema_resolver.resolve_ref(ref_path)
+                        }
+                    }
+                });
                 api_content.push(ApiContent {
                     media_type: media_type.clone(),
                     schema,
@@ -363,6 +453,7 @@ impl OpenApiParser {
             String,
             oas3::spec::ObjectOrReference<oas3::spec::Header>,
         >,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
     ) -> Vec<ApiHeader> {
         let mut api_headers = Vec::new();
 
@@ -372,7 +463,15 @@ impl OpenApiParser {
                     let schema = header
                         .schema
                         .as_ref()
-                        .map(|schema| Self::parse_schema(schema));
+                        .and_then(|schema_ref| match schema_ref {
+                            oas3::spec::ObjectOrReference::Object(_) => {
+                                Some(Self::parse_schema(schema_ref, schema_resolver))
+                            }
+                            oas3::spec::ObjectOrReference::Ref { .. } => {
+                                warn!("Skipping schema reference in header");
+                                None
+                            }
+                        });
                     api_headers.push(ApiHeader {
                         name: name.clone(),
                         schema,
@@ -388,29 +487,45 @@ impl OpenApiParser {
         api_headers
     }
 
-    fn parse_schema(schema: &oas3::spec::Schema) -> ApiSchema {
-        let properties: Vec<ApiProperty> = schema
-            .properties
-            .iter()
-            .filter_map(|(name, prop_schema_ref)| match prop_schema_ref {
-                oas3::spec::ObjectOrReference::Object(prop_schema) => Some(ApiProperty {
-                    name: name.clone(),
-                    schema: Self::parse_schema(prop_schema),
-                }),
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    warn!(property_name = %name, "Skipping schema reference in property");
-                    None
+    fn parse_schema(
+        schema: &oas3::spec::ObjectOrReference<oas3::spec::ObjectSchema>,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> ApiSchema {
+        match schema {
+            oas3::spec::ObjectOrReference::Object(obj_schema) => {
+                let properties: Vec<ApiProperty> = obj_schema
+                    .properties
+                    .iter()
+                    .map(|(name, prop_schema_ref)| {
+                        let schema = match prop_schema_ref {
+                            oas3::spec::ObjectOrReference::Object(_) => {
+                                Self::parse_schema(prop_schema_ref, schema_resolver)
+                            }
+                            oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                                schema_resolver.resolve_ref(ref_path).unwrap_or_default()
+                            }
+                        };
+                        ApiProperty {
+                            name: name.clone(),
+                            schema,
+                        }
+                    })
+                    .collect();
+
+                let schema_type = obj_schema.schema_type.as_ref().map(|t| format!("{:?}", t));
+
+                ApiSchema {
+                    schema_type,
+                    format: obj_schema.format.clone(),
+                    properties,
+                    required: obj_schema.required.clone(),
+                    summary: None,
+                    description: None,
                 }
-            })
-            .collect();
-
-        let schema_type = schema.schema_type.as_ref().map(|t| format!("{:?}", t));
-
-        ApiSchema {
-            schema_type,
-            format: schema.format.clone(),
-            properties,
-            required: schema.required.clone(),
+            }
+            oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                schema_resolver.resolve_ref(ref_path).unwrap_or_default()
+            }
         }
     }
 
@@ -431,6 +546,7 @@ impl OpenApiParser {
                             oas3::spec::SecurityScheme::ApiKey {
                                 location,
                                 name: key_name,
+                                description: _,
                             } => SecuritySchemeType::ApiKey {
                                 location: format!("{:?}", location),
                                 name: key_name.clone(),
@@ -438,11 +554,15 @@ impl OpenApiParser {
                             oas3::spec::SecurityScheme::Http {
                                 scheme: http_scheme,
                                 bearer_format,
+                                description: _,
                             } => SecuritySchemeType::Http {
                                 scheme: http_scheme.clone(),
-                                bearer_format: Some(bearer_format.clone()),
+                                bearer_format: bearer_format.clone(),
                             },
-                            oas3::spec::SecurityScheme::OAuth2 { flows } => {
+                            oas3::spec::SecurityScheme::OAuth2 {
+                                flows,
+                                description: _,
+                            } => {
                                 // Get token URLs for this scheme from extracted JSON
                                 let scheme_token_urls =
                                     oauth_token_urls.get(name).cloned().unwrap_or_default();
@@ -452,9 +572,15 @@ impl OpenApiParser {
                             }
                             oas3::spec::SecurityScheme::OpenIdConnect {
                                 open_id_connect_url,
+                                description: _,
                             } => SecuritySchemeType::OpenIdConnect {
                                 url: open_id_connect_url.clone(),
                             },
+                            oas3::spec::SecurityScheme::MutualTls { description: _ } => {
+                                // MutualTLS is not currently supported in our domain model
+                                warn!("MutualTLS security scheme is not supported, skipping");
+                                continue;
+                            }
                         };
 
                         schemes.push(SecurityScheme {
@@ -712,6 +838,21 @@ impl OpenApiParser {
 
         result
     }
+
+    /// Extract component schemas from raw JSON/YAML spec
+    fn extract_schemas_from_json(spec: &JsonValue) -> SchemaMap {
+        let mut schemas = SchemaMap::new();
+
+        if let Some(components) = spec.get("components") {
+            if let Some(schemas_obj) = components.get("schemas").and_then(|s| s.as_object()) {
+                for (schema_name, schema_def) in schemas_obj {
+                    schemas.insert(schema_name.clone(), schema_def.clone());
+                }
+            }
+        }
+
+        schemas
+    }
 }
 
 /// Parse error with context
@@ -731,7 +872,7 @@ pub enum ParseError {
     Json(#[from] serde_json::Error),
 
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yml::Error),
 
     #[error("OpenAPI version validation failed: {version}")]
     InvalidVersion { version: String },

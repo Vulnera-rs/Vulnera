@@ -146,6 +146,8 @@ pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     /// Requests allowed per hour
     pub requests_per_hour: u32,
+    /// Requests allowed per day for unauthenticated users
+    pub unauthenticated_requests_per_day: u32,
     /// Rate limit strategy (IP-based, API key, or global)
     pub strategy: RateLimitStrategy,
     /// Cleanup interval for expired entries in seconds (default: 300 = 5 minutes)
@@ -158,6 +160,7 @@ impl Default for RateLimitConfig {
             enabled: false,
             requests_per_minute: 60,
             requests_per_hour: 1000,
+            unauthenticated_requests_per_day: 10,
             strategy: RateLimitStrategy::Ip,
             cleanup_interval_seconds: 300,
         }
@@ -414,6 +417,10 @@ pub struct AnalysisConfig {
     pub max_concurrent_registry_queries: usize,
     /// Maximum concurrent API calls per source
     pub max_concurrent_api_calls: usize,
+    /// Maximum number of jobs buffered before back-pressure is applied
+    pub job_queue_capacity: usize,
+    /// Maximum number of concurrent background workers processing jobs
+    pub max_job_workers: usize,
 }
 
 impl Default for AnalysisConfig {
@@ -422,6 +429,8 @@ impl Default for AnalysisConfig {
             max_concurrent_packages: 3,
             max_concurrent_registry_queries: 5,
             max_concurrent_api_calls: 10,
+            job_queue_capacity: 32,
+            max_job_workers: 4,
         }
     }
 }
@@ -696,6 +705,8 @@ impl Default for Config {
                 max_concurrent_packages: 3,
                 max_concurrent_registry_queries: 5,
                 max_concurrent_api_calls: 10,
+                job_queue_capacity: 32,
+                max_job_workers: 4,
             },
             sast: SastConfig::default(),
             secret_detection: SecretDetectionConfig::default(),

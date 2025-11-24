@@ -1,6 +1,6 @@
 //! Python ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
     entities::Package,
@@ -151,7 +151,8 @@ impl RequirementsTxtParser {
         match parts.len() {
             1 => Ok(format!("{}.0.0", parts[0])),
             2 => Ok(format!("{}.{}.0", parts[0], parts[1])),
-            _ => Ok(version.to_string()),
+            3 => Ok(version.to_string()),
+            _ => Ok(format!("{}.{}.{}", parts[0], parts[1], parts[2])),
         }
     }
 }
@@ -162,7 +163,7 @@ impl PackageFileParser for RequirementsTxtParser {
         filename == "requirements.txt" || filename.ends_with("-requirements.txt")
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
 
         for line in content.lines() {
@@ -171,7 +172,10 @@ impl PackageFileParser for RequirementsTxtParser {
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -280,7 +284,7 @@ impl PackageFileParser for PipfileParser {
         filename == "Pipfile"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
         let mut packages = Vec::new();
 
@@ -290,7 +294,10 @@ impl PackageFileParser for PipfileParser {
         // Extract from dev-packages section
         packages.extend(self.extract_dependencies(&toml_value, "dev-packages")?);
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -480,9 +487,14 @@ impl PackageFileParser for PyProjectTomlParser {
         filename == "pyproject.toml"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
-        self.extract_pyproject_dependencies(&toml_value)
+        let packages = self.extract_pyproject_dependencies(&toml_value)?;
+
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -511,10 +523,14 @@ numpy
 pytest>=6.0.0  # inline comment
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 5);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 5);
 
-        let requests_pkg = packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests_pkg.version, Version::parse("2.25.1").unwrap());
     }
 
@@ -528,10 +544,10 @@ package2==2.0rc1
 package3==1.2.3a4
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 4);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 4);
 
-        let black_pkg = packages.iter().find(|p| p.name == "black").unwrap();
+        let black_pkg = result.packages.iter().find(|p| p.name == "black").unwrap();
         // Should parse as 21.5.0-beta.0
         assert_eq!(black_pkg.version, Version::parse("21.5.0-beta.0").unwrap());
     }
@@ -554,10 +570,14 @@ django = "*"
 pytest = ">=6.0.0"
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 4);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 4);
 
-        let requests_pkg = packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests_pkg.version, Version::parse("2.25.1").unwrap());
     }
 
@@ -581,10 +601,14 @@ dev = [
 ]
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 5);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 5);
 
-        let requests_pkg = packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests_pkg.version, Version::parse("2.25.1").unwrap());
     }
 
@@ -626,6 +650,10 @@ dev = [
         assert_eq!(parser.normalize_python_version("2.25.1").unwrap(), "2.25.1");
         assert_eq!(parser.normalize_python_version("1.2").unwrap(), "1.2.0");
         assert_eq!(parser.normalize_python_version("1").unwrap(), "1.0.0");
+
+        // Test 4-segment versions (should truncate to 3 segments)
+        assert_eq!(parser.normalize_python_version("2.7.6.1").unwrap(), "2.7.6");
+        assert_eq!(parser.normalize_python_version("1.2.3.4").unwrap(), "1.2.3");
     }
 
     #[test]

@@ -435,4 +435,204 @@ mod tests {
         assert!(transitive.contains(&id3));
         assert!(!transitive.contains(&id1));
     }
+
+    #[test]
+    fn test_topological_sort_cycle() {
+        let mut graph = DependencyGraph::new();
+        let pkg1 = create_test_package("a", "1.0.0");
+        let pkg2 = create_test_package("b", "1.0.0");
+        let pkg3 = create_test_package("c", "1.0.0");
+
+        let node1 = PackageNode::new(pkg1);
+        let node2 = PackageNode::new(pkg2);
+        let node3 = PackageNode::new(pkg3);
+
+        let id1 = node1.id.clone();
+        let id2 = node2.id.clone();
+        let id3 = node3.id.clone();
+
+        graph.add_node(node1);
+        graph.add_node(node2);
+        graph.add_node(node3);
+
+        // a -> b -> c -> a
+        graph.add_edge(DependencyEdge::new(
+            id1.clone(),
+            id2.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id2.clone(),
+            id3.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id3.clone(),
+            id1.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+
+        let result = graph.topological_sort();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Circular dependency"));
+    }
+
+    #[test]
+    fn test_diamond_dependencies() {
+        let mut graph = DependencyGraph::new();
+        // A -> B -> D
+        // A -> C -> D
+        let pkg_a = create_test_package("a", "1.0.0");
+        let pkg_b = create_test_package("b", "1.0.0");
+        let pkg_c = create_test_package("c", "1.0.0");
+        let pkg_d = create_test_package("d", "1.0.0");
+
+        let id_a = PackageId::from_package(&pkg_a);
+        let id_b = PackageId::from_package(&pkg_b);
+        let id_c = PackageId::from_package(&pkg_c);
+        let id_d = PackageId::from_package(&pkg_d);
+
+        graph.add_node(PackageNode::new(pkg_a));
+        graph.add_node(PackageNode::new(pkg_b));
+        graph.add_node(PackageNode::new(pkg_c));
+        graph.add_node(PackageNode::new(pkg_d));
+
+        graph.add_edge(DependencyEdge::new(
+            id_a.clone(),
+            id_b.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id_a.clone(),
+            id_c.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id_b.clone(),
+            id_d.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id_c.clone(),
+            id_d.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+
+        let sorted = graph.topological_sort().unwrap();
+
+        let idx_a = sorted.iter().position(|x| x == &id_a).unwrap();
+        let idx_b = sorted.iter().position(|x| x == &id_b).unwrap();
+        let idx_c = sorted.iter().position(|x| x == &id_c).unwrap();
+        let idx_d = sorted.iter().position(|x| x == &id_d).unwrap();
+
+        // D must be before B and C
+        assert!(idx_d < idx_b);
+        assert!(idx_d < idx_c);
+        // B and C must be before A
+        assert!(idx_b < idx_a);
+        assert!(idx_c < idx_a);
+    }
+
+    #[test]
+    fn test_orphaned_nodes() {
+        let mut graph = DependencyGraph::new();
+        let pkg1 = create_test_package("a", "1.0.0");
+        let pkg2 = create_test_package("b", "1.0.0"); // Orphan
+
+        let id1 = PackageId::from_package(&pkg1);
+        let id2 = PackageId::from_package(&pkg2);
+
+        graph.add_node(PackageNode::new(pkg1));
+        graph.add_node(PackageNode::new(pkg2));
+
+        let sorted = graph.topological_sort().unwrap();
+        assert!(sorted.contains(&id1));
+        assert!(sorted.contains(&id2));
+        assert_eq!(sorted.len(), 2);
+    }
+
+    #[test]
+    fn test_disconnected_components() {
+        let mut graph = DependencyGraph::new();
+        // A -> B
+        // C -> D
+        let pkg_a = create_test_package("a", "1.0.0");
+        let pkg_b = create_test_package("b", "1.0.0");
+        let pkg_c = create_test_package("c", "1.0.0");
+        let pkg_d = create_test_package("d", "1.0.0");
+
+        let id_a = PackageId::from_package(&pkg_a);
+        let id_b = PackageId::from_package(&pkg_b);
+        let id_c = PackageId::from_package(&pkg_c);
+        let id_d = PackageId::from_package(&pkg_d);
+
+        graph.add_node(PackageNode::new(pkg_a));
+        graph.add_node(PackageNode::new(pkg_b));
+        graph.add_node(PackageNode::new(pkg_c));
+        graph.add_node(PackageNode::new(pkg_d));
+
+        graph.add_edge(DependencyEdge::new(
+            id_a.clone(),
+            id_b.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            id_c.clone(),
+            id_d.clone(),
+            VersionConstraint::Any,
+            false,
+        ));
+
+        let sorted = graph.topological_sort().unwrap();
+
+        let idx_a = sorted.iter().position(|x| x == &id_a).unwrap();
+        let idx_b = sorted.iter().position(|x| x == &id_b).unwrap();
+        let idx_c = sorted.iter().position(|x| x == &id_c).unwrap();
+        let idx_d = sorted.iter().position(|x| x == &id_d).unwrap();
+
+        assert!(idx_b < idx_a);
+        assert!(idx_d < idx_c);
+    }
+
+    #[test]
+    fn test_deep_dependency_tree() {
+        let mut graph = DependencyGraph::new();
+        // Create a chain of 100 packages: p0 -> p1 -> ... -> p99
+        let count = 100;
+        let mut ids = Vec::new();
+
+        for i in 0..count {
+            let pkg = create_test_package(&format!("p{}", i), "1.0.0");
+            let id = PackageId::from_package(&pkg);
+            ids.push(id.clone());
+            graph.add_node(PackageNode::new(pkg));
+        }
+
+        for i in 0..count - 1 {
+            graph.add_edge(DependencyEdge::new(
+                ids[i].clone(),
+                ids[i + 1].clone(),
+                VersionConstraint::Any,
+                false,
+            ));
+        }
+
+        let sorted = graph.topological_sort().unwrap();
+        assert_eq!(sorted.len(), count);
+
+        // Verify order: p99 should be first, p0 last
+        for i in 0..count - 1 {
+            let idx_curr = sorted.iter().position(|x| x == &ids[i]).unwrap();
+            let idx_next = sorted.iter().position(|x| x == &ids[i + 1]).unwrap();
+            assert!(idx_next < idx_curr);
+        }
+    }
 }

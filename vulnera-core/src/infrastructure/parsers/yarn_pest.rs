@@ -9,7 +9,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 
 #[derive(Parser)]
 #[grammar = "src/infrastructure/parsers/grammars/yarn_lock.pest"]
@@ -389,7 +389,7 @@ impl PackageFileParser for YarnPestParser {
         filename == "yarn.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let pairs = self.parse_file_pairs(content)?;
 
         let mut packages: Vec<Package> = Vec::new();
@@ -448,9 +448,16 @@ impl PackageFileParser for YarnPestParser {
         }
 
         if packages.is_empty() {
-            return self.fallback_parse_raw(content);
+            let packages = self.fallback_parse_raw(content)?;
+            return Ok(ParseResult {
+                packages,
+                dependencies: Vec::new(),
+            });
         }
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -485,7 +492,7 @@ lodash@^4.17.21:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = match parser.parse_file(content).await {
+        let result = match parser.parse_file(content).await {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!("yarn_pest parse error: {:?}", e);
@@ -495,21 +502,25 @@ lodash@^4.17.21:
 
         // Expect lodash and @babel/core captured
         assert!(
-            pkgs.iter().any(|p| p.name == "lodash"
+            result.packages.iter().any(|p| p.name == "lodash"
                 && p.version == Version::parse("4.17.21").unwrap()
                 && p.ecosystem == Ecosystem::Npm),
             "Expected lodash@4.17.21 (npm) to be present, got: {:?}",
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .map(|p| (&p.name, p.version.to_string(), &p.ecosystem))
                 .collect::<Vec<_>>()
         );
 
         assert!(
-            pkgs.iter().any(|p| p.name == "@babel/core"
+            result.packages.iter().any(|p| p.name == "@babel/core"
                 && p.version == Version::parse("7.22.8").unwrap()
                 && p.ecosystem == Ecosystem::Npm),
             "Expected @babel/core@7.22.8 (npm) to be present, got: {:?}",
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .map(|p| (&p.name, p.version.to_string(), &p.ecosystem))
                 .collect::<Vec<_>>()
         );
@@ -548,18 +559,24 @@ left-pad@^1.3.0, "left-pad@~1.2.0":
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        let count = pkgs.iter().filter(|p| p.name == "left-pad").count();
+        let count = result
+            .packages
+            .iter()
+            .filter(|p| p.name == "left-pad")
+            .count();
         assert_eq!(
             count,
             1,
             "Expected exactly one left-pad package entry, got: {:?}",
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .map(|p| (&p.name, p.version.to_string()))
                 .collect::<Vec<_>>()
         );
-        assert!(pkgs.iter().any(|p| p.name == "left-pad"
+        assert!(result.packages.iter().any(|p| p.name == "left-pad"
             && p.version == Version::parse("1.3.0").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
@@ -575,9 +592,9 @@ minimist@^1.2.8:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        assert!(pkgs.iter().any(|p| p.name == "minimist"
+        assert!(result.packages.iter().any(|p| p.name == "minimist"
             && p.version == Version::parse("1.2.8").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
@@ -593,9 +610,9 @@ react-redux@^8.1.0:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        assert!(pkgs.iter().any(|p| p.name == "react-redux"
+        assert!(result.packages.iter().any(|p| p.name == "react-redux"
             && p.version == Version::parse("8.1.3").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
@@ -612,9 +629,9 @@ some-package@^1.0.0:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        assert!(pkgs.iter().any(|p| p.name == "some-package"
+        assert!(result.packages.iter().any(|p| p.name == "some-package"
             && p.version == Version::parse("1.2.3").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
@@ -630,10 +647,10 @@ valid-package@^1.0.0:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
         // Should still parse the valid package despite malformed line
-        assert!(pkgs.iter().any(|p| p.name == "valid-package"
+        assert!(result.packages.iter().any(|p| p.name == "valid-package"
             && p.version == Version::parse("1.0.0").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
@@ -648,9 +665,9 @@ nan@^2.17.0:
 "#;
 
         let parser = YarnPestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        assert!(pkgs.iter().any(|p| p.name == "nan"
+        assert!(result.packages.iter().any(|p| p.name == "nan"
             && p.version == Version::parse("2.17.0").unwrap()
             && p.ecosystem == Ecosystem::Npm));
     }
