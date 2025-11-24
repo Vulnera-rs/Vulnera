@@ -277,6 +277,26 @@ impl CacheServiceImpl {
         // No manual cleanup needed
         Ok(0)
     }
+
+    /// Push a value to the head of a list
+    pub async fn lpush<T>(&self, key: &str, value: &T) -> Result<(), ApplicationError>
+    where
+        T: serde::Serialize + Send + Sync,
+    {
+        self.cache_repository.lpush(key, value).await
+    }
+
+    /// Pop a value from the tail of a list, blocking until available
+    pub async fn brpop<T>(
+        &self,
+        key: &str,
+        timeout_seconds: f64,
+    ) -> Result<Option<T>, ApplicationError>
+    where
+        T: serde::de::DeserializeOwned + Send,
+    {
+        self.cache_repository.brpop(key, timeout_seconds).await
+    }
 }
 
 /// Cache statistics for monitoring and debugging

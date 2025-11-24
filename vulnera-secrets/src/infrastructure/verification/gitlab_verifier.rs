@@ -7,7 +7,27 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 /// GitLab token verifier
-pub struct GitLabVerifier;
+pub struct GitLabVerifier {
+    base_url: String,
+}
+
+impl GitLabVerifier {
+    pub fn new() -> Self {
+        Self {
+            base_url: "https://gitlab.com/api/v4".to_string(),
+        }
+    }
+
+    pub fn with_base_url(base_url: String) -> Self {
+        Self { base_url }
+    }
+}
+
+impl Default for GitLabVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl SecretVerifier for GitLabVerifier {
@@ -27,8 +47,10 @@ impl SecretVerifier for GitLabVerifier {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let url = format!("{}/user", self.base_url.trim_end_matches('/'));
+
         let response = client
-            .get("https://gitlab.com/api/v4/user")
+            .get(&url)
             .header("PRIVATE-TOKEN", secret)
             .send()
             .await;

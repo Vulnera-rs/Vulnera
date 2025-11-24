@@ -119,16 +119,18 @@ pub struct ApiHeader {
 }
 
 /// API schema
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ApiSchema {
     pub schema_type: Option<String>,
     pub format: Option<String>,
     pub properties: Vec<ApiProperty>,
     pub required: Vec<String>,
+    pub summary: Option<String>,
+    pub description: Option<String>,
 }
 
 /// API property
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ApiProperty {
     pub name: String,
     pub schema: ApiSchema,

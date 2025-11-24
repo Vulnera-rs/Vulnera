@@ -16,9 +16,9 @@ fn test_parser_with_file(path: &Path) -> datatest_stable::Result<()> {
 
         // Just verify it doesn't panic and returns a result
         match result {
-            Ok(packages) => {
+            Ok(parse_result) => {
                 // Verify we got a result (empty list is also valid)
-                let _ = packages.len();
+                let _ = parse_result.packages.len();
             }
             Err(_) => {
                 // Parsing errors are acceptable for invalid test files

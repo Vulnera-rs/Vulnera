@@ -233,8 +233,8 @@ where
             if let Some(content) = content_map.get(&file.path) {
                 if let Some(parser) = self.parser_factory.create_parser(&file.path) {
                     match parser.parse_file(content).await {
-                        Ok(pkgs) => {
-                            for p in &pkgs {
+                        Ok(parse_result) => {
+                            for p in &parse_result.packages {
                                 unique_packages
                                     .entry(p.identifier())
                                     .or_insert_with(|| p.clone());
@@ -242,7 +242,11 @@ where
                             parsed_files.push(RepositoryFileResultInternal {
                                 path: file.path.clone(),
                                 ecosystem,
-                                packages: if input.return_packages { pkgs } else { vec![] },
+                                packages: if input.return_packages {
+                                    parse_result.packages
+                                } else {
+                                    vec![]
+                                },
                                 error: None,
                             });
                         }

@@ -1,9 +1,9 @@
 //! PHP ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
+    entities::{Dependency, Package},
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
@@ -119,7 +119,7 @@ impl PackageFileParser for ComposerParser {
         filename == "composer.json"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let json: Value = serde_json::from_str(content)?;
         let mut packages = Vec::new();
 
@@ -127,7 +127,10 @@ impl PackageFileParser for ComposerParser {
         packages.extend(self.extract_dependencies(&json, "require")?);
         packages.extend(self.extract_dependencies(&json, "require-dev")?);
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -153,13 +156,10 @@ impl ComposerLockParser {
         Self
     }
 
-    /// Extract packages from composer.lock
-    fn extract_lock_packages(
-        &self,
-        json: &Value,
-        section: &str,
-    ) -> Result<Vec<Package>, ParseError> {
+    /// Extract packages and dependencies from composer.lock
+    fn extract_lock_data(&self, json: &Value, section: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         if let Some(packages_array) = json.get(section).and_then(|p| p.as_array()) {
             for package_info in packages_array {
@@ -192,12 +192,41 @@ impl ComposerLockParser {
                     let package = Package::new(name.to_string(), version, Ecosystem::Packagist)
                         .map_err(|e| ParseError::MissingField { field: e })?;
 
-                    packages.push(package);
+                    packages.push(package.clone());
+
+                    // Extract dependencies from "require" block inside the package
+                    if let Some(require) = package_obj.get("require").and_then(|r| r.as_object()) {
+                        for (dep_name, dep_req_val) in require {
+                            if dep_name == "php" {
+                                continue;
+                            }
+
+                            if let Some(dep_req) = dep_req_val.as_str() {
+                                // Create a placeholder package for the dependency target
+                                let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                                if let Ok(dep_pkg) = Package::new(
+                                    dep_name.to_string(),
+                                    dep_pkg_version,
+                                    Ecosystem::Packagist,
+                                ) {
+                                    dependencies.push(Dependency::new(
+                                        package.clone(),
+                                        dep_pkg,
+                                        dep_req.to_string(),
+                                        false,
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 }
 
@@ -207,17 +236,25 @@ impl PackageFileParser for ComposerLockParser {
         filename == "composer.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let json: Value = serde_json::from_str(content)?;
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         // Extract from packages section
-        packages.extend(self.extract_lock_packages(&json, "packages")?);
+        let result = self.extract_lock_data(&json, "packages")?;
+        packages.extend(result.packages);
+        dependencies.extend(result.dependencies);
 
         // Extract from packages-dev section
-        packages.extend(self.extract_lock_packages(&json, "packages-dev")?);
+        let result_dev = self.extract_lock_data(&json, "packages-dev")?;
+        packages.extend(result_dev.packages);
+        dependencies.extend(result_dev.dependencies);
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -252,17 +289,19 @@ mod tests {
         }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 5); // Excluding php version
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 5); // Excluding php version
 
-        let symfony_pkg = packages
+        let symfony_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "symfony/console")
             .unwrap();
         assert_eq!(symfony_pkg.version, Version::parse("5.4").unwrap());
         assert_eq!(symfony_pkg.ecosystem, Ecosystem::Packagist);
 
-        let guzzle_pkg = packages
+        let guzzle_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "guzzlehttp/guzzle")
             .unwrap();
@@ -285,6 +324,11 @@ mod tests {
                         "type": "git",
                         "url": "https://github.com/symfony/console.git",
                         "reference": "7fccea8728aa2d431a6725b02b3ce759049fc84d"
+                    },
+                    "require": {
+                        "php": ">=7.2.5",
+                        "symfony/polyfill-mbstring": "~1.0",
+                        "symfony/service-contracts": "^1.1|^2"
                     }
                 },
                 {
@@ -311,16 +355,32 @@ mod tests {
         }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let symfony_pkg = packages
+        let symfony_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "symfony/console")
             .unwrap();
         assert_eq!(symfony_pkg.version, Version::parse("5.4.8").unwrap());
 
-        let monolog_pkg = packages
+        // Check dependencies
+        let deps: Vec<_> = result
+            .dependencies
+            .iter()
+            .filter(|d| d.from.name == "symfony/console")
+            .collect();
+        assert_eq!(deps.len(), 2); // php is skipped
+
+        let polyfill_dep = deps
+            .iter()
+            .find(|d| d.to.name == "symfony/polyfill-mbstring")
+            .unwrap();
+        assert_eq!(polyfill_dep.requirement, "~1.0");
+
+        let monolog_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "monolog/monolog")
             .unwrap();

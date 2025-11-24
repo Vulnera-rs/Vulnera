@@ -4,7 +4,7 @@ pub mod parsers;
 pub mod rules;
 pub mod scanner;
 
-pub use rules::{RuleEngine, RuleRepository, SimpleRuleEngine};
+pub use rules::{RuleEngine, RuleRepository};
 
 pub use parsers::*;
 pub use rules::*;

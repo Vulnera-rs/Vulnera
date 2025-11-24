@@ -38,11 +38,8 @@ pub struct PythonParser {
 impl PythonParser {
     pub fn new() -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();
-        // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
-        // Using unsafe because LanguageFn is a raw function pointer
-        let language_fn: tree_sitter::Language =
-            unsafe { std::mem::transmute(tree_sitter_python::LANGUAGE) };
-        parser.set_language(&language_fn).map_err(|e| {
+        let language = tree_sitter_python::LANGUAGE.into();
+        parser.set_language(&language).map_err(|e| {
             error!(error = %e, "Failed to load Python grammar");
             ParseError::ParseFailed(format!("Failed to load Python grammar: {}", e))
         })?;
@@ -81,11 +78,8 @@ pub struct JavaScriptParser {
 impl JavaScriptParser {
     pub fn new() -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();
-        // LANGUAGE is a LanguageFn (function pointer), we need to call it to get Language
-        // Using unsafe because LanguageFn is a raw function pointer
-        let language_fn: tree_sitter::Language =
-            unsafe { std::mem::transmute(tree_sitter_javascript::LANGUAGE) };
-        parser.set_language(&language_fn).map_err(|e| {
+        let language = tree_sitter_javascript::LANGUAGE.into();
+        parser.set_language(&language).map_err(|e| {
             error!(error = %e, "Failed to load JavaScript grammar");
             ParseError::ParseFailed(format!("Failed to load JavaScript grammar: {}", e))
         })?;
@@ -119,6 +113,12 @@ impl Parser for JavaScriptParser {
 /// Rust parser using syn
 pub struct RustParser;
 
+impl Default for RustParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RustParser {
     pub fn new() -> Self {
         Self
@@ -133,23 +133,171 @@ impl Parser for RustParser {
     #[instrument(skip(self, source), fields(source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
         // Use syn to parse Rust code
-        let _syntax_tree = syn::parse_file(source).map_err(|e| {
+        let syntax_tree = syn::parse_file(source).map_err(|e| {
             warn!(error = %e, "Failed to parse Rust code");
             ParseError::ParseFailed(format!("Failed to parse Rust code: {}", e))
         })?;
 
         debug!("Rust AST parsed successfully");
+
         // Convert syn AST to our simplified AST representation
-        // This is a simplified conversion - in production, you'd want more detail
-        Ok(AstNode {
-            node_type: "source_file".to_string(),
+        Ok(convert_syn_file(&syntax_tree, source))
+    }
+}
+
+fn convert_syn_file(file: &syn::File, source: &str) -> AstNode {
+    let mut children = Vec::new();
+
+    for item in &file.items {
+        children.push(convert_syn_item(item, source));
+    }
+
+    AstNode {
+        node_type: "source_file".to_string(),
+        start_byte: 0,
+        end_byte: source.len(),
+        start_point: (0, 0),
+        end_point: (0, 0), // We'd need line/col calculation for full accuracy
+        children,
+        source: source.to_string(),
+    }
+}
+
+fn convert_syn_item(item: &syn::Item, source: &str) -> AstNode {
+    match item {
+        syn::Item::Fn(item_fn) => {
+            let mut children = Vec::new();
+            for stmt in &item_fn.block.stmts {
+                children.push(convert_syn_stmt(stmt, source));
+            }
+
+            AstNode {
+                node_type: "function_definition".to_string(),
+                start_byte: 0, // Simplified
+                end_byte: 0,
+                start_point: (0, 0),
+                end_point: (0, 0),
+                children,
+                source: "fn ...".to_string(), // Simplified
+            }
+        }
+        _ => AstNode {
+            node_type: "item".to_string(),
             start_byte: 0,
-            end_byte: source.len(),
+            end_byte: 0,
             start_point: (0, 0),
             end_point: (0, 0),
             children: vec![],
-            source: source.to_string(),
-        })
+            source: "".to_string(),
+        },
+    }
+}
+
+fn convert_syn_stmt(stmt: &syn::Stmt, source: &str) -> AstNode {
+    match stmt {
+        syn::Stmt::Expr(expr, _) => convert_syn_expr(expr, source),
+        syn::Stmt::Local(local) => {
+            if let Some(init) = &local.init {
+                convert_syn_expr(&init.expr, source)
+            } else {
+                AstNode {
+                    node_type: "local".to_string(),
+                    start_byte: 0,
+                    end_byte: 0,
+                    start_point: (0, 0),
+                    end_point: (0, 0),
+                    children: vec![],
+                    source: "".to_string(),
+                }
+            }
+        }
+        _ => AstNode {
+            node_type: "stmt".to_string(),
+            start_byte: 0,
+            end_byte: 0,
+            start_point: (0, 0),
+            end_point: (0, 0),
+            children: vec![],
+            source: "".to_string(),
+        },
+    }
+}
+
+fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
+    match expr {
+        syn::Expr::Call(expr_call) => {
+            let func_name = if let syn::Expr::Path(path) = &*expr_call.func {
+                path.path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::")
+            } else {
+                "unknown".to_string()
+            };
+
+            AstNode {
+                node_type: "call".to_string(),
+                start_byte: 0,
+                end_byte: 0,
+                start_point: (0, 0),
+                end_point: (0, 0),
+                children: vec![],
+                source: func_name, // Store function name in source for matching
+            }
+        }
+        syn::Expr::MethodCall(method_call) => {
+            let children = vec![convert_syn_expr(&method_call.receiver, source)];
+            AstNode {
+                node_type: "call".to_string(),
+                start_byte: 0,
+                end_byte: 0,
+                start_point: (0, 0),
+                end_point: (0, 0),
+                children,
+                source: method_call.method.to_string(), // Store method name
+            }
+        }
+        syn::Expr::Block(expr_block) => {
+            let mut children = Vec::new();
+            for stmt in &expr_block.block.stmts {
+                children.push(convert_syn_stmt(stmt, source));
+            }
+            AstNode {
+                node_type: "block".to_string(),
+                start_byte: 0,
+                end_byte: 0,
+                start_point: (0, 0),
+                end_point: (0, 0),
+                children,
+                source: "".to_string(),
+            }
+        }
+        syn::Expr::Unsafe(expr_unsafe) => {
+            let mut children = Vec::new();
+            for stmt in &expr_unsafe.block.stmts {
+                children.push(convert_syn_stmt(stmt, source));
+            }
+            AstNode {
+                node_type: "unsafe_block".to_string(),
+                start_byte: 0,
+                end_byte: 0,
+                start_point: (0, 0),
+                end_point: (0, 0),
+                children,
+                source: "unsafe { ... }".to_string(),
+            }
+        }
+        _ => AstNode {
+            node_type: "expr".to_string(),
+            start_byte: 0,
+            end_byte: 0,
+            start_point: (0, 0),
+            end_point: (0, 0),
+            children: vec![],
+            source: "".to_string(),
+        },
     }
 }
 
@@ -162,7 +310,130 @@ impl ParserFactory {
             Language::Python => Ok(Box::new(PythonParser::new()?)),
             Language::JavaScript => Ok(Box::new(JavaScriptParser::new()?)),
             Language::Rust => Ok(Box::new(RustParser::new())),
+            Language::Go => Ok(Box::new(GoParser::new()?)),
+            Language::C => Ok(Box::new(CParser::new()?)),
+            Language::Cpp => Ok(Box::new(CppParser::new()?)),
         }
+    }
+}
+
+/// Go parser using tree-sitter
+pub struct GoParser {
+    parser: tree_sitter::Parser,
+}
+
+impl GoParser {
+    pub fn new() -> Result<Self, ParseError> {
+        let mut parser = tree_sitter::Parser::new();
+        let language = tree_sitter_go::LANGUAGE.into();
+        parser.set_language(&language).map_err(|e| {
+            error!(error = %e, "Failed to load Go grammar");
+            ParseError::ParseFailed(format!("Failed to load Go grammar: {}", e))
+        })?;
+
+        debug!("Go parser initialized");
+        Ok(Self { parser })
+    }
+}
+
+impl Parser for GoParser {
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
+    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
+        let tree = self.parser.parse(source, None).ok_or_else(|| {
+            warn!("Failed to parse Go code");
+            ParseError::ParseFailed("Failed to parse Go code".to_string())
+        })?;
+
+        let root_node = tree.root_node();
+        debug!(
+            node_count = root_node.child_count(),
+            "Go AST parsed successfully"
+        );
+        Ok(convert_tree_sitter_node(root_node, source))
+    }
+}
+
+/// C parser using tree-sitter
+pub struct CParser {
+    parser: tree_sitter::Parser,
+}
+
+impl CParser {
+    pub fn new() -> Result<Self, ParseError> {
+        let mut parser = tree_sitter::Parser::new();
+        let language = tree_sitter_c::LANGUAGE.into();
+        parser.set_language(&language).map_err(|e| {
+            error!(error = %e, "Failed to load C grammar");
+            ParseError::ParseFailed(format!("Failed to load C grammar: {}", e))
+        })?;
+
+        debug!("C parser initialized");
+        Ok(Self { parser })
+    }
+}
+
+impl Parser for CParser {
+    fn language(&self) -> Language {
+        Language::C
+    }
+
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
+    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
+        let tree = self.parser.parse(source, None).ok_or_else(|| {
+            warn!("Failed to parse C code");
+            ParseError::ParseFailed("Failed to parse C code".to_string())
+        })?;
+
+        let root_node = tree.root_node();
+        debug!(
+            node_count = root_node.child_count(),
+            "C AST parsed successfully"
+        );
+        Ok(convert_tree_sitter_node(root_node, source))
+    }
+}
+
+/// C++ parser using tree-sitter
+pub struct CppParser {
+    parser: tree_sitter::Parser,
+}
+
+impl CppParser {
+    pub fn new() -> Result<Self, ParseError> {
+        let mut parser = tree_sitter::Parser::new();
+        let language = tree_sitter_cpp::LANGUAGE.into();
+        parser.set_language(&language).map_err(|e| {
+            error!(error = %e, "Failed to load C++ grammar");
+            ParseError::ParseFailed(format!("Failed to load C++ grammar: {}", e))
+        })?;
+
+        debug!("C++ parser initialized");
+        Ok(Self { parser })
+    }
+}
+
+impl Parser for CppParser {
+    fn language(&self) -> Language {
+        Language::Cpp
+    }
+
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
+    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
+        let tree = self.parser.parse(source, None).ok_or_else(|| {
+            warn!("Failed to parse C++ code");
+            ParseError::ParseFailed("Failed to parse C++ code".to_string())
+        })?;
+
+        let root_node = tree.root_node();
+        debug!(
+            node_count = root_node.child_count(),
+            "C++ AST parsed successfully"
+        );
+        Ok(convert_tree_sitter_node(root_node, source))
     }
 }
 

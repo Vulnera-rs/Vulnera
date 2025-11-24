@@ -21,13 +21,15 @@ use vulnera_deps::types::VersionResolutionService;
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
+use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
 use crate::infrastructure::job_store::{JobSnapshot, JobStore};
-use crate::presentation::auth::extractors::{AuthState, OptionalApiKeyAuth};
+use crate::presentation::auth::extractors::{ApiKeyAuth, AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
-    DependencyGraphEdgeDto, DependencyGraphNodeDto, FileAnalysisResult, FinalReportResponse,
+    DependencyGraphEdgeDto, DependencyGraphNodeDto, FileAnalysisResult, JobAcceptedResponse,
     PackageDto, SeverityBreakdownDto, VersionRecommendationDto, VulnerabilityDto,
 };
 use axum::extract::Query;
@@ -53,6 +55,7 @@ pub struct OrchestratorState {
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
     pub git_service: Arc<GitService>,
     pub job_store: Arc<dyn JobStore>,
+    pub job_queue: JobQueueHandle,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -95,7 +98,7 @@ pub struct OrchestratorState {
     path = "/api/v1/analyze/job",
     request_body = AnalysisRequest,
     responses(
-        (status = 200, description = "Analysis job created and executed", body = FinalReportResponse),
+        (status = 202, description = "Analysis job accepted for asynchronous execution", body = JobAcceptedResponse),
         (status = 400, description = "Invalid request"),
         (status = 500, description = "Internal server error")
     ),
@@ -103,65 +106,75 @@ pub struct OrchestratorState {
 )]
 pub async fn analyze(
     State(state): State<OrchestratorState>,
+    OptionalApiKeyAuth(api_key_auth): OptionalApiKeyAuth,
     Json(request): Json<AnalysisRequest>,
-) -> Result<Json<FinalReportResponse>, String> {
+) -> Result<(StatusCode, Json<JobAcceptedResponse>), String> {
     // Parse request
     let source_type = request.parse_source_type()?;
     let analysis_depth = request.parse_analysis_depth()?;
 
     // Create job
-    let (mut job, project) = state
+    let (job, project) = state
         .create_job_use_case
         .execute(source_type, request.source_uri.clone(), analysis_depth)
         .await
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
-    let project_id = project.id.clone();
+    let job_id = job.job_id;
+    let invocation_context = invocation_context_from_api_key(api_key_auth);
+    let callback_url = request.callback_url.clone();
 
-    let response = async {
-        let module_results = state
-            .execute_job_use_case
-            .execute(&mut job, &project)
-            .await
-            .map_err(|e| format!("Failed to execute job: {}", e))?;
-
-        let report = state
-            .aggregate_results_use_case
-            .execute(&job, module_results.clone());
-
-        // Persist snapshot for replay
-        let snapshot = JobSnapshot {
-            job_id: job.job_id,
-            project_id: job.project_id.clone(),
-            status: job.status.clone(),
-            module_results,
-            project_metadata: project.metadata.clone(),
-            created_at: job.created_at.to_rfc3339(),
-            started_at: job.started_at.map(|t| t.to_rfc3339()),
-            completed_at: job.completed_at.map(|t| t.to_rfc3339()),
-            error: job.error.clone(),
-            module_configs: std::collections::HashMap::new(),
-        };
-        if let Err(e) = state.job_store.save_snapshot(snapshot).await {
-            error!(
-                job_id = %job.job_id,
-                error = %e,
-                "Failed to save job snapshot"
-            );
-        }
-
-        Ok(Json(FinalReportResponse {
-            job_id: report.job_id,
-            status: format!("{:?}", report.status),
-            summary: report.summary,
-            findings: report.findings,
-        }))
+    let snapshot = JobSnapshot {
+        job_id,
+        project_id: job.project_id.clone(),
+        status: job.status.clone(),
+        module_results: Vec::new(),
+        project_metadata: project.metadata.clone(),
+        created_at: job.created_at.to_rfc3339(),
+        started_at: job.started_at.map(|t| t.to_rfc3339()),
+        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+        error: job.error.clone(),
+        module_configs: std::collections::HashMap::new(),
+        callback_url: callback_url.clone(),
+        invocation_context: invocation_context.clone(),
+        summary: None,
+        findings_by_type: None,
+    };
+    if let Err(e) = state.job_store.save_snapshot(snapshot).await {
+        error!(job_id = %job_id, error = %e, "Failed to persist pending job snapshot");
     }
-    .await;
 
-    state.git_service.cleanup_project(&project_id).await;
+    state
+        .job_queue
+        .enqueue(QueuedAnalysisJob {
+            job,
+            project,
+            callback_url: callback_url.clone(),
+            invocation_context,
+        })
+        .await
+        .map_err(|e| format!("Failed to enqueue job: {}", e))?;
 
-    response
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(JobAcceptedResponse {
+            job_id,
+            status: "queued".to_string(),
+            callback_url,
+            message: "Analysis job accepted for asynchronous execution".to_string(),
+        }),
+    ))
+}
+
+fn invocation_context_from_api_key(
+    api_key_auth: Option<ApiKeyAuth>,
+) -> Option<JobInvocationContext> {
+    api_key_auth.map(|auth| JobInvocationContext {
+        user_id: Some(auth.user_id),
+        email: Some(auth.email),
+        auth_strategy: Some(JobAuthStrategy::ApiKey),
+        api_key_id: Some(auth.api_key_id),
+    })
 }
 
 /// Query parameters for dependency analysis endpoint
@@ -454,6 +467,8 @@ async fn convert_analysis_report_to_response(
         version_recommendations,
         metadata: metadata_to_dto(&report.metadata),
         error: None,
+        cache_hit: None,
+        workspace_path: None,
     }
 }
 
@@ -461,7 +476,14 @@ async fn convert_analysis_report_to_response(
 ///
 /// This endpoint accepts optional API key authentication via the `X-API-Key` header or `Authorization: ApiKey <key>` header.
 /// Authenticated requests have higher rate limits and batch size limits.
-/// Unauthenticated requests are limited to 10 files per batch.
+/// Unauthenticated requests are limited to 10 analyzes per day and 10 files per batch.
+///
+/// **Extension Optimization Features:**
+/// - Batch processing for multiple files in one request
+/// - Configurable detail levels (minimal/standard/full)
+/// - Optional caching for faster repeated analysis
+/// - Compact mode for reduced payload size
+/// - Workspace path tracking for better context
 #[utoipa::path(
     post,
     path = "/api/v1/dependencies/analyze",
@@ -534,6 +556,7 @@ pub async fn analyze_dependencies(
         let use_case_clone = use_case.clone();
         let detail_level_clone = detail_level;
         let version_resolution_service_clone = version_resolution_service.clone();
+        let workspace_path = file_request.workspace_path.clone();
 
         join_set.spawn(async move {
             // Parse ecosystem
@@ -561,15 +584,20 @@ pub async fn analyze_dependencies(
                 )
                 .await
             {
-                Ok((report, dependency_graph)) => Ok(convert_analysis_report_to_response(
-                    &report,
-                    filename_for_response,
-                    ecosystem_for_response,
-                    detail_level_clone,
-                    Some(&dependency_graph),
-                    version_resolution_service_clone,
-                )
-                .await),
+                Ok((report, dependency_graph)) => {
+                    let mut result = convert_analysis_report_to_response(
+                        &report,
+                        filename_for_response,
+                        ecosystem_for_response,
+                        detail_level_clone,
+                        Some(&dependency_graph),
+                        version_resolution_service_clone,
+                    )
+                    .await;
+                    result.workspace_path = workspace_path;
+                    result.cache_hit = Some(false); // TODO: Implement actual cache tracking
+                    Ok(result)
+                }
                 Err(e) => {
                     error!("Analysis failed: {}", e);
                     Err(format!("Analysis failed: {}", e))
@@ -584,12 +612,24 @@ pub async fn analyze_dependencies(
     let mut failed = 0;
     let mut total_vulnerabilities = 0;
     let mut total_packages = 0;
+    let mut critical_count = 0;
+    let mut high_count = 0;
 
     while let Some(result) = join_set.join_next().await {
         match result {
             Ok(Ok(file_result)) => {
                 successful += 1;
                 total_vulnerabilities += file_result.vulnerabilities.len();
+
+                // Count critical and high vulnerabilities for quick extension reference
+                for vuln in &file_result.vulnerabilities {
+                    match vuln.severity.as_str() {
+                        "Critical" => critical_count += 1,
+                        "High" => high_count += 1,
+                        _ => {}
+                    }
+                }
+
                 if let Some(ref packages) = file_result.packages {
                     total_packages += packages.len();
                 } else {
@@ -621,6 +661,8 @@ pub async fn analyze_dependencies(
                         sources_queried: vec![],
                     },
                     error: Some(error_msg),
+                    cache_hit: None,
+                    workspace_path: None,
                 });
             }
             Err(e) => {
@@ -647,6 +689,8 @@ pub async fn analyze_dependencies(
                         sources_queried: vec![],
                     },
                     error: Some(format!("Internal error: {}", e)),
+                    cache_hit: None,
+                    workspace_path: None,
                 });
             }
         }
@@ -671,6 +715,9 @@ pub async fn analyze_dependencies(
             duration_ms: duration.as_millis() as u64,
             total_vulnerabilities,
             total_packages,
+            cache_hits: None, // TODO: Implement cache hit tracking
+            critical_count,
+            high_count,
         },
     }))
 }

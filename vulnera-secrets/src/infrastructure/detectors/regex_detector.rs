@@ -44,6 +44,9 @@ impl RegexDetector {
     /// Detect secrets using regex patterns
     pub fn detect(&self, content: &str, line_number: u32) -> Vec<RegexMatch> {
         let mut matches = Vec::new();
+        // Optimization: Lowercase content once if needed for keyword matching
+        // We use a lazy initialization to avoid allocation if no rules have keywords (unlikely but good practice)
+        let content_lower = once_cell::sync::Lazy::new(|| content.to_lowercase());
 
         for (rule_id, compiled_rule) in &self.compiled_rules {
             // Check keywords first (if any) for performance
@@ -52,7 +55,7 @@ impl RegexDetector {
                     .rule
                     .keywords
                     .iter()
-                    .any(|keyword| content.to_lowercase().contains(&keyword.to_lowercase()));
+                    .any(|keyword| content_lower.contains(&keyword.to_lowercase()));
                 if !has_keyword {
                     continue;
                 }

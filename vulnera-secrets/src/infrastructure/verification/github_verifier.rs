@@ -7,7 +7,27 @@ use std::time::Duration;
 use tracing::{debug, warn};
 
 /// GitHub token verifier
-pub struct GitHubVerifier;
+pub struct GitHubVerifier {
+    base_url: String,
+}
+
+impl GitHubVerifier {
+    pub fn new() -> Self {
+        Self {
+            base_url: "https://api.github.com".to_string(),
+        }
+    }
+
+    pub fn with_base_url(base_url: String) -> Self {
+        Self { base_url }
+    }
+}
+
+impl Default for GitHubVerifier {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[async_trait]
 impl SecretVerifier for GitHubVerifier {
@@ -27,8 +47,10 @@ impl SecretVerifier for GitHubVerifier {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let url = format!("{}/user", self.base_url.trim_end_matches('/'));
+
         let response = client
-            .get("https://api.github.com/user")
+            .get(&url)
             .header("Authorization", format!("Bearer {}", secret))
             .header("User-Agent", "Vulnera-Secret-Detector")
             .send()

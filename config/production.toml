@@ -20,6 +20,13 @@ ttl_hours = 24
 dragonfly_url = "${DRAGONFLY_URL:-redis://127.0.0.1:6379}"
 dragonfly_connection_timeout_seconds = 5
 
+[analysis]
+max_concurrent_packages = 5
+max_concurrent_registry_queries = 8
+max_concurrent_api_calls = 20
+job_queue_capacity = 128
+max_job_workers = 8
+
 [auth]
 # Production: MUST override jwt_secret via VULNERA__AUTH__JWT_SECRET environment variable
 jwt_secret = "${JWT_SECRET}"

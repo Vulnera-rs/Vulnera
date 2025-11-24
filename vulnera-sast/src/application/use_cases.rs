@@ -1,7 +1,6 @@
 //! SAST use cases
 
 use std::path::Path;
-use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::SastConfig;
@@ -9,7 +8,7 @@ use vulnera_core::config::SastConfig;
 use crate::domain::entities::{Finding as SastFinding, RulePattern};
 use crate::domain::value_objects::Confidence;
 use crate::infrastructure::parsers::ParserFactory;
-use crate::infrastructure::rules::{RuleEngine, RuleRepository, SimpleRuleEngine};
+use crate::infrastructure::rules::{RuleEngine, RuleRepository};
 use crate::infrastructure::scanner::DirectoryScanner;
 
 /// Result of a SAST scan
@@ -24,7 +23,7 @@ pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
     parser_factory: ParserFactory,
     rule_repository: RuleRepository,
-    rule_engine: Arc<dyn RuleEngine>,
+    rule_engine: RuleEngine,
 }
 
 impl ScanProjectUseCase {
@@ -46,7 +45,7 @@ impl ScanProjectUseCase {
             scanner,
             parser_factory: ParserFactory,
             rule_repository,
-            rule_engine: Arc::new(SimpleRuleEngine),
+            rule_engine: RuleEngine::new(),
         }
     }
 

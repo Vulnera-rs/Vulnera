@@ -80,18 +80,68 @@ pub struct AnalysisResponse {
     pub pagination: PaginationDto,
 }
 
+/// Module execution result
+#[derive(Serialize, ToSchema)]
+pub struct ModuleResultDto {
+    pub module_type: String,
+    pub status: String,
+    pub files_scanned: usize,
+    pub duration_ms: u64,
+    pub findings_count: usize,
+    pub metadata: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 /// Job status response
 #[derive(Serialize, ToSchema)]
 pub struct JobStatusResponse {
     pub job_id: Uuid,
     pub project_id: String,
     pub status: String,
-    pub modules_completed: usize,
-    pub modules_failed: usize,
+    pub summary: crate::domain::entities::Summary,
     pub created_at: String,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub error: Option<String>,
+    pub callback_url: Option<String>,
+    pub invocation_context: Option<JobInvocationContextDto>,
+
+    pub modules: Vec<ModuleResultDto>,
+    pub findings_by_type: crate::domain::entities::FindingsByType,
+}
+
+/// Response returned when a job is accepted for asynchronous processing
+#[derive(Serialize, ToSchema)]
+pub struct JobAcceptedResponse {
+    pub job_id: Uuid,
+    pub status: String,
+    pub callback_url: Option<String>,
+    pub message: String,
+}
+
+/// Sanitized view of the invocation context for API responses
+#[derive(Serialize, ToSchema)]
+pub struct JobInvocationContextDto {
+    pub user_id: Option<String>,
+    pub email: Option<String>,
+    pub auth_strategy: Option<String>,
+    pub api_key_id: Option<String>,
+}
+
+impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContextDto {
+    fn from(context: crate::domain::entities::JobInvocationContext) -> Self {
+        use crate::domain::entities::JobAuthStrategy;
+
+        Self {
+            user_id: context.user_id.map(|id| id.as_str()),
+            email: context.email.map(|email| email.into_string()),
+            auth_strategy: context.auth_strategy.map(|strategy| match strategy {
+                JobAuthStrategy::Jwt => "jwt".to_string(),
+                JobAuthStrategy::ApiKey => "api_key".to_string(),
+            }),
+            api_key_id: context.api_key_id.map(|id| id.as_str()),
+        }
+    }
 }
 
 /// Final report response
@@ -99,8 +149,8 @@ pub struct JobStatusResponse {
 pub struct FinalReportResponse {
     pub job_id: Uuid,
     pub status: String,
-    pub summary: crate::domain::entities::ReportSummary,
-    pub findings: Vec<vulnera_core::domain::module::Finding>,
+    pub summary: crate::domain::entities::Summary,
+    pub findings_by_type: crate::domain::entities::FindingsByType,
 }
 
 impl AnalysisRequest {
@@ -509,6 +559,10 @@ pub struct DependencyFileRequest {
     /// Optional filename for automatic ecosystem detection
     #[schema(example = "package.json")]
     pub filename: Option<String>,
+
+    /// Optional workspace path for better context (extension usage)
+    #[schema(example = "/workspace/frontend")]
+    pub workspace_path: Option<String>,
 }
 
 /// Batch dependency analysis request
@@ -516,6 +570,18 @@ pub struct DependencyFileRequest {
 pub struct BatchDependencyAnalysisRequest {
     /// List of dependency files to analyze
     pub files: Vec<DependencyFileRequest>,
+
+    /// Enable caching of results (default: true, useful for extensions)
+    #[serde(default = "default_true")]
+    pub enable_cache: bool,
+
+    /// Return minimal data for faster responses (extension mode)
+    #[serde(default)]
+    pub compact_mode: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Package DTO for response
@@ -606,6 +672,14 @@ pub struct FileAnalysisResult {
 
     /// Error message if analysis failed
     pub error: Option<String>,
+
+    /// Whether results were served from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hit: Option<bool>,
+
+    /// Workspace-relative path (if provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// Batch analysis metadata
@@ -634,6 +708,16 @@ pub struct BatchAnalysisMetadata {
     /// Total packages analyzed across all files
     #[schema(example = 45)]
     pub total_packages: usize,
+
+    /// Number of results served from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hits: Option<usize>,
+
+    /// Critical vulnerabilities count (quick reference for extensions)
+    pub critical_count: usize,
+
+    /// High vulnerabilities count (quick reference for extensions)
+    pub high_count: usize,
 }
 
 /// Batch dependency analysis response

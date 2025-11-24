@@ -30,6 +30,9 @@ tracing = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-javascript = { workspace = true }
+tree-sitter-go = { workspace = true }
+tree-sitter-c = { workspace = true }
+tree-sitter-cpp = { workspace = true }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
@@ -43,4 +46,5 @@ datatest-stable = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
 futures = { workspace = true }
+uuid = { workspace = true }
 

@@ -1,6 +1,6 @@
 //! Go ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
     entities::Package,
@@ -134,8 +134,12 @@ impl PackageFileParser for GoModParser {
         filename == "go.mod"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.parse_go_mod(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.parse_go_mod(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -249,8 +253,12 @@ impl PackageFileParser for GoSumParser {
         filename == "go.sum"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
-        self.parse_go_sum(content)
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
+        let packages = self.parse_go_sum(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -286,17 +294,19 @@ require (
 )
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 5);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 5);
 
-        let gin_pkg = packages
+        let gin_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "github.com/gin-gonic/gin")
             .unwrap();
         assert_eq!(gin_pkg.version, Version::parse("1.8.1").unwrap());
         assert_eq!(gin_pkg.ecosystem, Ecosystem::Go);
 
-        let crypto_pkg = packages
+        let crypto_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "golang.org/x/crypto")
             .unwrap();
@@ -313,10 +323,11 @@ github.com/stretchr/testify v1.7.1 h1:5TQK59W5E3v0r2duFAb7P95B6hEeOyEnHRa8MjYSMT
 github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2); // Should skip /go.mod entries
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2); // Should skip /go.mod entries
 
-        let gin_pkg = packages
+        let gin_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "github.com/gin-gonic/gin")
             .unwrap();
