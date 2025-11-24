@@ -1,7 +1,7 @@
 //! API security module implementation
 
 use async_trait::async_trait;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use vulnera_core::config::ApiSecurityConfig;
@@ -28,6 +28,37 @@ impl ApiSecurityModule {
             use_case: Arc::new(ScanApiSpecificationUseCase::with_config(config)),
         }
     }
+
+    /// Discover OpenAPI specification file in a directory
+    fn discover_openapi_spec(&self, dir: &Path) -> Option<PathBuf> {
+        let candidates = vec![
+            "openapi.yaml",
+            "openapi.yml",
+            "openapi.json",
+            "swagger.yaml",
+            "swagger.yml",
+            "swagger.json",
+            "api/openapi.yaml",
+            "api/openapi.yml",
+            "api/openapi.json",
+            "docs/openapi.yaml",
+            "docs/openapi.yml",
+            "docs/openapi.json",
+            "spec/openapi.yaml",
+            "spec/openapi.yml",
+            "spec/openapi.json",
+        ];
+
+        for candidate in candidates {
+            let spec_path = dir.join(candidate);
+            if spec_path.exists() && spec_path.is_file() {
+                tracing::info!("Discovered OpenAPI specification: {}", spec_path.display());
+                return Some(spec_path);
+            }
+        }
+
+        None
+    }
 }
 
 #[async_trait]
@@ -48,10 +79,42 @@ impl AnalysisModule for ApiSecurityModule {
             )));
         }
 
+        // Discover OpenAPI spec file
+        let spec_file = if source_path.is_file() {
+            source_path.to_path_buf()
+        } else if source_path.is_dir() {
+            match self.discover_openapi_spec(source_path) {
+                Some(path) => path,
+                None => {
+                    // No OpenAPI spec found - gracefully skip
+                    tracing::warn!(
+                        "No OpenAPI specification found in directory: {}",
+                        config.source_uri
+                    );
+                    return Ok(ModuleResult {
+                        job_id: config.job_id,
+                        module_type: self.module_type(),
+                        findings: Vec::new(),
+                        metadata: ModuleResultMetadata {
+                            files_scanned: 0,
+                            duration_ms: start_time.elapsed().as_millis() as u64,
+                            additional_info: std::collections::HashMap::new(),
+                        },
+                        error: None,
+                    });
+                }
+            }
+        } else {
+            return Err(ModuleExecutionError::InvalidConfig(format!(
+                "Source path is neither a file nor a directory: {}",
+                config.source_uri
+            )));
+        };
+
         // Execute scan
         let scan_result = self
             .use_case
-            .execute(source_path)
+            .execute(&spec_file)
             .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
 
         // Convert API findings to orchestrator findings

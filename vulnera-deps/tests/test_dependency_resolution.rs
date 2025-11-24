@@ -4,8 +4,7 @@ use std::sync::Arc;
 use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_deps::services::dependency_resolver::{
-    DependencyResolverService, DependencyResolverServiceImpl, build_graph_from_lockfile,
-    build_graph_from_manifest,
+    DependencyResolverServiceImpl, build_graph_from_lockfile, build_graph_from_manifest,
 };
 
 #[tokio::test]
@@ -164,7 +163,7 @@ async fn test_transitive_resolution_stub() {
     // This test documents the current behavior where transitive resolution is not yet fully implemented
     // without a registry that supports it.
     let parser_factory = Arc::new(ParserFactory::new());
-    let resolver = DependencyResolverServiceImpl::new(parser_factory);
+    let _resolver = DependencyResolverServiceImpl::new(parser_factory);
 
     let package = vulnera_core::domain::vulnerability::entities::Package::new(
         "express".to_string(),
@@ -177,10 +176,6 @@ async fn test_transitive_resolution_stub() {
     // without pulling in mockall or similar which might not be in dev-dependencies,
     // we'll skip the registry part for now or use a simple struct if possible.
     //
-    // However, the implementation currently returns empty vector anyway.
-    // So we can't easily test the "registry call" part without a mock.
-    //
-    // For now, we'll just verify that the service can be instantiated and doesn't panic.
 
     assert_eq!(package.name, "express");
 }

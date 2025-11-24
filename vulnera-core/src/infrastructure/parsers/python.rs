@@ -151,7 +151,8 @@ impl RequirementsTxtParser {
         match parts.len() {
             1 => Ok(format!("{}.0.0", parts[0])),
             2 => Ok(format!("{}.{}.0", parts[0], parts[1])),
-            _ => Ok(version.to_string()),
+            3 => Ok(version.to_string()),
+            _ => Ok(format!("{}.{}.{}", parts[0], parts[1], parts[2])),
         }
     }
 }
@@ -649,6 +650,10 @@ dev = [
         assert_eq!(parser.normalize_python_version("2.25.1").unwrap(), "2.25.1");
         assert_eq!(parser.normalize_python_version("1.2").unwrap(), "1.2.0");
         assert_eq!(parser.normalize_python_version("1").unwrap(), "1.0.0");
+
+        // Test 4-segment versions (should truncate to 3 segments)
+        assert_eq!(parser.normalize_python_version("2.7.6.1").unwrap(), "2.7.6");
+        assert_eq!(parser.normalize_python_version("1.2.3.4").unwrap(), "1.2.3");
     }
 
     #[test]

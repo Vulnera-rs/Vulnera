@@ -8,7 +8,7 @@ use crate::domain::entities::Project;
 use crate::domain::services::ModuleSelector;
 use crate::domain::value_objects::AnalysisDepth;
 
-/// Simple rule-based module selector
+/// rule-based module selector
 pub struct RuleBasedModuleSelector;
 
 #[async_trait]
@@ -47,11 +47,6 @@ impl ModuleSelector for RuleBasedModuleSelector {
                     || project.metadata.frameworks.contains(&"spring".to_string())
                 {
                     modules.push(ModuleType::ApiSecurity);
-                }
-
-                // Container security if Dockerfiles are present
-                if project.metadata.frameworks.contains(&"docker".to_string()) {
-                    modules.push(ModuleType::IaC);
                 }
             }
         }
