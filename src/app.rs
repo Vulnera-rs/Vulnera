@@ -5,7 +5,6 @@ use std::time::Instant;
 
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
-use tokio::sync::mpsc;
 use vulnera_api::ApiSecurityModule;
 use vulnera_core::Config;
 use vulnera_deps::DependencyAnalyzerModule;
@@ -275,15 +274,16 @@ pub async fn create_app(
     let aggregate_results_use_case = Arc::new(AggregateResultsUseCase::new());
 
     // Initialize background job queue and worker pool
-    let (job_tx, job_rx) = mpsc::channel(config.analysis.job_queue_capacity);
-    let job_queue_handle = JobQueueHandle::new(job_tx);
+    // Initialize background job queue and worker pool
+    let job_queue_handle = JobQueueHandle::new(cache_service.clone());
     let worker_context = JobWorkerContext {
         execute_job_use_case: execute_job_use_case.clone(),
         aggregate_results_use_case: aggregate_results_use_case.clone(),
         job_store: job_store.clone(),
         git_service: git_service.clone(),
+        cache_service: cache_service.clone(),
     };
-    spawn_job_worker_pool(job_rx, worker_context, config.analysis.max_job_workers);
+    spawn_job_worker_pool(worker_context, config.analysis.max_job_workers);
 
     // Initialize auth repositories
     let user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository> =

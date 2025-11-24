@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
+use vulnera_core::infrastructure::cache::CacheServiceImpl;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
 use crate::domain::entities::{AnalysisJob, JobInvocationContext, Project};
@@ -11,7 +12,10 @@ use crate::domain::value_objects::JobStatus;
 use crate::infrastructure::git::GitService;
 use crate::infrastructure::job_store::{JobSnapshot, JobStore, JobStoreError};
 
+const JOB_QUEUE_KEY: &str = "vulnera:orchestrator:job_queue";
+
 /// Message delivered to the background worker pool when a new analysis job is queued.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QueuedAnalysisJob {
     pub job: AnalysisJob,
     pub project: Project,
@@ -22,27 +26,71 @@ pub struct QueuedAnalysisJob {
 /// Handle that allows HTTP handlers to push jobs into the background worker queue.
 #[derive(Clone)]
 pub struct JobQueueHandle {
-    sender: mpsc::Sender<QueuedAnalysisJob>,
+    cache_service: Arc<CacheServiceImpl>,
 }
 
 impl JobQueueHandle {
-    pub fn new(sender: mpsc::Sender<QueuedAnalysisJob>) -> Self {
-        Self { sender }
+    pub fn new(cache_service: Arc<CacheServiceImpl>) -> Self {
+        Self { cache_service }
     }
 
     pub async fn enqueue(&self, job: QueuedAnalysisJob) -> Result<(), JobQueueError> {
-        self.sender
-            .send(job)
+        self.cache_service
+            .lpush(JOB_QUEUE_KEY, &job)
             .await
-            .map_err(|_| JobQueueError::QueueClosed)
+            .map_err(|e| {
+                error!("Failed to enqueue job: {}", e);
+                JobQueueError::EnqueueFailed(e.to_string())
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::entities::{AnalysisJob, Project, ProjectMetadata};
+    use crate::domain::value_objects::{AnalysisDepth, SourceType};
+    use vulnera_core::domain::module::ModuleType;
+
+    #[test]
+    fn test_queued_job_serialization() {
+        let project = Project {
+            id: "project_123".to_string(),
+            source_type: SourceType::Directory,
+            source_uri: "/tmp/test".to_string(),
+            metadata: ProjectMetadata::default(),
+        };
+
+        let job = AnalysisJob::new(
+            project.id.clone(),
+            vec![ModuleType::SAST, ModuleType::DependencyAnalyzer],
+            AnalysisDepth::Full,
+        );
+
+        let queued_job = QueuedAnalysisJob {
+            job: job.clone(),
+            project: project.clone(),
+            callback_url: Some("http://example.com/callback".to_string()),
+            invocation_context: None,
+        };
+
+        let serialized = serde_json::to_string(&queued_job).unwrap();
+        let deserialized: QueuedAnalysisJob = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.job.job_id, job.job_id);
+        assert_eq!(deserialized.project.id, project.id);
+        assert_eq!(
+            deserialized.callback_url,
+            Some("http://example.com/callback".to_string())
+        );
     }
 }
 
 /// Errors that can occur when enqueuing a job.
 #[derive(thiserror::Error, Debug)]
 pub enum JobQueueError {
-    #[error("Job queue is closed")]
-    QueueClosed,
+    #[error("Failed to enqueue job: {0}")]
+    EnqueueFailed(String),
 }
 
 /// Shared dependencies required by the job workers.
@@ -52,19 +100,20 @@ pub struct JobWorkerContext {
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
     pub job_store: Arc<dyn JobStore>,
     pub git_service: Arc<GitService>,
+    pub cache_service: Arc<CacheServiceImpl>,
 }
 
 /// Spawn a worker pool that consumes queued jobs and processes them in the background.
-pub fn spawn_job_worker_pool(
-    mut receiver: mpsc::Receiver<QueuedAnalysisJob>,
-    context: JobWorkerContext,
-    max_concurrent_jobs: usize,
-) {
+pub fn spawn_job_worker_pool(context: JobWorkerContext, max_concurrent_jobs: usize) {
     let concurrency = max_concurrent_jobs.max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
+    let cache_service = context.cache_service.clone();
 
     tokio::spawn(async move {
-        while let Some(job) = receiver.recv().await {
+        info!("Job worker pool started with concurrency: {}", concurrency);
+
+        loop {
+            // Wait for a permit before polling for a job
             let permit = match semaphore.clone().acquire_owned().await {
                 Ok(permit) => permit,
                 Err(err) => {
@@ -73,16 +122,36 @@ pub fn spawn_job_worker_pool(
                 }
             };
 
-            let ctx = context.clone();
-            tokio::spawn(async move {
-                if let Err(err) = process_job(ctx, job).await {
-                    error!(error = %err, "Background job processing failed");
+            // Poll for a job with a timeout (e.g., 5 seconds) to allow graceful shutdown checks if needed
+            // Using a loop here to keep trying until we get a job or shut down
+            let job_opt = match cache_service
+                .brpop::<QueuedAnalysisJob>(JOB_QUEUE_KEY, 5.0)
+                .await
+            {
+                Ok(job) => job,
+                Err(e) => {
+                    error!("Failed to poll job queue: {}", e);
+                    // Sleep a bit before retrying to avoid tight loop on error
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    None
                 }
+            };
+
+            if let Some(job) = job_opt {
+                let ctx = context.clone();
+                tokio::spawn(async move {
+                    if let Err(err) = process_job(ctx, job).await {
+                        error!(error = %err, "Background job processing failed");
+                    }
+                    drop(permit);
+                });
+            } else {
+                // No job received within timeout, release permit and loop again
                 drop(permit);
-            });
+            }
         }
 
-        warn!("Job queue receiver closed; worker loop exiting");
+        warn!("Job worker pool exiting");
     });
 }
 
@@ -91,6 +160,8 @@ async fn process_job(
     mut payload: QueuedAnalysisJob,
 ) -> Result<(), JobProcessingError> {
     let job_id = payload.job.job_id;
+
+    info!(job_id = %job_id, "Processing analysis job");
 
     // Execute modules via orchestrator use case
     match ctx

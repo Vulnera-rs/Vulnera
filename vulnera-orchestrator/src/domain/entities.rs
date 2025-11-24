@@ -41,8 +41,12 @@ pub struct JobInvocationContext {
 pub struct ProjectMetadata {
     /// Detected languages in the project
     pub languages: Vec<String>,
+    /// Detected frameworks (e.g., "django", "react", "spring")
+    pub frameworks: Vec<String>,
     /// Detected dependency files
     pub dependency_files: Vec<String>,
+    /// All detected configuration files of interest
+    pub detected_config_files: Vec<String>,
     /// Project root path (for directory-based sources)
     pub root_path: Option<String>,
     /// Git revision (HEAD commit) when the source comes from a repository clone

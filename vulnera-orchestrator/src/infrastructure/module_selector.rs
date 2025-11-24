@@ -40,9 +40,18 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 // Secret detection for all projects
                 modules.push(ModuleType::SecretDetection);
 
-                // API security if we have source code
-                if !project.metadata.languages.is_empty() {
+                // API security if we have source code or specific frameworks
+                if !project.metadata.languages.is_empty()
+                    || project.metadata.frameworks.contains(&"django".to_string())
+                    || project.metadata.frameworks.contains(&"fastapi".to_string())
+                    || project.metadata.frameworks.contains(&"spring".to_string())
+                {
                     modules.push(ModuleType::ApiSecurity);
+                }
+
+                // Container security if Dockerfiles are present
+                if project.metadata.frameworks.contains(&"docker".to_string()) {
+                    modules.push(ModuleType::IaC);
                 }
             }
         }

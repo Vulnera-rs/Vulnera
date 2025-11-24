@@ -136,6 +136,63 @@ impl DragonflyCache {
             .unwrap_or_default()
             .as_secs()
     }
+    /// Push a value to the head of a list
+    pub async fn lpush<T>(&self, key: &str, value: &T) -> Result<(), ApplicationError>
+    where
+        T: serde::Serialize + Send + Sync,
+    {
+        let mut conn = (*self.connection_manager).clone();
+        let json_value = serde_json::to_string(value).map_err(ApplicationError::Json)?;
+
+        redis::cmd("LPUSH")
+            .arg(key)
+            .arg(json_value)
+            .query_async::<i64>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to LPUSH to key {}: {}", key, e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Redis LPUSH error: {}", e),
+                )))
+            })?;
+
+        Ok(())
+    }
+
+    /// Pop a value from the tail of a list, blocking until available
+    pub async fn brpop<T>(
+        &self,
+        key: &str,
+        timeout_seconds: f64,
+    ) -> Result<Option<T>, ApplicationError>
+    where
+        T: serde::de::DeserializeOwned + Send,
+    {
+        let mut conn = (*self.connection_manager).clone();
+
+        // BRPOP returns [key, value] or nil if timeout
+        let result: Option<(String, String)> = redis::cmd("BRPOP")
+            .arg(key)
+            .arg(timeout_seconds)
+            .query_async::<Option<(String, String)>>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to BRPOP from key {}: {}", key, e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Redis BRPOP error: {}", e),
+                )))
+            })?;
+
+        match result {
+            Some((_, value_str)) => {
+                let value: T = serde_json::from_str(&value_str).map_err(ApplicationError::Json)?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 #[async_trait]
