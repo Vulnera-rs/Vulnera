@@ -470,6 +470,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 return parser
                     .parse_file(file_content)
                     .await
+                    .map(|result| result.packages)
                     .map_err(ApplicationError::Parse);
             }
         }
@@ -502,6 +503,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 return parser
                     .parse_file(file_content)
                     .await
+                    .map(|result| result.packages)
                     .map_err(ApplicationError::Parse);
             }
         }

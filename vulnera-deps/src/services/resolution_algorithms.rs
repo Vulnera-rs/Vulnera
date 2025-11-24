@@ -56,6 +56,13 @@ impl BacktrackingResolver {
                         message: format!("No compatible version found for {}", package_id),
                     });
                 }
+            } else {
+                // No versions available for this package
+                conflicts.push(ResolutionConflict {
+                    package: package_id.clone(),
+                    conflicting_constraints: Vec::new(),
+                    message: format!("No versions available for {}", package_id),
+                });
             }
         }
 

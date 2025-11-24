@@ -1,9 +1,9 @@
 //! Rust ecosystem parsers
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
+    entities::{Dependency, Package},
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
@@ -110,7 +110,7 @@ impl PackageFileParser for CargoParser {
         filename == "Cargo.toml"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
         let mut packages = Vec::new();
 
@@ -123,7 +123,10 @@ impl PackageFileParser for CargoParser {
         // Extract from build-dependencies section
         packages.extend(self.extract_dependencies(&toml_value, "build-dependencies")?);
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(), // Cargo.toml parser only extracts dependencies as a flat list for now
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -149,10 +152,13 @@ impl CargoLockParser {
         Self
     }
 
-    /// Extract packages from Cargo.lock
-    fn extract_lock_packages(&self, toml_value: &toml::Value) -> Result<Vec<Package>, ParseError> {
+    /// Extract packages and dependencies from Cargo.lock
+    fn extract_lock_data(&self, toml_value: &toml::Value) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
+        let mut package_map = std::collections::HashMap::new();
 
+        // First pass: Collect all packages
         if let Some(packages_array) = toml_value.get("package").and_then(|p| p.as_array()) {
             for package_info in packages_array {
                 if let Some(package_table) = package_info.as_table() {
@@ -177,12 +183,73 @@ impl CargoLockParser {
                     let package = Package::new(name.to_string(), version, Ecosystem::Cargo)
                         .map_err(|e| ParseError::MissingField { field: e })?;
 
-                    packages.push(package);
+                    packages.push(package.clone());
+                    // Key by name and version for precise lookup
+                    package_map.insert((name.to_string(), version_str.to_string()), package);
                 }
             }
         }
 
-        Ok(packages)
+        // Second pass: Build dependency edges
+        if let Some(packages_array) = toml_value.get("package").and_then(|p| p.as_array()) {
+            for package_info in packages_array {
+                if let Some(package_table) = package_info.as_table() {
+                    let name = package_table
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or_default();
+                    let version_str = package_table
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+
+                    if let Some(source_pkg) =
+                        package_map.get(&(name.to_string(), version_str.to_string()))
+                    {
+                        if let Some(deps) =
+                            package_table.get("dependencies").and_then(|d| d.as_array())
+                        {
+                            for dep_val in deps {
+                                if let Some(dep_str) = dep_val.as_str() {
+                                    // Format: "name version" or just "name"
+                                    let parts: Vec<&str> = dep_str.split_whitespace().collect();
+                                    let dep_name = parts[0];
+
+                                    // If version is specified, use it. If not, we have to guess or find the only one.
+                                    // Cargo.lock usually specifies version if ambiguous.
+                                    let target_pkg = if parts.len() >= 2 {
+                                        let dep_version = parts[1];
+                                        package_map
+                                            .get(&(dep_name.to_string(), dep_version.to_string()))
+                                    } else {
+                                        // Find any package with this name (assuming unique or taking first)
+                                        // In a real implementation we should handle this better, but for now this is a reasonable fallback
+                                        package_map
+                                            .iter()
+                                            .find(|((n, _), _)| n == dep_name)
+                                            .map(|(_, p)| p)
+                                    };
+
+                                    if let Some(target) = target_pkg {
+                                        dependencies.push(Dependency::new(
+                                            source_pkg.clone(),
+                                            target.clone(),
+                                            target.version.to_string(), // Requirement is effectively the locked version
+                                            false, // We don't know if it's transitive from here easily, but in a lockfile everything is explicit
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 }
 
@@ -192,9 +259,9 @@ impl PackageFileParser for CargoLockParser {
         filename == "Cargo.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
-        self.extract_lock_packages(&toml_value)
+        self.extract_lock_data(&toml_value)
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -228,14 +295,14 @@ clap = "~3.2"
 tokio-test = "0.4"
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 5);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 5);
 
-        let serde_pkg = packages.iter().find(|p| p.name == "serde").unwrap();
+        let serde_pkg = result.packages.iter().find(|p| p.name == "serde").unwrap();
         assert_eq!(serde_pkg.version, Version::parse("1.0").unwrap());
         assert_eq!(serde_pkg.ecosystem, Ecosystem::Cargo);
 
-        let tokio_pkg = packages.iter().find(|p| p.name == "tokio").unwrap();
+        let tokio_pkg = result.packages.iter().find(|p| p.name == "tokio").unwrap();
         assert_eq!(tokio_pkg.version, Version::parse("1.0").unwrap());
     }
 
@@ -261,13 +328,13 @@ dependencies = [
 ]
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2);
 
-        let serde_pkg = packages.iter().find(|p| p.name == "serde").unwrap();
+        let serde_pkg = result.packages.iter().find(|p| p.name == "serde").unwrap();
         assert_eq!(serde_pkg.version, Version::parse("1.0.136").unwrap());
 
-        let tokio_pkg = packages.iter().find(|p| p.name == "tokio").unwrap();
+        let tokio_pkg = result.packages.iter().find(|p| p.name == "tokio").unwrap();
         assert_eq!(tokio_pkg.version, Version::parse("1.17.0").unwrap());
     }
 

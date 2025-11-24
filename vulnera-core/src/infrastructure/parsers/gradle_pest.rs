@@ -10,7 +10,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 
 // Internal pest module to avoid exporting Rule and causing name conflicts
 mod pest_impl {
@@ -333,9 +333,9 @@ impl PackageFileParser for GradlePestParser {
         filename == "build.gradle" || filename == "build.gradle.kts"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let pairs = self.parse_pairs(content)?;
-        let mut out: Vec<Package> = Vec::new();
+        let mut packages: Vec<Package> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
         for top in pairs {
@@ -357,7 +357,7 @@ impl PackageFileParser for GradlePestParser {
                                                     version.clone(),
                                                     Ecosystem::Maven,
                                                 ) {
-                                                    out.push(pkg);
+                                                    packages.push(pkg);
                                                 }
                                             }
                                         }
@@ -376,7 +376,7 @@ impl PackageFileParser for GradlePestParser {
                                             version.clone(),
                                             Ecosystem::Maven,
                                         ) {
-                                            out.push(pkg);
+                                            packages.push(pkg);
                                         }
                                     }
                                 }
@@ -399,7 +399,7 @@ impl PackageFileParser for GradlePestParser {
                                         version.clone(),
                                         Ecosystem::Maven,
                                     ) {
-                                        out.push(pkg);
+                                        packages.push(pkg);
                                     }
                                 }
                             }
@@ -416,7 +416,7 @@ impl PackageFileParser for GradlePestParser {
                             if let Ok(pkg) =
                                 Package::new(name.clone(), version.clone(), Ecosystem::Maven)
                             {
-                                out.push(pkg);
+                                packages.push(pkg);
                             }
                         }
                     }
@@ -429,10 +429,13 @@ impl PackageFileParser for GradlePestParser {
         let fallback_pkgs = self.fallback_parse_raw(content);
         for pkg in fallback_pkgs {
             if seen.insert((pkg.name.clone(), pkg.version.to_string())) {
-                out.push(pkg);
+                packages.push(pkg);
             }
         }
-        Ok(out)
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -459,23 +462,31 @@ dependencies {
 }
 "#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
         assert!(
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .any(|p| p.name == "org.springframework:spring-core"
                     && p.version == Version::parse("5.3.21").unwrap()),
             "Expected org.springframework:spring-core:5.3.21, got: {:?}",
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .map(|p| (&p.name, p.version.to_string()))
                 .collect::<Vec<_>>()
         );
 
         assert!(
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .any(|p| p.name == "junit:junit" && p.version == Version::parse("4.13.2").unwrap()),
             "Expected junit:junit:4.13.2, got: {:?}",
-            pkgs.iter()
+            result
+                .packages
+                .iter()
                 .map(|p| (&p.name, p.version.to_string()))
                 .collect::<Vec<_>>()
         );
@@ -489,9 +500,10 @@ dependencies {
 }
 "#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        let guava = pkgs
+        let guava = result
+            .packages
             .iter()
             .find(|p| p.name == "com.google.guava:guava")
             .unwrap();
@@ -507,18 +519,20 @@ dependencies {
 }
 "#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
         assert!(
-            pkgs.iter().any(|p| p.name == "org.slf4j:slf4j-api"
-                && p.version == Version::parse("2.0.13").unwrap())
+            result
+                .packages
+                .iter()
+                .any(|p| p.name == "org.slf4j:slf4j-api"
+                    && p.version == Version::parse("2.0.13").unwrap())
         );
 
         // Platform BOM captured as a package coordinate (best-effort)
-        assert!(pkgs.iter().any(
-            |p| p.name == "org.springframework.boot:spring-boot-dependencies"
-                && p.version == Version::parse("3.2.5").unwrap()
-        ));
+        assert!(result.packages.iter().any(|p| p.name
+            == "org.springframework.boot:spring-boot-dependencies"
+            && p.version == Version::parse("3.2.5").unwrap()));
     }
 
     #[tokio::test]
@@ -530,19 +544,20 @@ dependencies {
 }
 "#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
         // No packages should be extracted from project() declarations
-        assert!(pkgs.is_empty());
+        assert!(result.packages.is_empty());
     }
 
     #[tokio::test]
     async fn test_gradle_pest_top_level_dep_stmt() {
         let content = r#"implementation 'org.apache.commons:commons-lang3:3.12.0'"#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        let commons = pkgs
+        let commons = result
+            .packages
             .iter()
             .find(|p| p.name == "org.apache.commons:commons-lang3")
             .unwrap();
@@ -557,9 +572,10 @@ dependencies {
 }
 "#;
         let parser = GradlePestParser::new();
-        let pkgs = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
 
-        let slf4j = pkgs
+        let slf4j = result
+            .packages
             .iter()
             .find(|p| p.name == "org.slf4j:slf4j-api")
             .unwrap();

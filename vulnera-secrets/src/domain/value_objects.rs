@@ -49,10 +49,16 @@ impl Entropy {
     /// Check if a string looks like Base64
     pub fn is_base64_like(data: &str) -> bool {
         // Base64 characters: A-Z, a-z, 0-9, +, /, = (padding)
+        // Also support URL-safe Base64: -, _
         data.len() >= 20
-            && data
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+            && data.chars().all(|c| {
+                c.is_ascii_alphanumeric()
+                    || c == '+'
+                    || c == '/'
+                    || c == '='
+                    || c == '-'
+                    || c == '_'
+            })
             && data.len() % 4 == 0
     }
 

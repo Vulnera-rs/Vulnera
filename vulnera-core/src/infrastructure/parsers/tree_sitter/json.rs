@@ -4,7 +4,7 @@
 
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{entities::Package, value_objects::Ecosystem};
-use crate::infrastructure::parsers::traits::PackageFileParser;
+use crate::infrastructure::parsers::traits::{PackageFileParser, ParseResult};
 use async_trait::async_trait;
 use tree_sitter::{Node, Tree};
 
@@ -181,7 +181,7 @@ impl TreeSitterJsonParser {
 
 impl TreeSitterParser for TreeSitterJsonParser {
     fn language(&self) -> tree_sitter::Language {
-        tree_sitter_json::language()
+        tree_sitter_json::language().into()
     }
 
     fn parse_with_tree_sitter(
@@ -228,11 +228,15 @@ impl PackageFileParser for TreeSitterJsonPackageParser {
         filename == self.filename
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         // Create a new parser for this parse (Parser doesn't implement Clone)
         let mut parser = create_parser_with_recovery(self.inner.language())?;
         let tree = parse_with_error_recovery(&mut parser, content, None)?;
-        self.inner.parse_with_tree_sitter(content, &tree)
+        let packages = self.inner.parse_with_tree_sitter(content, &tree)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -273,11 +277,12 @@ mod tests {
 }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 6);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 6);
 
         // Check dependencies
-        let express = packages
+        let express = result
+            .packages
             .iter()
             .find(|p| p.name == "express")
             .expect("Should find express");
@@ -286,7 +291,8 @@ mod tests {
             crate::domain::vulnerability::value_objects::Version::parse("4.18.0").unwrap()
         );
 
-        let lodash = packages
+        let lodash = result
+            .packages
             .iter()
             .find(|p| p.name == "lodash")
             .expect("Should find lodash");
@@ -295,7 +301,8 @@ mod tests {
             crate::domain::vulnerability::value_objects::Version::parse("4.17.21").unwrap()
         );
 
-        let axios = packages
+        let axios = result
+            .packages
             .iter()
             .find(|p| p.name == "axios")
             .expect("Should find axios");
@@ -305,7 +312,8 @@ mod tests {
         );
 
         // Check devDependencies
-        let typescript = packages
+        let typescript = result
+            .packages
             .iter()
             .find(|p| p.name == "typescript")
             .expect("Should find typescript");
@@ -315,7 +323,8 @@ mod tests {
         );
 
         // Check peerDependencies
-        let react = packages
+        let react = result
+            .packages
             .iter()
             .find(|p| p.name == "react")
             .expect("Should find react");
@@ -338,8 +347,8 @@ mod tests {
 }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 0);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 0);
     }
 
     #[tokio::test]
@@ -360,11 +369,12 @@ mod tests {
 }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
         // * and latest should be converted to 0.0.0, empty should be skipped
-        assert!(packages.len() >= 3);
+        assert!(result.packages.len() >= 3);
 
-        let pkg4 = packages
+        let pkg4 = result
+            .packages
             .iter()
             .find(|p| p.name == "pkg4")
             .expect("Should find pkg4");

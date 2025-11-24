@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use vulnera_core::domain::module::ModuleResult;
 
-use crate::domain::entities::ProjectMetadata;
+use crate::domain::entities::{FindingsByType, JobInvocationContext, ProjectMetadata, Summary};
 use crate::domain::value_objects::JobStatus;
 
 /// Snapshot of job execution state for replay and retrieval.
@@ -20,4 +20,8 @@ pub struct JobSnapshot {
     pub completed_at: Option<String>,
     pub error: Option<String>,
     pub module_configs: HashMap<String, serde_json::Value>,
+    pub callback_url: Option<String>,
+    pub invocation_context: Option<JobInvocationContext>,
+    pub summary: Option<Summary>,
+    pub findings_by_type: Option<FindingsByType>,
 }

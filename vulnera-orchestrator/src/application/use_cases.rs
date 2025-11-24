@@ -9,7 +9,10 @@ use vulnera_core::domain::module::{
     FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult,
 };
 
-use crate::domain::entities::{AggregatedReport, AnalysisJob, Project, ReportSummary};
+use crate::domain::entities::{
+    AggregatedReport, AnalysisJob, CveInfo, DependencyRecommendations, FindingsByType,
+    GroupedDependencyFinding, Project, SeverityBreakdown, Summary, TypeBreakdown,
+};
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
@@ -321,41 +324,89 @@ impl AggregateResultsUseCase {
         job: &AnalysisJob,
         module_results: Vec<ModuleResult>,
     ) -> AggregatedReport {
-        let mut all_findings = Vec::new();
         let mut modules_completed = 0;
         let mut modules_failed = 0;
+
+        let mut sast_findings = Vec::new();
+        let mut secret_findings = Vec::new();
+        let mut dependency_findings_raw = Vec::new();
+        let mut api_findings = Vec::new();
 
         for result in &module_results {
             if result.error.is_none() {
                 modules_completed += 1;
-                all_findings.extend(result.findings.clone());
+                match result.module_type {
+                    vulnera_core::domain::module::ModuleType::SAST => {
+                        sast_findings.extend(result.findings.clone());
+                    }
+                    vulnera_core::domain::module::ModuleType::SecretDetection => {
+                        secret_findings.extend(result.findings.clone());
+                    }
+                    vulnera_core::domain::module::ModuleType::DependencyAnalyzer => {
+                        dependency_findings_raw.extend(result.findings.clone());
+                    }
+                    vulnera_core::domain::module::ModuleType::ApiSecurity => {
+                        api_findings.extend(result.findings.clone());
+                    }
+                    _ => {
+                        sast_findings.extend(result.findings.clone());
+                    }
+                }
             } else {
                 modules_failed += 1;
             }
         }
 
-        // Deduplicate findings (simple approach - by ID)
-        let mut seen = std::collections::HashSet::new();
-        let mut deduplicated = Vec::new();
-        for finding in all_findings {
-            if seen.insert(finding.id.clone()) {
-                deduplicated.push(finding);
+        // Deduplicate each list
+        let deduplicate = |findings: Vec<vulnera_core::domain::module::Finding>| -> Vec<vulnera_core::domain::module::Finding> {
+            let mut seen = std::collections::HashSet::new();
+            let mut dedup = Vec::new();
+            for f in findings {
+                if seen.insert(f.id.clone()) {
+                    dedup.push(f);
+                }
             }
-        }
+            dedup
+        };
+
+        let sast_findings = deduplicate(sast_findings);
+        let secret_findings = deduplicate(secret_findings);
+        let dependency_findings_raw = deduplicate(dependency_findings_raw);
+        let api_findings = deduplicate(api_findings);
+
+        // Group dependency findings
+        let grouped_dependencies = Self::group_dependency_findings(&dependency_findings_raw);
 
         // Calculate summary
-        let mut summary = ReportSummary::default();
-        summary.total_findings = deduplicated.len();
-        summary.modules_completed = modules_completed;
-        summary.modules_failed = modules_failed;
+        let mut summary = Summary {
+            total_findings: sast_findings.len()
+                + secret_findings.len()
+                + dependency_findings_raw.len()
+                + api_findings.len(),
+            by_severity: SeverityBreakdown::default(),
+            by_type: TypeBreakdown {
+                sast: sast_findings.len(),
+                secrets: secret_findings.len(),
+                dependencies: grouped_dependencies.len(),
+                api: api_findings.len(),
+            },
+            modules_completed,
+            modules_failed,
+        };
 
-        for finding in &deduplicated {
+        // Calculate severity breakdown (across all findings)
+        for finding in sast_findings
+            .iter()
+            .chain(secret_findings.iter())
+            .chain(dependency_findings_raw.iter())
+            .chain(api_findings.iter())
+        {
             match finding.severity {
-                FindingSeverity::Critical => summary.critical += 1,
-                FindingSeverity::High => summary.high += 1,
-                FindingSeverity::Medium => summary.medium += 1,
-                FindingSeverity::Low => summary.low += 1,
-                FindingSeverity::Info => summary.info += 1,
+                FindingSeverity::Critical => summary.by_severity.critical += 1,
+                FindingSeverity::High => summary.by_severity.high += 1,
+                FindingSeverity::Medium => summary.by_severity.medium += 1,
+                FindingSeverity::Low => summary.by_severity.low += 1,
+                FindingSeverity::Info => summary.by_severity.info += 1,
             }
         }
 
@@ -364,10 +415,107 @@ impl AggregateResultsUseCase {
             project_id: job.project_id.clone(),
             status: job.status.clone(),
             summary,
-            findings: deduplicated,
+            findings_by_type: FindingsByType {
+                sast: sast_findings,
+                secrets: secret_findings,
+                dependencies: grouped_dependencies,
+                api: api_findings,
+            },
             module_results,
             created_at: chrono::Utc::now(),
         }
+    }
+
+    fn group_dependency_findings(
+        findings: &[vulnera_core::domain::module::Finding],
+    ) -> std::collections::HashMap<String, GroupedDependencyFinding> {
+        let mut grouped: std::collections::HashMap<String, GroupedDependencyFinding> =
+            std::collections::HashMap::new();
+
+        for finding in findings {
+            let (ecosystem, package, version) =
+                Self::parse_dependency_location(&finding.location.path);
+
+            let entry =
+                grouped
+                    .entry(package.clone())
+                    .or_insert_with(|| GroupedDependencyFinding {
+                        package_name: package.clone(),
+                        ecosystem: ecosystem.clone(),
+                        current_version: version.clone(),
+                        recommendations: DependencyRecommendations {
+                            nearest_safe: None,
+                            latest_safe: None,
+                        },
+                        severity: format!("{:?}", finding.severity),
+                        cves: Vec::new(),
+                        summary: String::new(),
+                    });
+
+            if Self::is_higher_severity(&finding.severity, &entry.severity) {
+                entry.severity = format!("{:?}", finding.severity);
+            }
+
+            entry.cves.push(CveInfo {
+                id: finding
+                    .rule_id
+                    .clone()
+                    .unwrap_or_else(|| finding.id.clone()),
+                severity: format!("{:?}", finding.severity),
+                description: finding.description.clone(),
+            });
+
+            if let Some(rec) = &finding.recommendation {
+                // Try to parse as JSON
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(rec) {
+                    if let Some(nearest) = json.get("nearest_safe").and_then(|v| v.as_str()) {
+                        entry.recommendations.nearest_safe = Some(nearest.to_string());
+                    }
+                    if let Some(latest) = json.get("latest_safe").and_then(|v| v.as_str()) {
+                        entry.recommendations.latest_safe = Some(latest.to_string());
+                    }
+                } else {
+                    // Fallback for legacy or non-JSON recommendations
+                    if entry.recommendations.nearest_safe.is_none() {
+                        entry.recommendations.nearest_safe = Some(rec.clone());
+                    }
+                }
+            }
+        }
+
+        for entry in grouped.values_mut() {
+            entry.summary = format!("{} vulnerabilities found", entry.cves.len());
+        }
+
+        grouped
+    }
+
+    fn parse_dependency_location(path: &str) -> (String, String, String) {
+        if let Some((eco_rest, _)) = path.split_once(':') {
+            let ecosystem = eco_rest.to_string();
+            let rest = path
+                .strip_prefix(&format!("{}:", ecosystem))
+                .unwrap_or(path);
+            if let Some((pkg, ver)) = rest.split_once('@') {
+                return (ecosystem, pkg.to_string(), ver.to_string());
+            }
+        }
+        (
+            "unknown".to_string(),
+            path.to_string(),
+            "unknown".to_string(),
+        )
+    }
+
+    fn is_higher_severity(new_severity: &FindingSeverity, current_severity_str: &str) -> bool {
+        let current = match current_severity_str {
+            "Critical" => FindingSeverity::Critical,
+            "High" => FindingSeverity::High,
+            "Medium" => FindingSeverity::Medium,
+            "Low" => FindingSeverity::Low,
+            _ => FindingSeverity::Info,
+        };
+        new_severity < &current
     }
 }
 

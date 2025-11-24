@@ -55,7 +55,11 @@ moka = { workspace = true }
 flate2 = { workspace = true }
 
 # Redis client for Dragonfly DB
-redis = { version = "0.26", features = ["tokio-comp", "connection-manager", "aio"] }
+redis = { version = "0.26", features = [
+    "tokio-comp",
+    "connection-manager",
+    "aio",
+] }
 
 # Authentication and security
 jsonwebtoken = { workspace = true }
@@ -95,3 +99,4 @@ wiremock = { workspace = true }
 rstest = { workspace = true }
 serial_test = { workspace = true }
 futures = { workspace = true }
+testcontainers = { workspace = true }

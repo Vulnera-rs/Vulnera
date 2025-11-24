@@ -12,20 +12,27 @@ use crate::infrastructure::parsers::AstNode;
 use tracing::debug;
 
 /// Rule engine for matching security patterns
-pub trait RuleEngine: Send + Sync {
-    fn match_rule(&self, rule: &Rule, node: &AstNode) -> bool;
+pub struct RuleEngine;
+
+impl Default for RuleEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-/// Simple rule engine implementation
-pub struct SimpleRuleEngine;
+impl RuleEngine {
+    pub fn new() -> Self {
+        Self
+    }
 
-impl RuleEngine for SimpleRuleEngine {
-    fn match_rule(&self, rule: &Rule, node: &AstNode) -> bool {
+    pub fn match_rule(&self, rule: &Rule, node: &AstNode) -> bool {
         match &rule.pattern {
             RulePattern::AstNodeType(pattern) => node.node_type == *pattern,
             RulePattern::FunctionCall(func_name) => {
                 // Check if node is a function call with matching name
-                node.node_type == "call" && node.source.contains(func_name)
+                // Support both "call" (Python) and "call_expression" (JS)
+                let is_call = node.node_type == "call" || node.node_type == "call_expression";
+                is_call && node.source.contains(func_name)
             }
             RulePattern::Regex(pattern) => {
                 if let Ok(re) = regex::Regex::new(pattern) {

@@ -55,8 +55,8 @@ impl VerificationService {
     pub fn new(timeout: Duration) -> Self {
         let mut verifiers: Vec<Box<dyn SecretVerifier>> = Vec::new();
         verifiers.push(Box::new(AwsVerifier {}));
-        verifiers.push(Box::new(GitHubVerifier {}));
-        verifiers.push(Box::new(GitLabVerifier {}));
+        verifiers.push(Box::new(GitHubVerifier::new()));
+        verifiers.push(Box::new(GitLabVerifier::new()));
 
         Self { verifiers, timeout }
     }

@@ -4,7 +4,7 @@
 
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{entities::Package, value_objects::Ecosystem};
-use crate::infrastructure::parsers::traits::PackageFileParser;
+use crate::infrastructure::parsers::traits::{PackageFileParser, ParseResult};
 use async_trait::async_trait;
 use tree_sitter::{Node, Tree};
 
@@ -337,11 +337,15 @@ impl PackageFileParser for TreeSitterGoPackageParser {
         filename == self.filename
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         // Note: tree-sitter-go is for parsing Go source code, not go.mod files.
         // Since go.mod files have a different syntax, we fall back to text-based parsing.
         // This parser exists for potential future use with a go.mod-specific tree-sitter grammar.
-        self.inner.parse_go_mod_text(content)
+        let packages = self.inner.parse_go_mod_text(content)?;
+        Ok(ParseResult {
+            packages,
+            dependencies: Vec::new(),
+        })
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -375,10 +379,11 @@ require (
 require github.com/stretchr/testify v1.7.1
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let gin_pkg = packages
+        let gin_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "github.com/gin-gonic/gin")
             .expect("Should find gin package");
@@ -387,7 +392,8 @@ require github.com/stretchr/testify v1.7.1
             crate::domain::vulnerability::value_objects::Version::parse("1.9.1").unwrap()
         );
 
-        let crypto_pkg = packages
+        let crypto_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "golang.org/x/crypto")
             .expect("Should find crypto package");
@@ -396,7 +402,8 @@ require github.com/stretchr/testify v1.7.1
             crate::domain::vulnerability::value_objects::Version::parse("0.9.0").unwrap()
         );
 
-        let testify_pkg = packages
+        let testify_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "github.com/stretchr/testify")
             .expect("Should find testify package");
@@ -422,10 +429,11 @@ require (
 )
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 2);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 2);
 
-        let crypto_pkg = packages
+        let crypto_pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "golang.org/x/crypto")
             .expect("Should find crypto package");
@@ -435,7 +443,8 @@ require (
             crate::domain::vulnerability::value_objects::Version::parse("0.0.0").unwrap()
         );
 
-        let pkg = packages
+        let pkg = result
+            .packages
             .iter()
             .find(|p| p.name == "github.com/example/pkg")
             .expect("Should find example package");

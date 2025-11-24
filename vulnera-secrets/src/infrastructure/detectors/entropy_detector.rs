@@ -1,6 +1,7 @@
 //! Entropy-based secret detector
 
 use crate::domain::value_objects::{Entropy, EntropyEncoding};
+use regex::Regex;
 use tracing::debug;
 
 /// Entropy detector for high-entropy strings
@@ -8,6 +9,7 @@ use tracing::debug;
 pub struct EntropyDetector {
     base64_threshold: f64,
     hex_threshold: f64,
+    candidate_regex: Regex,
 }
 
 impl EntropyDetector {
@@ -15,6 +17,10 @@ impl EntropyDetector {
         Self {
             base64_threshold,
             hex_threshold,
+            // Match sequences of potential secret characters (Base64/Hex/URL-safe)
+            // Minimum length 20 to avoid noise
+            candidate_regex: Regex::new(r"[A-Za-z0-9+/=_-]{20,}")
+                .expect("Failed to compile entropy candidate regex"),
         }
     }
 
@@ -22,17 +28,9 @@ impl EntropyDetector {
     pub fn detect(&self, content: &str, line_number: u32) -> Vec<EntropyMatch> {
         let mut matches = Vec::new();
 
-        // Split content into potential secret candidates
-        // Look for Base64-like and hex-like strings
-        let words: Vec<&str> = content
-            .split_whitespace()
-            .flat_map(|s| {
-                s.split(|c: char| !c.is_alphanumeric() && c != '+' && c != '/' && c != '=')
-            })
-            .filter(|s| s.len() >= 20) // Minimum length for secrets
-            .collect();
+        for mat in self.candidate_regex.find_iter(content) {
+            let word = mat.as_str();
 
-        for word in words {
             // Check Base64-like strings
             if Entropy::is_base64_like(word) {
                 let entropy = Entropy::shannon_entropy(word);
@@ -46,13 +44,15 @@ impl EntropyDetector {
                         encoding: EntropyEncoding::Base64,
                         entropy,
                         matched_text: word.to_string(),
-                        start_pos: content.find(word).unwrap_or(0),
-                        end_pos: content.find(word).unwrap_or(0) + word.len(),
+                        start_pos: mat.start(),
+                        end_pos: mat.end(),
                     });
+                    // Skip hex checking if Base64 threshold is met, to avoid duplicate matches (hex is a subset of Base64).
+                    continue;
                 }
             }
 
-            // Check hex-like strings
+            // Check hex-like strings (only if not already added as Base64)
             if Entropy::is_hex_like(word) {
                 let entropy = Entropy::shannon_entropy(word);
                 if entropy >= self.hex_threshold {
@@ -65,8 +65,8 @@ impl EntropyDetector {
                         encoding: EntropyEncoding::Hex,
                         entropy,
                         matched_text: word.to_string(),
-                        start_pos: content.find(word).unwrap_or(0),
-                        end_pos: content.find(word).unwrap_or(0) + word.len(),
+                        start_pos: mat.start(),
+                        end_pos: mat.end(),
                     });
                 }
             }

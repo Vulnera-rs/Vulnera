@@ -139,11 +139,11 @@ pub async fn build_graph_from_lockfile(
         std::collections::HashMap::new();
 
     // Create nodes for all packages
-    for package in packages {
+    for package in packages.packages {
         let id = PackageId::from_package(&package);
         let mut metadata = PackageMetadata::default();
         metadata.resolved_version = Some(package.version.clone());
-        metadata.is_direct = true; // In lockfiles, we can determine this from structure
+        metadata.is_direct = true;
 
         let node = PackageNode::new(package.clone()).with_metadata(metadata);
         package_map.insert(id.clone(), node);
@@ -194,10 +194,10 @@ pub async fn build_graph_from_manifest(
         .map_err(ApplicationError::Parse)?;
 
     let mut graph = DependencyGraph::new();
-    let packages_clone = packages.clone();
+    let packages_clone = packages.packages.clone();
 
     // Add direct dependencies as nodes
-    for package in packages {
+    for package in packages.packages {
         let mut metadata = PackageMetadata::default();
         metadata.is_direct = true;
 

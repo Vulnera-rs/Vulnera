@@ -8,8 +8,6 @@ pub mod module;
 pub mod vulnerability;
 
 // Re-export common types from both modules
-// Note: Both auth and vulnerability modules have sub-modules with similar names (entities, errors, repositories, value_objects)
-// Use explicit paths like `domain::auth::entities::User` or `domain::vulnerability::entities::Package` to avoid ambiguity
 #[allow(ambiguous_glob_reexports)]
 pub use auth::*;
 #[allow(ambiguous_glob_reexports)]

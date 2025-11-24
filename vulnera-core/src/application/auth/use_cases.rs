@@ -266,6 +266,12 @@ impl GenerateApiKeyUseCase {
 }
 
 /// Use case for validating API keys
+pub struct ApiKeyValidationResult {
+    pub user_id: UserId,
+    pub api_key_id: ApiKeyId,
+}
+
+/// Use case for validating API keys
 pub struct ValidateApiKeyUseCase {
     api_key_repository: Arc<dyn IApiKeyRepository>,
     api_key_generator: Arc<ApiKeyGenerator>,
@@ -282,7 +288,7 @@ impl ValidateApiKeyUseCase {
         }
     }
 
-    pub async fn execute(&self, api_key: &str) -> Result<UserId, AuthError> {
+    pub async fn execute(&self, api_key: &str) -> Result<ApiKeyValidationResult, AuthError> {
         // Hash the provided API key
         let key_hash = self.api_key_generator.hash_key(api_key);
 
@@ -310,7 +316,10 @@ impl ValidateApiKeyUseCase {
             .await
             .ok(); // Don't fail if update fails, just log it
 
-        Ok(api_key_entity.user_id)
+        Ok(ApiKeyValidationResult {
+            user_id: api_key_entity.user_id,
+            api_key_id: api_key_entity.api_key_id,
+        })
     }
 }
 

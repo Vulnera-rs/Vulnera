@@ -3,10 +3,10 @@
 //! UV is a fast Python package manager that uses pyproject.toml and uv.lock files.
 //! This module provides parsers for UV's lockfile format.
 
-use super::traits::PackageFileParser;
+use super::traits::{PackageFileParser, ParseResult};
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
+    entities::{Dependency, Package},
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
@@ -28,9 +28,10 @@ impl UvLockParser {
         Self
     }
 
-    /// Extract packages from UV lockfile
-    fn extract_lock_packages(&self, toml_value: &toml::Value) -> Result<Vec<Package>, ParseError> {
+    /// Extract packages and dependencies from UV lockfile
+    fn extract_lock_data(&self, toml_value: &toml::Value) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
         let mut seen_packages = std::collections::HashSet::new();
 
         // UV lockfiles have a [[package]] array
@@ -69,12 +70,56 @@ impl UvLockParser {
                     let package = Package::new(name.to_string(), version, Ecosystem::PyPI)
                         .map_err(|e| ParseError::MissingField { field: e })?;
 
-                    packages.push(package);
+                    packages.push(package.clone());
+
+                    // Extract dependencies
+                    if let Some(deps) = package_table.get("dependencies").and_then(|d| d.as_array())
+                    {
+                        for dep_val in deps {
+                            if let Some(dep_str) = dep_val.as_str() {
+                                // dep_str is like "certifi>=2021" or "charset-normalizer<4,>=2"
+                                // We need to split name and requirement
+                                let (dep_name, dep_req) = self.parse_dependency_string(dep_str);
+
+                                // Create a placeholder package for the dependency target
+                                // We use 0.0.0 as version since we don't know the resolved version here directly
+                                // (though we could find it by looking up other packages, but that requires 2 passes)
+                                let dep_pkg_version = Version::parse("0.0.0").unwrap();
+                                if let Ok(dep_pkg) = Package::new(
+                                    dep_name.to_string(),
+                                    dep_pkg_version,
+                                    Ecosystem::PyPI,
+                                ) {
+                                    dependencies.push(Dependency::new(
+                                        package.clone(),
+                                        dep_pkg,
+                                        dep_req.to_string(),
+                                        false,
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
+    }
+
+    /// Parse dependency string into (name, requirement)
+    fn parse_dependency_string<'a>(&self, dep_str: &'a str) -> (&'a str, &'a str) {
+        // Find the first character that indicates a version requirement
+        let split_chars = ['<', '>', '=', '!', '~'];
+        if let Some(idx) = dep_str.find(&split_chars[..]) {
+            (&dep_str[..idx], &dep_str[idx..])
+        } else {
+            // No requirement specified, or it's just a name
+            (dep_str, "*")
+        }
     }
 
     /// Clean UV version string
@@ -106,9 +151,9 @@ impl PackageFileParser for UvLockParser {
         filename == "uv.lock"
     }
 
-    async fn parse_file(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
-        self.extract_lock_packages(&toml_value)
+        self.extract_lock_data(&toml_value)
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -150,15 +195,33 @@ version = "3.2.0"
 source = { type = "registry", url = "https://pypi.org/simple" }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 3);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 3);
 
-        let requests_pkg = packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests_pkg.version, Version::parse("2.31.0").unwrap());
         assert_eq!(requests_pkg.ecosystem, Ecosystem::PyPI);
 
-        let certifi_pkg = packages.iter().find(|p| p.name == "certifi").unwrap();
+        let certifi_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "certifi")
+            .unwrap();
         assert_eq!(certifi_pkg.version, Version::parse("2023.7.22").unwrap());
+
+        // Check dependencies
+        assert_eq!(result.dependencies.len(), 2);
+        let dep1 = result
+            .dependencies
+            .iter()
+            .find(|d| d.to.name == "certifi")
+            .unwrap();
+        assert_eq!(dep1.from.name, "requests");
+        assert_eq!(dep1.requirement, ">=2021");
     }
 
     #[tokio::test]
@@ -173,10 +236,14 @@ version = "v2.31.0"
 source = { type = "registry", url = "https://pypi.org/simple" }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
-        assert_eq!(packages.len(), 1);
+        let result = parser.parse_file(content).await.unwrap();
+        assert_eq!(result.packages.len(), 1);
 
-        let requests_pkg = packages.iter().find(|p| p.name == "requests").unwrap();
+        let requests_pkg = result
+            .packages
+            .iter()
+            .find(|p| p.name == "requests")
+            .unwrap();
         assert_eq!(requests_pkg.version, Version::parse("2.31.0").unwrap());
     }
 
@@ -197,9 +264,9 @@ version = "2.31.0"
 source = { type = "registry", url = "https://pypi.org/simple" }
         "#;
 
-        let packages = parser.parse_file(content).await.unwrap();
+        let result = parser.parse_file(content).await.unwrap();
         // Should deduplicate identical packages
-        assert_eq!(packages.len(), 1);
+        assert_eq!(result.packages.len(), 1);
     }
 
     #[test]
