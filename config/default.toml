@@ -15,6 +15,14 @@ sanitize_errors = false
 hsts_max_age = 31536000         # 1 year in seconds
 hsts_include_subdomains = true
 
+[server.rate_limit]
+enabled = true
+requests_per_minute = 60
+requests_per_hour = 1000
+unauthenticated_requests_per_day = 10
+strategy = "ip"
+cleanup_interval_seconds = 300
+
 [cache]
 ttl_hours = 24
 l1_cache_size_mb = 100
@@ -31,6 +39,10 @@ max_concurrent_registry_queries = 5
 max_concurrent_api_calls = 10
 job_queue_capacity = 64
 max_job_workers = 4
+# Extension-friendly settings
+extension_batch_size_limit = 25    # Max files per batch for extension requests
+enable_response_compression = true # Enable gzip compression for responses
+cache_extension_results = true     # Cache results for faster repeated analysis
 
 [auth]
 # JWT secret key (must be at least 16 characters, 32+ recommended for production)

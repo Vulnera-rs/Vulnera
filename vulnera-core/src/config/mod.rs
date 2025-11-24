@@ -146,6 +146,8 @@ pub struct RateLimitConfig {
     pub requests_per_minute: u32,
     /// Requests allowed per hour
     pub requests_per_hour: u32,
+    /// Requests allowed per day for unauthenticated users
+    pub unauthenticated_requests_per_day: u32,
     /// Rate limit strategy (IP-based, API key, or global)
     pub strategy: RateLimitStrategy,
     /// Cleanup interval for expired entries in seconds (default: 300 = 5 minutes)
@@ -158,6 +160,7 @@ impl Default for RateLimitConfig {
             enabled: false,
             requests_per_minute: 60,
             requests_per_hour: 1000,
+            unauthenticated_requests_per_day: 10,
             strategy: RateLimitStrategy::Ip,
             cleanup_interval_seconds: 300,
         }

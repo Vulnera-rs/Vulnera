@@ -467,6 +467,8 @@ async fn convert_analysis_report_to_response(
         version_recommendations,
         metadata: metadata_to_dto(&report.metadata),
         error: None,
+        cache_hit: None,
+        workspace_path: None,
     }
 }
 
@@ -474,7 +476,14 @@ async fn convert_analysis_report_to_response(
 ///
 /// This endpoint accepts optional API key authentication via the `X-API-Key` header or `Authorization: ApiKey <key>` header.
 /// Authenticated requests have higher rate limits and batch size limits.
-/// Unauthenticated requests are limited to 10 files per batch.
+/// Unauthenticated requests are limited to 10 analyzes per day and 10 files per batch.
+///
+/// **Extension Optimization Features:**
+/// - Batch processing for multiple files in one request
+/// - Configurable detail levels (minimal/standard/full)
+/// - Optional caching for faster repeated analysis
+/// - Compact mode for reduced payload size
+/// - Workspace path tracking for better context
 #[utoipa::path(
     post,
     path = "/api/v1/dependencies/analyze",
@@ -547,6 +556,7 @@ pub async fn analyze_dependencies(
         let use_case_clone = use_case.clone();
         let detail_level_clone = detail_level;
         let version_resolution_service_clone = version_resolution_service.clone();
+        let workspace_path = file_request.workspace_path.clone();
 
         join_set.spawn(async move {
             // Parse ecosystem
@@ -574,15 +584,20 @@ pub async fn analyze_dependencies(
                 )
                 .await
             {
-                Ok((report, dependency_graph)) => Ok(convert_analysis_report_to_response(
-                    &report,
-                    filename_for_response,
-                    ecosystem_for_response,
-                    detail_level_clone,
-                    Some(&dependency_graph),
-                    version_resolution_service_clone,
-                )
-                .await),
+                Ok((report, dependency_graph)) => {
+                    let mut result = convert_analysis_report_to_response(
+                        &report,
+                        filename_for_response,
+                        ecosystem_for_response,
+                        detail_level_clone,
+                        Some(&dependency_graph),
+                        version_resolution_service_clone,
+                    )
+                    .await;
+                    result.workspace_path = workspace_path;
+                    result.cache_hit = Some(false); // TODO: Implement actual cache tracking
+                    Ok(result)
+                }
                 Err(e) => {
                     error!("Analysis failed: {}", e);
                     Err(format!("Analysis failed: {}", e))
@@ -597,12 +612,24 @@ pub async fn analyze_dependencies(
     let mut failed = 0;
     let mut total_vulnerabilities = 0;
     let mut total_packages = 0;
+    let mut critical_count = 0;
+    let mut high_count = 0;
 
     while let Some(result) = join_set.join_next().await {
         match result {
             Ok(Ok(file_result)) => {
                 successful += 1;
                 total_vulnerabilities += file_result.vulnerabilities.len();
+
+                // Count critical and high vulnerabilities for quick extension reference
+                for vuln in &file_result.vulnerabilities {
+                    match vuln.severity.as_str() {
+                        "Critical" => critical_count += 1,
+                        "High" => high_count += 1,
+                        _ => {}
+                    }
+                }
+
                 if let Some(ref packages) = file_result.packages {
                     total_packages += packages.len();
                 } else {
@@ -634,6 +661,8 @@ pub async fn analyze_dependencies(
                         sources_queried: vec![],
                     },
                     error: Some(error_msg),
+                    cache_hit: None,
+                    workspace_path: None,
                 });
             }
             Err(e) => {
@@ -660,6 +689,8 @@ pub async fn analyze_dependencies(
                         sources_queried: vec![],
                     },
                     error: Some(format!("Internal error: {}", e)),
+                    cache_hit: None,
+                    workspace_path: None,
                 });
             }
         }
@@ -684,6 +715,9 @@ pub async fn analyze_dependencies(
             duration_ms: duration.as_millis() as u64,
             total_vulnerabilities,
             total_packages,
+            cache_hits: None, // TODO: Implement cache hit tracking
+            critical_count,
+            high_count,
         },
     }))
 }

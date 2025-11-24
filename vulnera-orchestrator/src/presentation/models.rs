@@ -559,6 +559,10 @@ pub struct DependencyFileRequest {
     /// Optional filename for automatic ecosystem detection
     #[schema(example = "package.json")]
     pub filename: Option<String>,
+
+    /// Optional workspace path for better context (extension usage)
+    #[schema(example = "/workspace/frontend")]
+    pub workspace_path: Option<String>,
 }
 
 /// Batch dependency analysis request
@@ -566,6 +570,18 @@ pub struct DependencyFileRequest {
 pub struct BatchDependencyAnalysisRequest {
     /// List of dependency files to analyze
     pub files: Vec<DependencyFileRequest>,
+
+    /// Enable caching of results (default: true, useful for extensions)
+    #[serde(default = "default_true")]
+    pub enable_cache: bool,
+
+    /// Return minimal data for faster responses (extension mode)
+    #[serde(default)]
+    pub compact_mode: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Package DTO for response
@@ -656,6 +672,14 @@ pub struct FileAnalysisResult {
 
     /// Error message if analysis failed
     pub error: Option<String>,
+
+    /// Whether results were served from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hit: Option<bool>,
+
+    /// Workspace-relative path (if provided)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_path: Option<String>,
 }
 
 /// Batch analysis metadata
@@ -684,6 +708,16 @@ pub struct BatchAnalysisMetadata {
     /// Total packages analyzed across all files
     #[schema(example = 45)]
     pub total_packages: usize,
+
+    /// Number of results served from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hits: Option<usize>,
+
+    /// Critical vulnerabilities count (quick reference for extensions)
+    pub critical_count: usize,
+
+    /// High vulnerabilities count (quick reference for extensions)
+    pub high_count: usize,
 }
 
 /// Batch dependency analysis response
