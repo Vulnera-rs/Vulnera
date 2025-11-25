@@ -5832,13 +5832,18 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "mockall",
+ "proptest",
  "regex",
  "reqwest",
+ "rstest",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-test",
  "tracing",
  "vulnera-core",
+ "wiremock",
 ]
 
 [[package]]
