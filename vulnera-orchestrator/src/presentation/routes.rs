@@ -13,18 +13,19 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 use vulnera_core::Config;
+use vulnera_core::infrastructure::auth::CsrfService;
 
 use crate::presentation::{
     auth::controller::{
-        AuthAppState, create_api_key, list_api_keys, login, refresh_token, register, revoke_api_key,
+        AuthAppState, create_api_key, list_api_keys, login, logout, refresh_token, register, revoke_api_key,
     },
     controllers::{
         OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
     },
     middleware::{
-        RateLimiterState, ghsa_token_middleware, https_enforcement_middleware, logging_middleware,
-        rate_limit_middleware, security_headers_middleware,
+        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware, 
+        https_enforcement_middleware, logging_middleware, rate_limit_middleware, security_headers_middleware,
     },
     models::*,
 };
@@ -45,6 +46,7 @@ use axum::{
         crate::presentation::auth::controller::login,
         crate::presentation::auth::controller::register,
         crate::presentation::auth::controller::refresh_token,
+        crate::presentation::auth::controller::logout,
         crate::presentation::auth::controller::create_api_key,
         crate::presentation::auth::controller::list_api_keys,
         crate::presentation::auth::controller::revoke_api_key
@@ -74,8 +76,9 @@ use axum::{
             VersionRecommendationDto,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
-            crate::presentation::auth::models::TokenResponse,
-            crate::presentation::auth::models::RefreshRequest,
+            crate::presentation::auth::models::AuthResponse,
+            crate::presentation::auth::models::RefreshResponse,
+            crate::presentation::auth::models::LogoutResponse,
             crate::presentation::auth::models::CreateApiKeyRequest,
             crate::presentation::auth::models::ApiKeyResponse,
             crate::presentation::auth::models::ApiKeyListResponse,
@@ -88,12 +91,12 @@ use axum::{
         (name = "jobs", description = "Job retrieval and status endpoints"),
         (name = "dependencies", description = "Dependency analysis endpoints optimized for LSP/IDE extensions"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
-        (name = "auth", description = "Authentication and authorization endpoints")
+        (name = "auth", description = "Authentication and authorization endpoints (HttpOnly cookie-based)")
     ),
     info(
         title = "Vulnera API",
         version = "1.0.0",
-        description = "A comprehensive vulnerability analysis API for multiple programming language ecosystems. Supports analysis of dependency files from npm, PyPI, Maven, Cargo, Go modules, and Composer ecosystems.",
+        description = "A comprehensive vulnerability analysis API for multiple programming language ecosystems. Supports analysis of dependency files from npm, PyPI, Maven, Cargo, Go modules, and Composer ecosystems. Uses HttpOnly cookie authentication with CSRF protection.",
         license(
             name = "AGPL-3.0",
             url = "https://www.gnu.org/licenses/agpl-3.0.html"
@@ -124,6 +127,12 @@ async fn inject_auth_state_middleware(
 
 /// Create the application router with comprehensive middleware stack
 pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>) -> Router {
+    // Create CSRF service for auth endpoints
+    let csrf_service = Arc::new(CsrfService::new(config.auth.csrf_token_bytes));
+    
+    // Create CSRF middleware state
+    let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
+    
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
         login_use_case: orchestrator_state.login_use_case.clone(),
@@ -131,21 +140,37 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
         auth_state: orchestrator_state.auth_state.clone(),
         token_ttl_hours: config.auth.token_ttl_hours,
+        csrf_service: csrf_service.clone(),
+        cookie_domain: config.auth.cookie_domain.clone(),
+        cookie_secure: config.auth.cookie_secure,
+        cookie_same_site: config.auth.cookie_same_site.clone(),
+        cookie_path: config.auth.cookie_path.clone(),
+        refresh_cookie_path: config.auth.refresh_cookie_path.clone(),
     };
 
-    // Auth routes
-    let auth_routes = Router::new()
+    // Auth routes (login/register don't need CSRF, refresh/logout do)
+    // Public auth routes (no CSRF required - these establish the session)
+    let public_auth_routes = Router::new()
         .route("/auth/login", post(login))
         .route("/auth/register", post(register))
+        .with_state(auth_app_state.clone());
+    
+    // Protected auth routes (CSRF required for state-changing operations)
+    let protected_auth_routes = Router::new()
         .route("/auth/refresh", post(refresh_token))
+        .route("/auth/logout", post(logout))
         .route("/auth/api-keys", post(create_api_key).get(list_api_keys))
         .route(
             "/auth/api-keys/{key_id}",
             axum::routing::delete(revoke_api_key),
         )
+        .layer(middleware::from_fn_with_state(
+            csrf_middleware_state.clone(),
+            csrf_validation_middleware,
+        ))
         .with_state(auth_app_state);
 
-    // Orchestrator job-based analysis route
+    // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
@@ -154,7 +179,12 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             get(crate::presentation::controllers::jobs::get_job),
         )
         .route("/dependencies/analyze", post(analyze_dependencies))
-        .merge(auth_routes);
+        .layer(middleware::from_fn_with_state(
+            csrf_middleware_state,
+            csrf_validation_middleware,
+        ))
+        .merge(public_auth_routes)
+        .merge(protected_auth_routes);
 
     // Root route - redirect to docs if enabled, otherwise show API info
     async fn root_handler() -> Response {
@@ -178,9 +208,13 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/metrics", get(metrics));
 
     // Build CORS layer from configuration
+    // Note: For cookie-based auth, we need allow_credentials(true) which requires
+    // specific origins (not wildcard) in production
     let cors_layer =
         if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
-            // Allow all origins (development only)
+            // Development mode: allow all origins but without credentials
+            // In development, cookies may not work across origins without proper config
+            tracing::warn!("CORS: Using wildcard origin (*) - cookies won't work cross-origin. Configure specific origins for production.");
             CorsLayer::new()
                 .allow_origin(tower_http::cors::AllowOrigin::any())
                 .allow_methods([
@@ -192,7 +226,6 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
                 ])
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
-                    axum::http::header::AUTHORIZATION,
                     axum::http::header::ACCEPT,
                     axum::http::header::USER_AGENT,
                     axum::http::header::ORIGIN,
@@ -201,22 +234,27 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
                     axum::http::HeaderName::from_static("x-ghsa-token"),
                     axum::http::HeaderName::from_static("x-github-token"),
                     axum::http::HeaderName::from_static("x-api-key"),
+                    axum::http::HeaderName::from_static("x-csrf-token"),
                 ])
-                .allow_credentials(false)
+                .allow_credentials(false) // Cannot use credentials with wildcard origin
                 .max_age(Duration::from_secs(3600))
         } else {
-            let mut layer = CorsLayer::new();
-            for origin in &config.server.allowed_origins {
-                match axum::http::HeaderValue::from_str(origin) {
-                    Ok(origin_header) => {
-                        layer = layer.allow_origin(origin_header);
-                    }
-                    Err(_) => {
-                        tracing::warn!(origin, "Invalid CORS origin in config; skipping");
-                    }
-                }
-            }
-            layer
+            // Production mode: specific origins with credentials enabled
+            let origins: Vec<axum::http::HeaderValue> = config
+                .server
+                .allowed_origins
+                .iter()
+                .filter_map(|origin| {
+                    axum::http::HeaderValue::from_str(origin)
+                        .map_err(|_| {
+                            tracing::warn!(origin, "Invalid CORS origin in config; skipping");
+                        })
+                        .ok()
+                })
+                .collect();
+            
+            CorsLayer::new()
+                .allow_origin(origins)
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
@@ -226,7 +264,6 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
                 ])
                 .allow_headers([
                     axum::http::header::CONTENT_TYPE,
-                    axum::http::header::AUTHORIZATION,
                     axum::http::header::ACCEPT,
                     axum::http::header::USER_AGENT,
                     axum::http::header::ORIGIN,
@@ -235,8 +272,9 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
                     axum::http::HeaderName::from_static("x-ghsa-token"),
                     axum::http::HeaderName::from_static("x-github-token"),
                     axum::http::HeaderName::from_static("x-api-key"),
+                    axum::http::HeaderName::from_static("x-csrf-token"),
                 ])
-                .allow_credentials(false)
+                .allow_credentials(true) // Enable credentials for cookie-based auth
                 .max_age(Duration::from_secs(3600))
         };
     let mut router = Router::new()

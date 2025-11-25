@@ -1,9 +1,9 @@
-//! Authentication controller endpoints
+//! Authentication controller endpoints with HttpOnly cookie-based authentication
 
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::Json,
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{IntoResponse, Json, Response},
 };
 use chrono::{Duration, Utc};
 use std::sync::Arc;
@@ -13,10 +13,12 @@ use vulnera_core::application::auth::use_cases::{
     GenerateApiKeyUseCase, ListApiKeysUseCase, LoginUseCase, RefreshTokenUseCase,
     RegisterUserUseCase, RevokeApiKeyUseCase,
 };
+use vulnera_core::config::CookieSameSite;
 use vulnera_core::domain::auth::{
     errors::AuthError,
     value_objects::{ApiKeyId, Email},
 };
+use vulnera_core::infrastructure::auth::CsrfService;
 
 use crate::presentation::auth::extractors::{Auth, AuthState};
 use crate::presentation::auth::models::*;
@@ -29,17 +31,129 @@ pub struct AuthAppState {
     pub register_use_case: Arc<RegisterUserUseCase>,
     pub refresh_token_use_case: Arc<RefreshTokenUseCase>,
     pub auth_state: AuthState,
+    pub csrf_service: Arc<CsrfService>,
     pub token_ttl_hours: u64,
+    // Cookie configuration
+    pub cookie_domain: Option<String>,
+    pub cookie_secure: bool,
+    pub cookie_same_site: CookieSameSite,
+    pub cookie_path: String,
+    pub refresh_cookie_path: String,
 }
 
-/// Login endpoint
+impl AuthAppState {
+    /// Build a Set-Cookie header value for the access token
+    fn build_access_token_cookie(&self, token: &str, max_age_secs: i64) -> String {
+        let mut cookie = format!(
+            "access_token={}; HttpOnly; Path={}; Max-Age={}; SameSite={}",
+            token,
+            self.cookie_path,
+            max_age_secs,
+            self.cookie_same_site.as_str()
+        );
+
+        if self.cookie_secure {
+            cookie.push_str("; Secure");
+        }
+
+        if let Some(ref domain) = self.cookie_domain {
+            cookie.push_str(&format!("; Domain={}", domain));
+        }
+
+        cookie
+    }
+
+    /// Build a Set-Cookie header value for the refresh token
+    fn build_refresh_token_cookie(&self, token: &str, max_age_secs: i64) -> String {
+        // Refresh token uses Strict SameSite for extra security
+        let mut cookie = format!(
+            "refresh_token={}; HttpOnly; Path={}; Max-Age={}; SameSite=Strict",
+            token, self.refresh_cookie_path, max_age_secs
+        );
+
+        if self.cookie_secure {
+            cookie.push_str("; Secure");
+        }
+
+        if let Some(ref domain) = self.cookie_domain {
+            cookie.push_str(&format!("; Domain={}", domain));
+        }
+
+        cookie
+    }
+
+    /// Build a Set-Cookie header value for the CSRF token (NOT HttpOnly - must be readable by JS)
+    fn build_csrf_cookie(&self, token: &str, max_age_secs: i64) -> String {
+        let mut cookie = format!(
+            "csrf_token={}; Path={}; Max-Age={}; SameSite={}",
+            token,
+            self.cookie_path,
+            max_age_secs,
+            self.cookie_same_site.as_str()
+        );
+
+        if self.cookie_secure {
+            cookie.push_str("; Secure");
+        }
+
+        if let Some(ref domain) = self.cookie_domain {
+            cookie.push_str(&format!("; Domain={}", domain));
+        }
+
+        cookie
+    }
+
+    /// Build Set-Cookie headers to clear all auth cookies (for logout)
+    fn build_clear_cookies(&self) -> Vec<String> {
+        vec![
+            // Clear access token
+            format!(
+                "access_token=; HttpOnly; Path={}; Max-Age=0; SameSite={}{}{}",
+                self.cookie_path,
+                self.cookie_same_site.as_str(),
+                if self.cookie_secure { "; Secure" } else { "" },
+                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+            ),
+            // Clear refresh token
+            format!(
+                "refresh_token=; HttpOnly; Path={}; Max-Age=0; SameSite=Strict{}{}",
+                self.refresh_cookie_path,
+                if self.cookie_secure { "; Secure" } else { "" },
+                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+            ),
+            // Clear CSRF token
+            format!(
+                "csrf_token=; Path={}; Max-Age=0; SameSite={}{}{}",
+                self.cookie_path,
+                self.cookie_same_site.as_str(),
+                if self.cookie_secure { "; Secure" } else { "" },
+                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+            ),
+        ]
+    }
+}
+
+/// Helper function to extract a cookie value from headers
+pub fn extract_cookie(headers: &HeaderMap, cookie_name: &str) -> Option<String> {
+    headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .map(|s| s.trim())
+        .find(|s| s.starts_with(&format!("{}=", cookie_name)))?
+        .strip_prefix(&format!("{}=", cookie_name))
+        .map(|s| s.to_string())
+}
+
+/// Login endpoint - sets HttpOnly cookies for tokens
 #[utoipa::path(
     post,
     path = "/api/v1/auth/login",
     tag = "auth",
     request_body = LoginRequest,
     responses(
-        (status = 200, description = "Login successful", body = TokenResponse),
+        (status = 200, description = "Login successful - tokens set as HttpOnly cookies", body = AuthResponse),
         (status = 401, description = "Invalid credentials", body = ErrorResponse),
         (status = 422, description = "Validation error", body = ErrorResponse)
     )
@@ -47,7 +161,7 @@ pub struct AuthAppState {
 pub async fn login(
     State(state): State<AuthAppState>,
     axum::Json(request): axum::Json<LoginRequest>,
-) -> Result<Json<TokenResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     // Validate email
     let email = Email::new(request.email).map_err(|e| {
         (
@@ -86,25 +200,53 @@ pub async fn login(
             )
         })?;
 
-    // Get token TTL from state
-    let expires_in = state.token_ttl_hours * 3600;
+    // Calculate cookie expiration times
+    let access_token_max_age = (state.token_ttl_hours * 3600) as i64;
+    let refresh_token_max_age = (state.token_ttl_hours * 30 * 3600) as i64; // 30x access token TTL
 
-    Ok(Json(TokenResponse {
-        access_token: result.access_token,
-        refresh_token: result.refresh_token,
-        token_type: "Bearer".to_string(),
-        expires_in,
-    }))
+    // Generate CSRF token
+    let csrf_token = state.csrf_service.generate_token();
+
+    // Build response with cookies
+    let mut headers = HeaderMap::new();
+    
+    headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_access_token_cookie(&result.access_token, access_token_max_age))
+            .unwrap(),
+    );
+    
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age))
+            .unwrap(),
+    );
+    
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
+            .unwrap(),
+    );
+
+    let body = AuthResponse {
+        csrf_token,
+        expires_in: state.token_ttl_hours * 3600,
+        user_id: result.user_id.as_uuid(),
+        email: result.email.as_str().to_string(),
+        roles: result.roles.iter().map(|r| r.to_string()).collect(),
+    };
+
+    Ok((StatusCode::OK, headers, Json(body)).into_response())
 }
 
-/// Register new user endpoint
+/// Register new user endpoint - sets HttpOnly cookies for tokens
 #[utoipa::path(
     post,
     path = "/api/v1/auth/register",
     tag = "auth",
     request_body = RegisterRequest,
     responses(
-        (status = 200, description = "Registration successful", body = TokenResponse),
+        (status = 200, description = "Registration successful - tokens set as HttpOnly cookies", body = AuthResponse),
         (status = 409, description = "Email already exists", body = ErrorResponse),
         (status = 422, description = "Validation error", body = ErrorResponse)
     )
@@ -112,9 +254,9 @@ pub async fn login(
 pub async fn register(
     State(state): State<AuthAppState>,
     axum::Json(request): axum::Json<RegisterRequest>,
-) -> Result<Json<TokenResponse>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     // Validate email
-    let email = Email::new(request.email).map_err(|e| {
+    let email = Email::new(request.email.clone()).map_err(|e| {
         (
             StatusCode::UNPROCESSABLE_ENTITY,
             Json(ErrorResponse {
@@ -130,12 +272,12 @@ pub async fn register(
     // Execute register use case
     let result = state
         .register_use_case
-        .execute(email, request.password, request.roles)
+        .execute(email.clone(), request.password, request.roles.clone())
         .await
         .map_err(|e| {
             let status = match e {
                 AuthError::EmailAlreadyExists { .. } => StatusCode::CONFLICT,
-                AuthError::WeakPassword => StatusCode::UNPROCESSABLE_ENTITY,
+                AuthError::WeakPassword | AuthError::PasswordRequirementsNotMet { .. } => StatusCode::UNPROCESSABLE_ENTITY,
                 AuthError::InvalidEmail { .. } => StatusCode::UNPROCESSABLE_ENTITY,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
@@ -152,35 +294,80 @@ pub async fn register(
             )
         })?;
 
-    // Get token TTL from state
-    let expires_in = state.token_ttl_hours * 3600;
+    // Calculate cookie expiration times
+    let access_token_max_age = (state.token_ttl_hours * 3600) as i64;
+    let refresh_token_max_age = (state.token_ttl_hours * 30 * 3600) as i64;
 
-    Ok(Json(TokenResponse {
-        access_token: result.access_token,
-        refresh_token: result.refresh_token,
-        token_type: "Bearer".to_string(),
-        expires_in,
-    }))
+    // Generate CSRF token
+    let csrf_token = state.csrf_service.generate_token();
+
+    // Build response with cookies
+    let mut headers = HeaderMap::new();
+    
+    headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_access_token_cookie(&result.access_token, access_token_max_age))
+            .unwrap(),
+    );
+    
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age))
+            .unwrap(),
+    );
+    
+    headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
+            .unwrap(),
+    );
+
+    // Get roles for response
+    let roles = request.roles.unwrap_or_else(|| vec![vulnera_core::domain::auth::value_objects::UserRole::User]);
+
+    let body = AuthResponse {
+        csrf_token,
+        expires_in: state.token_ttl_hours * 3600,
+        user_id: result.user_id.as_uuid(),
+        email: email.as_str().to_string(),
+        roles: roles.iter().map(|r| r.to_string()).collect(),
+    };
+
+    Ok((StatusCode::OK, headers, Json(body)).into_response())
 }
 
-/// Refresh token endpoint
+/// Refresh token endpoint - reads refresh token from cookie, sets new access token cookie
 #[utoipa::path(
     post,
     path = "/api/v1/auth/refresh",
     tag = "auth",
-    request_body = RefreshRequest,
     responses(
-        (status = 200, description = "Token refreshed", body = TokenResponse),
+        (status = 200, description = "Token refreshed - new access token set as HttpOnly cookie", body = RefreshResponse),
         (status = 401, description = "Invalid or expired refresh token", body = ErrorResponse)
     )
 )]
 pub async fn refresh_token(
     State(state): State<AuthAppState>,
-    axum::Json(request): axum::Json<RefreshRequest>,
-) -> Result<Json<TokenResponse>, (StatusCode, Json<ErrorResponse>)> {
+    headers: HeaderMap,
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+    // Extract refresh token from cookie
+    let refresh_token_value = extract_cookie(&headers, "refresh_token").ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                code: "REFRESH_FAILED".to_string(),
+                message: "No refresh token provided".to_string(),
+                details: None,
+                request_id: Uuid::new_v4(),
+                timestamp: Utc::now(),
+            }),
+        )
+    })?;
+
+    // Execute refresh use case
     let access_token = state
         .refresh_token_use_case
-        .execute(&request.refresh_token)
+        .execute(&refresh_token_value)
         .await
         .map_err(|e| {
             (
@@ -195,15 +382,63 @@ pub async fn refresh_token(
             )
         })?;
 
-    // Get token TTL from state
-    let expires_in = state.token_ttl_hours * 3600;
+    // Calculate cookie expiration time
+    let access_token_max_age = (state.token_ttl_hours * 3600) as i64;
 
-    Ok(Json(TokenResponse {
-        access_token,
-        refresh_token: request.refresh_token, // Return same refresh token
-        token_type: "Bearer".to_string(),
-        expires_in,
-    }))
+    // Generate new CSRF token
+    let csrf_token = state.csrf_service.generate_token();
+
+    // Build response with new cookies
+    let mut response_headers = HeaderMap::new();
+    
+    response_headers.insert(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_access_token_cookie(&access_token, access_token_max_age))
+            .unwrap(),
+    );
+    
+    response_headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
+            .unwrap(),
+    );
+
+    let body = RefreshResponse {
+        csrf_token,
+        expires_in: state.token_ttl_hours * 3600,
+    };
+
+    Ok((StatusCode::OK, response_headers, Json(body)).into_response())
+}
+
+/// Logout endpoint - clears auth cookies
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/logout",
+    tag = "auth",
+    responses(
+        (status = 200, description = "Successfully logged out", body = LogoutResponse)
+    )
+)]
+pub async fn logout(
+    State(state): State<AuthAppState>,
+    _headers: HeaderMap,
+) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+    // Build response with cleared cookies
+    let mut response_headers = HeaderMap::new();
+    
+    for cookie in state.build_clear_cookies() {
+        response_headers.append(
+            header::SET_COOKIE,
+            HeaderValue::from_str(&cookie).unwrap(),
+        );
+    }
+
+    let body = LogoutResponse {
+        message: "Successfully logged out".to_string(),
+    };
+
+    Ok((StatusCode::OK, response_headers, Json(body)).into_response())
 }
 
 /// Create API key endpoint
@@ -218,7 +453,7 @@ pub async fn refresh_token(
         (status = 422, description = "Validation error", body = ErrorResponse)
     ),
     security(
-        ("Bearer" = [])
+        ("CookieAuth" = [])
     )
 )]
 pub async fn create_api_key(
@@ -278,7 +513,7 @@ pub async fn create_api_key(
         (status = 401, description = "Unauthorized", body = ErrorResponse)
     ),
     security(
-        ("Bearer" = [])
+        ("CookieAuth" = [])
     )
 )]
 pub async fn list_api_keys(
@@ -342,7 +577,7 @@ pub async fn list_api_keys(
         (status = 404, description = "API key not found", body = ErrorResponse)
     ),
     security(
-        ("Bearer" = [])
+        ("CookieAuth" = [])
     )
 )]
 pub async fn revoke_api_key(
