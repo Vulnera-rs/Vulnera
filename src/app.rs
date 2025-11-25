@@ -1,10 +1,12 @@
 //! Application setup and wiring
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
+use tokio_util::sync::CancellationToken;
 use vulnera_api::ApiSecurityModule;
 use vulnera_core::Config;
 use vulnera_deps::DependencyAnalyzerModule;
@@ -26,17 +28,12 @@ use vulnera_core::application::auth::use_cases::{
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::infrastructure::{
-    api_clients::{
-        circuit_breaker_wrapper::CircuitBreakerApiClient, ghsa::GhsaClient, nvd::NvdClient,
-        osv::OsvClient,
-    },
+    VulneraAdvisorRepository,
     auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
-    repositories::AggregatingVulnerabilityRepository,
     repository_source::github_client::GitHubRepositoryClient,
-    resilience::{CircuitBreaker, CircuitBreakerConfig},
 };
 use vulnera_deps::{
     AnalyzeDependenciesUseCase,
@@ -47,12 +44,115 @@ use vulnera_deps::{
     types::VersionResolutionService,
 };
 
-/// Create the application router
+/// Handle returned from create_app for graceful shutdown coordination
+pub struct AppHandle {
+    pub router: Router,
+    pub shutdown_token: CancellationToken,
+}
+
+/// Spawns a background worker that periodically syncs vulnerability sources.
+/// Respects the cancellation token for graceful shutdown.
+fn spawn_sync_worker(
+    vulnerability_repository: Arc<VulneraAdvisorRepository>,
+    config: &Config,
+    shutdown_token: CancellationToken,
+) {
+    let sync_config = config.sync.clone();
+    let is_syncing = Arc::new(AtomicBool::new(false));
+
+    // Perform initial sync if configured
+    if sync_config.on_startup {
+        let vuln_repo = vulnerability_repository.clone();
+        let is_syncing_startup = is_syncing.clone();
+        let token = shutdown_token.clone();
+
+        tokio::spawn(async move {
+            // Skip if already cancelled
+            if token.is_cancelled() {
+                return;
+            }
+
+            is_syncing_startup.store(true, Ordering::SeqCst);
+            tracing::info!("Starting initial vulnerability source sync...");
+
+            tokio::select! {
+                result = vuln_repo.sync_all() => {
+                    match result {
+                        Ok(()) => {
+                            tracing::info!("Initial vulnerability source sync completed successfully");
+                        }
+                        Err(e) => {
+                            tracing::warn!("Initial vulnerability sync failed (non-fatal): {}", e);
+                        }
+                    }
+                }
+                _ = token.cancelled() => {
+                    tracing::info!("Initial sync cancelled due to shutdown");
+                }
+            }
+
+            is_syncing_startup.store(false, Ordering::SeqCst);
+        });
+    }
+
+    // Spawn periodic sync worker
+    if sync_config.enabled && sync_config.interval_hours > 0 {
+        let interval = Duration::from_secs(sync_config.interval_hours * 3600);
+        let token = shutdown_token.clone();
+
+        tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+            // Skip the first immediate tick since we handle startup sync separately
+            interval_timer.tick().await;
+
+            loop {
+                tokio::select! {
+                    _ = interval_timer.tick() => {
+                        // Skip if already syncing
+                        if is_syncing.swap(true, Ordering::SeqCst) {
+                            tracing::debug!("Skipping periodic sync - already in progress");
+                            continue;
+                        }
+
+                        tracing::info!("Starting periodic vulnerability source sync...");
+
+                        tokio::select! {
+                            result = vulnerability_repository.sync_all() => {
+                                match result {
+                                    Ok(()) => {
+                                        tracing::info!("Periodic vulnerability source sync completed successfully");
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Periodic vulnerability sync failed (non-fatal): {}", e);
+                                    }
+                                }
+                            }
+                            _ = token.cancelled() => {
+                                tracing::info!("Periodic sync cancelled due to shutdown");
+                                is_syncing.store(false, Ordering::SeqCst);
+                                return;
+                            }
+                        }
+
+                        is_syncing.store(false, Ordering::SeqCst);
+                    }
+                    _ = token.cancelled() => {
+                        tracing::info!("Sync worker shutting down gracefully");
+                        return;
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// Create the application router and return an AppHandle for shutdown coordination
 pub async fn create_app(
     config: Config,
-) -> Result<Router, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<AppHandle, Box<dyn std::error::Error + Send + Sync>> {
     let startup_time = Instant::now();
     let config_arc = Arc::new(config.clone());
+    let shutdown_token = CancellationToken::new();
 
     // Initialize database pool
     let db_pool = Arc::new(
@@ -108,73 +208,25 @@ pub async fn create_app(
             std::time::Duration::from_secs(3600), // 1 hour TTL for job replay data
         ));
 
-    // Initialize API clients with circuit breakers and retries
-    let osv_circuit_breaker = Arc::new(CircuitBreaker::new(CircuitBreakerConfig {
-        failure_threshold: 5,
-        recovery_timeout: std::time::Duration::from_secs(60),
-        half_open_max_requests: 3,
-        request_timeout: std::time::Duration::from_secs(30),
-    }));
-
-    let osv_client_inner = Arc::new(OsvClient);
-    let osv_retry_config = vulnera_core::infrastructure::resilience::RetryConfig {
-        max_attempts: 3,
-        initial_delay: std::time::Duration::from_secs(1),
-        max_delay: std::time::Duration::from_secs(30),
-        backoff_multiplier: 2.0,
-    };
-
-    let osv_client = Arc::new(CircuitBreakerApiClient::new(
-        osv_client_inner,
-        osv_circuit_breaker,
-        osv_retry_config,
-    ));
-
-    // NVD client with config-driven circuit breaker
-    let nvd_circuit_breaker = Arc::new(CircuitBreaker::new(
-        config.apis.nvd.circuit_breaker.to_circuit_breaker_config(),
-    ));
-    let nvd_client_inner = Arc::new(NvdClient::new(
-        config.apis.nvd.base_url.clone(),
-        config.apis.nvd.api_key.clone(),
-    ));
-    let nvd_client = Arc::new(CircuitBreakerApiClient::new(
-        nvd_client_inner,
-        nvd_circuit_breaker,
-        config.apis.nvd.retry.to_retry_config(),
-    ));
-
-    // GHSA client with config-driven circuit breaker
-    let ghsa_token = config
-        .apis
-        .ghsa
-        .token
-        .clone()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .unwrap_or_default();
-    let ghsa_circuit_breaker = Arc::new(CircuitBreaker::new(
-        config.apis.ghsa.circuit_breaker.to_circuit_breaker_config(),
-    ));
-    let ghsa_client_inner = Arc::new(
-        GhsaClient::new(ghsa_token, config.apis.ghsa.graphql_url.clone()).map_err(|e| {
-            tracing::error!("Failed to initialize GHSA client: {}", e);
-            e
-        })?,
+    // Initialize vulnerability repository using vulnera-advisor
+    tracing::info!("Initializing vulnerability intelligence via vulnera-advisor");
+    let vulnerability_repository = Arc::new(
+        VulneraAdvisorRepository::from_config(&config)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to initialize vulnerability repository: {}", e);
+                e
+            })?,
     );
-    let ghsa_client = Arc::new(CircuitBreakerApiClient::new(
-        ghsa_client_inner,
-        ghsa_circuit_breaker,
-        config.apis.ghsa.retry.to_retry_config(),
-    ));
 
-    // Create vulnerability repository with all three sources
-    let vulnerability_repository =
-        Arc::new(AggregatingVulnerabilityRepository::new_with_concurrency(
-            osv_client.clone(),
-            nvd_client.clone(),
-            ghsa_client.clone(),
-            config.analysis.max_concurrent_api_calls,
-        ));
+    // Spawn background sync worker with periodic re-sync and graceful shutdown support
+    if config.sync.enabled {
+        spawn_sync_worker(
+            vulnerability_repository.clone(),
+            &config,
+            shutdown_token.clone(),
+        );
+    }
 
     // Initialize GitHub repository client for repository analysis (reuse GHSA token when configured)
     let github_repo_token = config
@@ -363,5 +415,8 @@ pub async fn create_app(
     // Create router using orchestrator's router builder
     let router = create_router(orchestrator_state, config_arc);
 
-    Ok(router)
+    Ok(AppHandle {
+        router,
+        shutdown_token,
+    })
 }

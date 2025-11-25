@@ -159,12 +159,7 @@ impl RegisterUserUseCase {
         let password_hash = self.password_hasher.hash(&password)?;
 
         // Create user entity
-        let user = User::new(
-            UserId::generate(),
-            email.clone(),
-            password_hash,
-            user_roles,
-        );
+        let user = User::new(UserId::generate(), email.clone(), password_hash, user_roles);
 
         // Save user to repository
         self.user_repository.create(&user).await?;

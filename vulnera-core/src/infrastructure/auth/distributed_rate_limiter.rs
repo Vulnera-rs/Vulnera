@@ -47,9 +47,9 @@ pub struct DistributedRateLimitConfig {
 impl Default for DistributedRateLimitConfig {
     fn default() -> Self {
         Self {
-            authenticated_limit: 60,                          // 60 requests
-            authenticated_window: Duration::from_secs(60),    // per minute
-            unauthenticated_limit: 10,                        // 10 requests
+            authenticated_limit: 60,                            // 60 requests
+            authenticated_window: Duration::from_secs(60),      // per minute
+            unauthenticated_limit: 10,                          // 10 requests
             unauthenticated_window: Duration::from_secs(86400), // per day
             key_prefix: "rate_limit".to_string(),
         }
@@ -76,10 +76,18 @@ pub trait DistributedRateLimiter: Send + Sync {
     ///
     /// # Returns
     /// `RateLimitResult` indicating whether the request is allowed
-    async fn check(&self, key: &str, is_authenticated: bool) -> Result<RateLimitResult, ApplicationError>;
+    async fn check(
+        &self,
+        key: &str,
+        is_authenticated: bool,
+    ) -> Result<RateLimitResult, ApplicationError>;
 
     /// Get current rate limit status for a key
-    async fn get_status(&self, key: &str, is_authenticated: bool) -> Result<Option<(u32, u32)>, ApplicationError>;
+    async fn get_status(
+        &self,
+        key: &str,
+        is_authenticated: bool,
+    ) -> Result<Option<(u32, u32)>, ApplicationError>;
 }
 
 /// Cache-backed distributed rate limiter
@@ -108,16 +116,26 @@ impl<C: CacheService> CacheDistributedRateLimiter<C> {
     /// Get limit and window based on authentication status
     fn get_limits(&self, is_authenticated: bool) -> (u32, Duration) {
         if is_authenticated {
-            (self.config.authenticated_limit, self.config.authenticated_window)
+            (
+                self.config.authenticated_limit,
+                self.config.authenticated_window,
+            )
         } else {
-            (self.config.unauthenticated_limit, self.config.unauthenticated_window)
+            (
+                self.config.unauthenticated_limit,
+                self.config.unauthenticated_window,
+            )
         }
     }
 }
 
 #[async_trait]
 impl<C: CacheService + Send + Sync> DistributedRateLimiter for CacheDistributedRateLimiter<C> {
-    async fn check(&self, key: &str, is_authenticated: bool) -> Result<RateLimitResult, ApplicationError> {
+    async fn check(
+        &self,
+        key: &str,
+        is_authenticated: bool,
+    ) -> Result<RateLimitResult, ApplicationError> {
         let cache_key = self.cache_key(key, is_authenticated);
         let (limit, window) = self.get_limits(is_authenticated);
         let now = chrono::Utc::now().timestamp();
@@ -145,7 +163,13 @@ impl<C: CacheService + Send + Sync> DistributedRateLimiter for CacheDistributedR
                     let remaining = limit.saturating_sub(existing.count);
                     let reset_after = (existing.window_start + window_secs - now) as u64;
 
-                    (existing, RateLimitResult::Allowed { remaining, reset_after })
+                    (
+                        existing,
+                        RateLimitResult::Allowed {
+                            remaining,
+                            reset_after,
+                        },
+                    )
                 } else {
                     // New window - reset counter
                     let new = RateLimitEntry {
@@ -155,7 +179,13 @@ impl<C: CacheService + Send + Sync> DistributedRateLimiter for CacheDistributedR
                     let remaining = limit - 1;
                     let reset_after = window_secs as u64;
 
-                    (new, RateLimitResult::Allowed { remaining, reset_after })
+                    (
+                        new,
+                        RateLimitResult::Allowed {
+                            remaining,
+                            reset_after,
+                        },
+                    )
                 }
             }
             None => {
@@ -167,7 +197,13 @@ impl<C: CacheService + Send + Sync> DistributedRateLimiter for CacheDistributedR
                 let remaining = limit - 1;
                 let reset_after = window_secs as u64;
 
-                (new, RateLimitResult::Allowed { remaining, reset_after })
+                (
+                    new,
+                    RateLimitResult::Allowed {
+                        remaining,
+                        reset_after,
+                    },
+                )
             }
         };
 
@@ -178,7 +214,11 @@ impl<C: CacheService + Send + Sync> DistributedRateLimiter for CacheDistributedR
         Ok(result)
     }
 
-    async fn get_status(&self, key: &str, is_authenticated: bool) -> Result<Option<(u32, u32)>, ApplicationError> {
+    async fn get_status(
+        &self,
+        key: &str,
+        is_authenticated: bool,
+    ) -> Result<Option<(u32, u32)>, ApplicationError> {
         let cache_key = self.cache_key(key, is_authenticated);
         let (limit, window) = self.get_limits(is_authenticated);
         let now = chrono::Utc::now().timestamp();
@@ -228,7 +268,12 @@ mod tests {
             {
                 Ok(None)
             }
-            async fn set<T>(&self, _key: &str, _value: &T, _ttl: Duration) -> Result<(), ApplicationError>
+            async fn set<T>(
+                &self,
+                _key: &str,
+                _value: &T,
+                _ttl: Duration,
+            ) -> Result<(), ApplicationError>
             where
                 T: serde::Serialize + Send + Sync,
             {

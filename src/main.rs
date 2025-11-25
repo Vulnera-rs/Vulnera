@@ -1,7 +1,9 @@
 //! Vulnera Rust - Main application entry point
 
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::{net::TcpListener, signal};
+use tokio_util::sync::CancellationToken;
 
 use vulnera_rust::{Config, create_app, init_tracing};
 
@@ -35,7 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_host = config.server.host.clone();
     let server_port = config.server.port;
     let enable_docs = config.server.enable_docs;
-    let app = create_app(config).await.map_err(|e| {
+    let shutdown_timeout = Duration::from_secs(config.sync.shutdown_timeout_seconds);
+
+    let app_handle = create_app(config).await.map_err(|e| {
         Box::new(std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("Failed to create application: {}", e),
@@ -54,16 +58,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Start server with graceful shutdown
     let listener = TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+    axum::serve(listener, app_handle.router)
+        .with_graceful_shutdown(shutdown_signal(app_handle.shutdown_token, shutdown_timeout))
         .await?;
 
     tracing::info!("Server shutdown complete");
     Ok(())
 }
 
-/// Handle graceful shutdown signals
-async fn shutdown_signal() {
+/// Handle graceful shutdown signals and cancel background tasks
+async fn shutdown_signal(shutdown_token: CancellationToken, timeout: Duration) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -89,4 +93,12 @@ async fn shutdown_signal() {
             tracing::info!("Received SIGTERM, initiating graceful shutdown");
         },
     }
+
+    // Cancel background tasks and wait for them to complete
+    tracing::info!("Cancelling background tasks...");
+    shutdown_token.cancel();
+
+    // Give background tasks time to finish gracefully
+    tokio::time::sleep(timeout).await;
+    tracing::info!("Background tasks shutdown timeout reached");
 }

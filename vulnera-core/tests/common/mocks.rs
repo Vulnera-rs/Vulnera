@@ -1,9 +1,9 @@
 //! Mock factories for vulnera-core tests
 
 use std::sync::Arc;
-use vulnera_core::domain::vulnerability::repositories::VulnerabilityRepository;
+use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
 use vulnera_core::domain::vulnerability::entities::{Package, Vulnerability};
-use vulnera_core::application::errors::ApplicationError;
+use vulnera_core::application::errors::VulnerabilityError;
 
 /// Mock vulnerability repository for testing
 #[cfg(test)]
