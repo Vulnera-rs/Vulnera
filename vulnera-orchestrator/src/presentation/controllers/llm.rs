@@ -2,17 +2,20 @@
 
 use axum::{
     Json,
-    extract::State,
+    extract::{Path, State},
     response::{Sse, sse::Event},
 };
 use futures::stream::{Stream, StreamExt};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio_stream::wrappers::ReceiverStream;
+use uuid::Uuid;
 
 use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::{
-    CodeFixResponse, ExplainVulnerabilityRequest, GenerateCodeFixRequest,
-    NaturalLanguageQueryRequest, NaturalLanguageQueryResponse,
+    CodeFixResponse, EnrichFindingsRequest, EnrichFindingsResponse, EnrichedFindingDto,
+    ExplainVulnerabilityRequest, GenerateCodeFixRequest, NaturalLanguageQueryRequest,
+    NaturalLanguageQueryResponse,
 };
 
 /// POST /api/v1/llm/fix - Generate code fix
@@ -145,5 +148,125 @@ pub async fn natural_language_query(
     Ok(Json(NaturalLanguageQueryResponse {
         answer,
         references: vec![], // Not supported by current LLM provider
+    }))
+}
+
+/// POST /api/v1/jobs/{job_id}/enrich - Enrich job findings with LLM insights
+///
+/// Enriches the top N findings (prioritized by severity: Critical > High > Medium > Low > Info)
+/// with LLM-generated explanations, remediation suggestions, and risk summaries.
+///
+/// This is an on-demand operation typically triggered by a user action (e.g., clicking an
+/// "Enrich with AI" button in the UI).
+#[utoipa::path(
+    post,
+    path = "/api/v1/jobs/{job_id}/enrich",
+    params(
+        ("job_id" = Uuid, Path, description = "Job ID to enrich findings for")
+    ),
+    request_body = EnrichFindingsRequest,
+    responses(
+        (status = 200, description = "Findings enriched successfully", body = EnrichFindingsResponse),
+        (status = 404, description = "Job not found"),
+        (status = 400, description = "Invalid request"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "llm"
+)]
+pub async fn enrich_job_findings(
+    State(state): State<OrchestratorState>,
+    Path(job_id): Path<Uuid>,
+    Json(request): Json<EnrichFindingsRequest>,
+) -> Result<Json<EnrichFindingsResponse>, (axum::http::StatusCode, String)> {
+    use axum::http::StatusCode;
+
+    // Fetch job snapshot
+    let snapshot = state
+        .job_store
+        .get_snapshot(job_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to fetch job: {}", e),
+            )
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Job {} not found", job_id)))?;
+
+    // Extract findings from module results
+    let mut all_findings: Vec<vulnera_core::domain::module::Finding> = snapshot
+        .module_results
+        .iter()
+        .flat_map(|result| result.findings.clone())
+        .collect();
+
+    if all_findings.is_empty() {
+        return Ok(Json(EnrichFindingsResponse {
+            job_id,
+            enriched_count: 0,
+            failed_count: 0,
+            findings: vec![],
+        }));
+    }
+
+    // Filter to specific finding IDs if provided
+    if let Some(ref finding_ids) = request.finding_ids {
+        if !finding_ids.is_empty() {
+            all_findings.retain(|f| finding_ids.contains(&f.id));
+        }
+    }
+
+    // Build code contexts map
+    let code_contexts: HashMap<String, String> = request.code_contexts.unwrap_or_default();
+
+    // Create enrichment request
+    let enrich_request = vulnera_llm::EnrichFindingsRequest {
+        findings: all_findings,
+        code_contexts,
+    };
+
+    // Execute enrichment
+    let enrich_response = state
+        .enrich_findings_use_case
+        .execute(enrich_request)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to enrich findings: {}", e),
+            )
+        })?;
+
+    // Convert to response DTOs
+    let enriched_findings: Vec<EnrichedFindingDto> = enrich_response
+        .findings
+        .into_iter()
+        .filter(|f| f.enrichment.is_some())
+        .map(|f| {
+            let enrichment = f.enrichment.unwrap();
+            EnrichedFindingDto {
+                id: f.id,
+                severity: format!("{:?}", f.severity),
+                description: f.description,
+                location: format!(
+                    "{}:{}:{}",
+                    f.location.path,
+                    f.location.line.unwrap_or(0),
+                    f.location.column.unwrap_or(0)
+                ),
+                explanation: enrichment.explanation,
+                remediation_suggestion: enrichment.remediation_suggestion,
+                risk_summary: enrichment.risk_summary,
+                enrichment_successful: enrichment.enrichment_successful,
+                enrichment_error: enrichment.error,
+            }
+        })
+        .collect();
+
+    Ok(Json(EnrichFindingsResponse {
+        job_id,
+        enriched_count: enrich_response.enriched_count,
+        failed_count: enrich_response.failed_count,
+        findings: enriched_findings,
     }))
 }

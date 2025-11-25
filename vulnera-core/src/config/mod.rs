@@ -716,6 +716,8 @@ pub struct LlmConfig {
     pub explanation_model: Option<String>,
     /// Model to use for code fixes (overrides default)
     pub code_fix_model: Option<String>,
+    /// Model to use for finding enrichment (overrides default)
+    pub enrichment_model: Option<String>,
     /// Temperature for generation (0.0 to 1.0)
     pub temperature: f64,
     /// Maximum tokens to generate
@@ -727,6 +729,9 @@ pub struct LlmConfig {
     /// Rate limiting configuration
     #[serde(default)]
     pub rate_limit: LlmRateLimitConfig,
+    /// Finding enrichment configuration
+    #[serde(default)]
+    pub enrichment: LlmEnrichmentConfig,
 }
 
 impl Default for LlmConfig {
@@ -738,11 +743,38 @@ impl Default for LlmConfig {
             default_model: "deepseek-v3.1".to_string(),
             explanation_model: Some("deepseek-v3.1".to_string()),
             code_fix_model: Some("qwen3-32b".to_string()),
+            enrichment_model: Some("deepseek-v3.1".to_string()),
             temperature: 0.3,
             max_tokens: 2048,
             timeout_seconds: 60,
             enable_streaming: true,
             rate_limit: LlmRateLimitConfig::default(),
+            enrichment: LlmEnrichmentConfig::default(),
+        }
+    }
+}
+
+/// LLM Finding Enrichment configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmEnrichmentConfig {
+    /// Maximum number of findings to enrich per request (prioritized by severity)
+    pub max_findings_to_enrich: usize,
+    /// Maximum concurrent LLM calls for enrichment
+    pub max_concurrent_enrichments: usize,
+    /// Whether to include code context in enrichment prompts
+    pub include_code_context: bool,
+    /// Maximum code snippet length to include in context (in chars)
+    pub max_code_context_chars: usize,
+}
+
+impl Default for LlmEnrichmentConfig {
+    fn default() -> Self {
+        Self {
+            max_findings_to_enrich: 10,
+            max_concurrent_enrichments: 3,
+            include_code_context: true,
+            max_code_context_chars: 2000,
         }
     }
 }

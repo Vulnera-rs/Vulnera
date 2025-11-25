@@ -829,3 +829,72 @@ pub struct NaturalLanguageQueryResponse {
     #[schema(example = json!(["https://owasp.org/www-community/attacks/SQL_Injection"]))]
     pub references: Vec<String>,
 }
+
+/// Request for enriching job findings with LLM insights
+#[derive(Deserialize, ToSchema)]
+pub struct EnrichFindingsRequest {
+    /// Optional list of specific finding IDs to enrich (if empty, prioritizes by severity)
+    #[schema(example = json!(["finding_123", "finding_456"]))]
+    pub finding_ids: Option<Vec<String>>,
+
+    /// Optional code context per finding ID (for more accurate suggestions)
+    #[schema(example = json!({"finding_123": "def login(user, password):\n    query = f\"SELECT * FROM users WHERE user='{user}'\""}), default)]
+    pub code_contexts: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Response for findings enrichment
+#[derive(Serialize, ToSchema)]
+pub struct EnrichFindingsResponse {
+    /// Job ID that was enriched
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub job_id: Uuid,
+
+    /// Number of findings successfully enriched
+    #[schema(example = 5)]
+    pub enriched_count: usize,
+
+    /// Number of findings that failed enrichment
+    #[schema(example = 1)]
+    pub failed_count: usize,
+
+    /// Enriched findings with LLM-generated insights
+    pub findings: Vec<EnrichedFindingDto>,
+}
+
+/// DTO for enriched finding
+#[derive(Serialize, ToSchema)]
+pub struct EnrichedFindingDto {
+    /// Finding ID
+    #[schema(example = "finding_123")]
+    pub id: String,
+
+    /// Finding severity
+    #[schema(example = "Critical")]
+    pub severity: String,
+
+    /// Finding description
+    #[schema(example = "SQL Injection vulnerability detected")]
+    pub description: String,
+
+    /// Location (file:line:column)
+    #[schema(example = "src/auth.py:42:10")]
+    pub location: String,
+
+    /// LLM-generated explanation
+    #[schema(example = "This SQL injection vulnerability allows attackers to...")]
+    pub explanation: Option<String>,
+
+    /// LLM-generated remediation suggestion
+    #[schema(example = "Use parameterized queries or an ORM...")]
+    pub remediation_suggestion: Option<String>,
+
+    /// Risk summary
+    #[schema(example = "High risk: potential data breach")]
+    pub risk_summary: Option<String>,
+
+    /// Whether enrichment was successful
+    pub enrichment_successful: bool,
+
+    /// Error message if enrichment failed
+    pub enrichment_error: Option<String>,
+}

@@ -3,6 +3,7 @@ pub mod domain;
 pub mod infrastructure;
 
 pub use application::use_cases::{
+    EnrichFindingsRequest, EnrichFindingsResponse, EnrichFindingsUseCase,
     ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, NaturalLanguageQueryUseCase,
 };
 pub use domain::*;

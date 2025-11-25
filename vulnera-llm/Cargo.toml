@@ -20,6 +20,7 @@ bytes = { workspace = true }
 regex = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
+chrono = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }

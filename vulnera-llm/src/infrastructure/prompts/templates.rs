@@ -30,6 +30,38 @@ Findings:
 Provide a concise and accurate answer based ONLY on the provided findings.
 "#;
 
+pub const ENRICHMENT_PROMPT: &str = r#"You are an expert security analyst. Analyze the following security vulnerability finding and provide detailed insights.
+
+## Finding Details
+- **ID**: {finding_id}
+- **Type**: {finding_type}
+- **Severity**: {severity}
+- **Confidence**: {confidence}
+- **Description**: {description}
+- **Location**: {location}
+{code_context}
+
+## Your Task
+Provide a comprehensive analysis in the following JSON format:
+
+```json
+{
+    "explanation": "A clear, detailed explanation of why this is a security vulnerability, how it could be exploited, and its potential impact. Written for developers who may not be security experts.",
+    "remediation": "Specific, actionable steps to fix this vulnerability. Include code examples if applicable.",
+    "risk_summary": "A brief (1-2 sentence) executive summary of the risk level and business impact."
+}
+```
+
+Be specific and actionable. Avoid generic advice.
+"#;
+
+pub const ENRICHMENT_PROMPT_WITH_CODE: &str = r#"
+## Code Context
+```
+{code}
+```
+"#;
+
 pub struct PromptBuilder;
 
 impl PromptBuilder {
@@ -44,5 +76,32 @@ impl PromptBuilder {
         NL_QUERY_PROMPT
             .replace("{query}", query)
             .replace("{findings_json}", findings_json)
+    }
+
+    pub fn build_enrichment_prompt(
+        finding: &vulnera_core::domain::module::Finding,
+        code_context: Option<&str>,
+    ) -> String {
+        let location = format!(
+            "{}:{}:{}",
+            finding.location.path,
+            finding.location.line.unwrap_or(0),
+            finding.location.column.unwrap_or(0)
+        );
+
+        let code_section = if let Some(code) = code_context {
+            ENRICHMENT_PROMPT_WITH_CODE.replace("{code}", code)
+        } else {
+            String::new()
+        };
+
+        ENRICHMENT_PROMPT
+            .replace("{finding_id}", &finding.id)
+            .replace("{finding_type}", &format!("{:?}", finding.r#type))
+            .replace("{severity}", &format!("{:?}", finding.severity))
+            .replace("{confidence}", &format!("{:?}", finding.confidence))
+            .replace("{description}", &finding.description)
+            .replace("{location}", &location)
+            .replace("{code_context}", &code_section)
     }
 }

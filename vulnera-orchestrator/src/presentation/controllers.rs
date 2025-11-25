@@ -79,6 +79,7 @@ pub struct OrchestratorState {
         Arc<vulnera_llm::application::use_cases::ExplainVulnerabilityUseCase>,
     pub natural_language_query_use_case:
         Arc<vulnera_llm::application::use_cases::NaturalLanguageQueryUseCase>,
+    pub enrich_findings_use_case: Arc<vulnera_llm::application::use_cases::EnrichFindingsUseCase>,
 
     // Auth-related state
     pub db_pool: Arc<sqlx::PgPool>,

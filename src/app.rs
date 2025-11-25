@@ -44,7 +44,7 @@ use vulnera_deps::{
     types::VersionResolutionService,
 };
 use vulnera_llm::{
-    ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, HuaweiLlmProvider,
+    EnrichFindingsUseCase, ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, HuaweiLlmProvider,
     NaturalLanguageQueryUseCase,
 };
 
@@ -400,6 +400,10 @@ pub async fn create_app(
         llm_provider.clone(),
         config.llm.clone(),
     ));
+    let enrich_findings_use_case = Arc::new(EnrichFindingsUseCase::new(
+        llm_provider.clone(),
+        config.llm.clone(),
+    ));
 
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
@@ -418,6 +422,7 @@ pub async fn create_app(
         generate_code_fix_use_case,
         explain_vulnerability_use_case,
         natural_language_query_use_case,
+        enrich_findings_use_case,
         db_pool,
         user_repository,
         api_key_repository,

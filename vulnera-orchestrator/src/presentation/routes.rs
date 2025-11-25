@@ -23,7 +23,9 @@ use crate::presentation::{
     controllers::{
         OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
-        llm::{explain_vulnerability, generate_code_fix, natural_language_query},
+        llm::{
+            enrich_job_findings, explain_vulnerability, generate_code_fix, natural_language_query,
+        },
     },
     middleware::{
         CsrfMiddlewareState, LlmRateLimiterState, RateLimiterState, csrf_validation_middleware,
@@ -55,7 +57,8 @@ use axum::{
         crate::presentation::auth::controller::revoke_api_key,
         crate::presentation::controllers::llm::generate_code_fix,
         crate::presentation::controllers::llm::explain_vulnerability,
-        crate::presentation::controllers::llm::natural_language_query
+        crate::presentation::controllers::llm::natural_language_query,
+        crate::presentation::controllers::llm::enrich_job_findings
     ),
     components(
         schemas(
@@ -86,6 +89,9 @@ use axum::{
             ExplanationResponse,
             NaturalLanguageQueryRequest,
             NaturalLanguageQueryResponse,
+            EnrichFindingsRequest,
+            EnrichFindingsResponse,
+            EnrichedFindingDto,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::AuthResponse,
@@ -191,6 +197,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/llm/fix", post(generate_code_fix))
         .route("/llm/explain", post(explain_vulnerability))
         .route("/llm/query", post(natural_language_query))
+        .route("/jobs/{job_id}/enrich", post(enrich_job_findings))
         .layer(middleware::from_fn_with_state(
             llm_rate_limiter_state,
             llm_rate_limit_middleware,
