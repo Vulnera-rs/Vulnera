@@ -29,7 +29,7 @@ l1_cache_size_mb = 100
 l1_cache_ttl_seconds = 300
 enable_cache_compression = true
 compression_threshold_bytes = 10240
-# Dragonfly DB configuration (default cache backend, replaces file-based caching)
+# Dragonfly DB configuration
 dragonfly_url = "redis://127.0.0.1:6379"
 dragonfly_connection_timeout_seconds = 5
 
@@ -60,6 +60,15 @@ token_ttl_hours = 24
 refresh_token_ttl_hours = 720                                    # 30 days
 api_key_length = 32
 api_key_ttl_days = 365                                           # 1 year, set to null for no expiration
+
+# Cookie-based authentication settings
+cookie_domain = ""                  # Empty for localhost, set to your domain in production (e.g., "vulnera.io")
+cookie_secure = false               # Set to true in production (requires HTTPS)
+cookie_same_site = "lax"            # Options: "strict", "lax", "none" (lax recommended for most use cases)
+cookie_path = "/"                   # Path for access token cookie
+refresh_cookie_path = "/api/v1/auth/refresh"  # Path for refresh token cookie (restricted to refresh endpoint)
+csrf_token_bytes = 32               # Size of CSRF token (256 bits of entropy)
+blacklist_tokens_on_logout = true   # Add tokens to blacklist on logout (requires cache)
 
 [database]
 # Database connection URL (can also be set via DATABASE_URL env var)

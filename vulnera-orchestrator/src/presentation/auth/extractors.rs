@@ -1,8 +1,8 @@
-//! Authentication extractors for Axum
+//! Authentication extractors for Axum (Cookie-based authentication)
 
 use axum::{
     extract::FromRequestParts,
-    http::{StatusCode, request::Parts},
+    http::{StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRol
 
 use crate::presentation::middleware::application_error_to_response;
 
-/// Authenticated user information from JWT token
+/// Authenticated user information from JWT token (cookie-based)
 #[derive(Debug, Clone)]
 pub struct AuthUser {
     pub user_id: UserId,
@@ -32,11 +32,11 @@ pub struct ApiKeyAuth {
 /// Authentication method used
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {
-    Jwt,
+    Cookie,
     ApiKey,
 }
 
-/// Generic authentication extractor that accepts either JWT or API key
+/// Generic authentication extractor that accepts either Cookie or API key
 #[derive(Debug, Clone)]
 pub struct Auth {
     pub user_id: UserId,
@@ -54,6 +54,20 @@ pub struct AuthState {
     pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
     pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
     pub api_key_generator: Arc<vulnera_core::infrastructure::auth::ApiKeyGenerator>,
+}
+
+/// Helper function to extract a cookie value from request parts
+fn extract_cookie_from_parts(parts: &Parts, cookie_name: &str) -> Option<String> {
+    parts
+        .headers
+        .get(header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .map(|s| s.trim())
+        .find(|s| s.starts_with(&format!("{}=", cookie_name)))?
+        .strip_prefix(&format!("{}=", cookie_name))
+        .map(|s| s.to_string())
 }
 
 impl<S> FromRequestParts<S> for AuthUser
@@ -74,21 +88,8 @@ where
                 },
             })?;
 
-        // Extract Authorization header
-        let auth_header = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .ok_or_else(|| AuthErrorResponse {
-                status: StatusCode::UNAUTHORIZED,
-                error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::InvalidToken,
-                ),
-            })?;
-
-        // Parse Bearer token
-        let token = auth_header
-            .strip_prefix("Bearer ")
+        // Extract access token from cookie
+        let token = extract_cookie_from_parts(parts, "access_token")
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
@@ -100,7 +101,7 @@ where
         let (user_id, email, roles) =
             auth_state
                 .validate_token
-                .execute(token)
+                .execute(&token)
                 .map_err(|e| AuthErrorResponse {
                     status: StatusCode::UNAUTHORIZED,
                     error: ApplicationError::Authentication(e),
@@ -209,69 +210,25 @@ where
                 },
             })?;
 
-        // Try JWT Bearer token first
-        let auth_header = parts
-            .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok());
-
-        if let Some(header) = auth_header {
-            // Try JWT Bearer token
-            if let Some(token) = header.strip_prefix("Bearer ") {
-                match auth_state.validate_token.execute(token) {
-                    Ok((user_id, email, roles)) => {
-                        return Ok(Auth {
-                            user_id,
-                            email,
-                            roles,
-                            auth_method: AuthMethod::Jwt,
-                            api_key_id: None,
-                        });
-                    }
-                    Err(_) => {
-                        // JWT validation failed, try API key below
-                    }
+        // Try cookie-based JWT authentication first
+        if let Some(token) = extract_cookie_from_parts(parts, "access_token") {
+            match auth_state.validate_token.execute(&token) {
+                Ok((user_id, email, roles)) => {
+                    return Ok(Auth {
+                        user_id,
+                        email,
+                        roles,
+                        auth_method: AuthMethod::Cookie,
+                        api_key_id: None,
+                    });
                 }
-            }
-
-            // Try API key from Authorization header
-            if let Some(api_key) = header.strip_prefix("ApiKey ") {
-                match auth_state.validate_api_key.execute(api_key).await {
-                    Ok(validation) => {
-                        let user_id = validation.user_id;
-                        let user = auth_state
-                            .user_repository
-                            .find_by_id(&user_id)
-                            .await
-                            .map_err(|e| AuthErrorResponse {
-                                status: StatusCode::UNAUTHORIZED,
-                                error: ApplicationError::Authentication(e),
-                            })?
-                            .ok_or_else(|| AuthErrorResponse {
-                                status: StatusCode::UNAUTHORIZED,
-                                error: ApplicationError::Authentication(
-                                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
-                                        user_id: user_id.as_str(),
-                                    },
-                                ),
-                            })?;
-
-                        return Ok(Auth {
-                            user_id,
-                            email: user.email,
-                            roles: user.roles,
-                            auth_method: AuthMethod::ApiKey,
-                            api_key_id: Some(validation.api_key_id),
-                        });
-                    }
-                    Err(_) => {
-                        // API key validation failed
-                    }
+                Err(_) => {
+                    // Cookie token validation failed, try API key below
                 }
             }
         }
 
-        // Try X-API-Key header
+        // Try X-API-Key header (for programmatic access)
         if let Some(api_key) = parts.headers.get("X-API-Key").and_then(|h| h.to_str().ok()) {
             match auth_state.validate_api_key.execute(api_key).await {
                 Ok(validation) => {
@@ -322,6 +279,7 @@ where
 
 /// Optional API key authentication extractor
 /// Returns None if no API key is provided, Some(ApiKeyAuth) if valid API key is found
+/// Uses X-API-Key header only (for programmatic access)
 #[derive(Debug, Clone)]
 pub struct OptionalApiKeyAuth(pub Option<ApiKeyAuth>);
 
@@ -343,20 +301,11 @@ where
                 },
             })?;
 
-        // Try to extract API key from Authorization header or X-API-Key header
+        // Try to extract API key from X-API-Key header only
         let api_key = parts
             .headers
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.strip_prefix("ApiKey "))
-            .map(|s| s.to_string())
-            .or_else(|| {
-                parts
-                    .headers
-                    .get("X-API-Key")
-                    .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_string())
-            });
+            .get("X-API-Key")
+            .and_then(|h| h.to_str().ok());
 
         // If no API key found, return None (optional auth)
         let api_key = match api_key {
@@ -367,7 +316,7 @@ where
         // Validate API key
         let validation = auth_state
             .validate_api_key
-            .execute(&api_key)
+            .execute(api_key)
             .await
             .map_err(|_| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,

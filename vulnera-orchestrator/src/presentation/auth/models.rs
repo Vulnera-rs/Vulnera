@@ -32,29 +32,49 @@ pub struct RegisterRequest {
     pub roles: Option<Vec<UserRole>>,
 }
 
-/// Token response DTO
+/// Authentication response DTO (cookie-based)
+///
+/// Tokens are set as HttpOnly cookies. This response contains only
+/// the CSRF token (for client-side header submission) and metadata.
 #[derive(Debug, Serialize, ToSchema)]
-pub struct TokenResponse {
-    /// JWT access token
-    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
-    pub access_token: String,
-    /// JWT refresh token
-    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
-    pub refresh_token: String,
-    /// Token type (always "Bearer")
-    #[schema(example = "Bearer")]
-    pub token_type: String,
+pub struct AuthResponse {
+    /// CSRF token - must be included in X-CSRF-Token header for state-changing requests
+    #[schema(example = "dGhpc2lzYWNzcmZ0b2tlbmV4YW1wbGU")]
+    pub csrf_token: String,
     /// Access token expiration time in seconds
+    #[schema(example = 86400)]
+    pub expires_in: u64,
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+    /// User email
+    #[schema(example = "user@example.com")]
+    pub email: String,
+    /// User roles
+    #[schema(example = json!(["user"]))]
+    pub roles: Vec<String>,
+}
+
+/// Refresh token response DTO (cookie-based)
+///
+/// New access token is set as HttpOnly cookie. This response contains
+/// the new CSRF token and metadata.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RefreshResponse {
+    /// New CSRF token - must be included in X-CSRF-Token header for state-changing requests
+    #[schema(example = "bmV3Y3NyZnRva2VuZXhhbXBsZQ")]
+    pub csrf_token: String,
+    /// New access token expiration time in seconds
     #[schema(example = 86400)]
     pub expires_in: u64,
 }
 
-/// Refresh token request DTO
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct RefreshRequest {
-    /// Refresh token
-    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
-    pub refresh_token: String,
+/// Logout response DTO
+#[derive(Debug, Serialize, ToSchema)]
+pub struct LogoutResponse {
+    /// Logout status message
+    #[schema(example = "Successfully logged out")]
+    pub message: String,
 }
 
 /// Create API key request DTO

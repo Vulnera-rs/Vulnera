@@ -286,6 +286,33 @@ impl Validate for AuthConfig {
             ));
         }
 
+        // Validate CSRF token length (16-64 bytes for reasonable entropy)
+        if self.csrf_token_bytes < 16 || self.csrf_token_bytes > 64 {
+            return Err(ValidationError::auth(
+                "CSRF token length must be between 16 and 64 bytes".to_string(),
+            ));
+        }
+
+        // Validate cookie paths are not empty
+        if self.cookie_path.is_empty() {
+            return Err(ValidationError::auth(
+                "Cookie path cannot be empty".to_string(),
+            ));
+        }
+
+        if self.refresh_cookie_path.is_empty() {
+            return Err(ValidationError::auth(
+                "Refresh cookie path cannot be empty".to_string(),
+            ));
+        }
+
+        // Warn if cookie_secure is false (development only)
+        if !self.cookie_secure {
+            tracing::warn!(
+                "Cookie secure flag is disabled. This should only be used in development."
+            );
+        }
+
         Ok(())
     }
 }

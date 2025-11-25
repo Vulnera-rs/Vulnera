@@ -601,6 +601,30 @@ impl Default for ApiSecurityConfig {
     }
 }
 
+/// Cookie SameSite policy
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CookieSameSite {
+    /// Cookies sent with same-site requests and cross-site top-level navigations
+    #[default]
+    Lax,
+    /// Cookies only sent with same-site requests
+    Strict,
+    /// Cookies sent with all requests (requires Secure)
+    None,
+}
+
+impl CookieSameSite {
+    /// Convert to cookie::SameSite string representation
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            CookieSameSite::Lax => "Lax",
+            CookieSameSite::Strict => "Strict",
+            CookieSameSite::None => "None",
+        }
+    }
+}
+
 /// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -615,6 +639,22 @@ pub struct AuthConfig {
     pub api_key_length: usize,
     /// API key TTL in days (None means no expiration)
     pub api_key_ttl_days: Option<u64>,
+
+    // Cookie-based authentication settings
+    /// Cookie domain (None = current host only, recommended for security)
+    pub cookie_domain: Option<String>,
+    /// Whether cookies require HTTPS (should be true in production)
+    pub cookie_secure: bool,
+    /// Cookie SameSite policy (Lax recommended for balance of security and usability)
+    pub cookie_same_site: CookieSameSite,
+    /// Cookie path for access token
+    pub cookie_path: String,
+    /// Cookie path for refresh token (more restrictive)
+    pub refresh_cookie_path: String,
+    /// CSRF token length in bytes (will be base64-encoded)
+    pub csrf_token_bytes: usize,
+    /// Whether to blacklist tokens on logout
+    pub blacklist_tokens_on_logout: bool,
 }
 
 impl Default for AuthConfig {
@@ -625,6 +665,14 @@ impl Default for AuthConfig {
             refresh_token_ttl_hours: 720, // 30 days
             api_key_length: 32,
             api_key_ttl_days: Some(365), // 1 year
+            // Cookie settings
+            cookie_domain: None, // Current host only (most secure default)
+            cookie_secure: true, // Require HTTPS in production
+            cookie_same_site: CookieSameSite::Lax, // Balance security and usability
+            cookie_path: "/api".to_string(), // Scope to API routes
+            refresh_cookie_path: "/api/v1/auth".to_string(), // More restrictive for refresh
+            csrf_token_bytes: 32, // 256 bits of entropy
+            blacklist_tokens_on_logout: true, // Invalidate tokens on logout
         }
     }
 }
