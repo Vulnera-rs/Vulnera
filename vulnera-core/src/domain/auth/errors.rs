@@ -17,6 +17,9 @@ pub enum AuthError {
     #[error("Token has expired")]
     TokenExpired,
 
+    #[error("Token has been revoked")]
+    TokenRevoked,
+
     #[error("API key not found")]
     ApiKeyNotFound,
 
@@ -38,6 +41,12 @@ pub enum AuthError {
     #[error("Password is too weak - must be at least 8 characters")]
     WeakPassword,
 
+    #[error("Password does not meet requirements: {requirements}")]
+    PasswordRequirementsNotMet { requirements: String },
+
+    #[error("Account temporarily locked due to too many failed login attempts. Try again in {retry_after_seconds} seconds.")]
+    AccountLocked { retry_after_seconds: u64 },
+
     #[error("User ID not found: {user_id}")]
     UserIdNotFound { user_id: String },
 
@@ -46,4 +55,7 @@ pub enum AuthError {
 
     #[error("Insufficient permissions - admin role required")]
     InsufficientPermissions,
+
+    #[error("Role assignment not allowed - only admins can assign roles")]
+    RoleAssignmentNotAllowed,
 }

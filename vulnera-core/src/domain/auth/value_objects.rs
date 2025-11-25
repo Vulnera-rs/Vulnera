@@ -121,6 +121,94 @@ impl fmt::Display for Email {
     }
 }
 
+/// Password validation result containing details about why validation failed
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PasswordValidationError {
+    pub message: String,
+    pub missing_requirements: Vec<String>,
+}
+
+impl fmt::Display for PasswordValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+/// Password value object with strong validation
+///
+/// Validates passwords against the following requirements:
+/// - Minimum 8 characters
+/// - At least one uppercase letter
+/// - At least one lowercase letter
+/// - At least one digit
+/// - At least one special character (!@#$%^&*()_+-=[]{}|;':\",./<>?)
+#[derive(Debug, Clone)]
+pub struct Password(String);
+
+impl Password {
+    /// Minimum password length
+    pub const MIN_LENGTH: usize = 8;
+
+    /// Create a new Password with validation
+    pub fn new(password: String) -> Result<Self, PasswordValidationError> {
+        Self::validate(&password)?;
+        Ok(Password(password))
+    }
+
+    /// Validate a password string against security requirements
+    pub fn validate(password: &str) -> Result<(), PasswordValidationError> {
+        let mut missing = Vec::new();
+
+        if password.len() < Self::MIN_LENGTH {
+            missing.push(format!("at least {} characters", Self::MIN_LENGTH));
+        }
+
+        if !password.chars().any(|c| c.is_uppercase()) {
+            missing.push("at least one uppercase letter".to_string());
+        }
+
+        if !password.chars().any(|c| c.is_lowercase()) {
+            missing.push("at least one lowercase letter".to_string());
+        }
+
+        if !password.chars().any(|c| c.is_ascii_digit()) {
+            missing.push("at least one digit".to_string());
+        }
+
+        let special_chars = "!@#$%^&*()_+-=[]{}|;':\",./<>?";
+        if !password.chars().any(|c| special_chars.contains(c)) {
+            missing.push("at least one special character".to_string());
+        }
+
+        if !missing.is_empty() {
+            return Err(PasswordValidationError {
+                message: format!(
+                    "Password must contain: {}",
+                    missing.join(", ")
+                ),
+                missing_requirements: missing,
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Check if a password meets the minimum requirements (legacy method for backward compatibility)
+    pub fn is_strong_enough(password: &str) -> bool {
+        Self::validate(password).is_ok()
+    }
+
+    /// Get the inner password string (for hashing)
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume and return the inner string
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
 /// Password hash value object (never exposes raw hash)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PasswordHash(String);
@@ -353,6 +441,52 @@ mod tests {
     fn test_email_normalization() {
         let email = Email::new("  USER@EXAMPLE.COM  ".to_string()).unwrap();
         assert_eq!(email.as_str(), "user@example.com");
+    }
+
+    #[test]
+    fn test_password_validation_strong() {
+        // Strong password that meets all requirements
+        let strong = "MyP@ssw0rd!";
+        assert!(Password::new(strong.to_string()).is_ok());
+        assert!(Password::is_strong_enough(strong));
+    }
+
+    #[test]
+    fn test_password_validation_weak() {
+        // Too short
+        let result = Password::new("Ab1!".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("8 characters")));
+
+        // No uppercase
+        let result = Password::new("myp@ssw0rd!".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("uppercase")));
+
+        // No lowercase
+        let result = Password::new("MYP@SSW0RD!".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("lowercase")));
+
+        // No digit
+        let result = Password::new("MyP@ssword!".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("digit")));
+
+        // No special character
+        let result = Password::new("MyPassword1".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("special")));
+    }
+
+    #[test]
+    fn test_password_validation_multiple_missing() {
+        // Multiple requirements missing
+        let result = Password::new("password".to_string());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Should be missing uppercase, digit, and special character
+        assert!(err.missing_requirements.len() >= 3);
     }
 
     #[test]
