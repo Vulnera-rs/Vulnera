@@ -579,6 +579,7 @@ impl Default for SecretDetectionConfig {
 /// API Security configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct ApiSecurityConfig {
     /// List of enabled analyzers (empty = all enabled)
     pub enabled_analyzers: Vec<String>,
@@ -588,17 +589,6 @@ pub struct ApiSecurityConfig {
     pub exclude_paths: Vec<String>,
     /// Whether to use strict mode (more aggressive checks)
     pub strict_mode: bool,
-}
-
-impl Default for ApiSecurityConfig {
-    fn default() -> Self {
-        Self {
-            enabled_analyzers: Vec::new(), // Empty = all enabled
-            severity_overrides: std::collections::HashMap::new(),
-            exclude_paths: Vec::new(),
-            strict_mode: false,
-        }
-    }
 }
 
 /// Cookie SameSite policy

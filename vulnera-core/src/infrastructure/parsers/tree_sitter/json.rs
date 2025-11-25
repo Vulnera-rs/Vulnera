@@ -76,9 +76,9 @@ impl TreeSitterJsonParser {
     }
 
     /// Parse a dependencies object node
-    fn parse_dependencies_object<'a>(
+    fn parse_dependencies_object(
         &self,
-        object_node: &'a Node,
+        object_node: &Node,
         content: &str,
     ) -> Result<Vec<Package>, ParseError> {
         let mut packages = Vec::new();
@@ -96,9 +96,9 @@ impl TreeSitterJsonParser {
     }
 
     /// Parse a single dependency pair (name: version)
-    fn parse_dependency_pair<'a>(
+    fn parse_dependency_pair(
         &self,
-        pair_node: &'a Node,
+        pair_node: &Node,
         content: &str,
     ) -> Result<Option<Package>, ParseError> {
         let key_node =
@@ -181,7 +181,7 @@ impl TreeSitterJsonParser {
 
 impl TreeSitterParser for TreeSitterJsonParser {
     fn language(&self) -> tree_sitter::Language {
-        tree_sitter_json::language().into()
+        tree_sitter_json::language()
     }
 
     fn parse_with_tree_sitter(

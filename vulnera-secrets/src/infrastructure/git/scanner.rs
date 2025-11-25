@@ -87,7 +87,7 @@ impl GitScanner {
 
             let commit = repo.find_commit(oid).map_err(GitScanError::GitError)?;
             let commit_time =
-                DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_else(|| Utc::now());
+                DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_else(Utc::now);
 
             // Check since_date filter
             if let Some(since) = self.since_date {

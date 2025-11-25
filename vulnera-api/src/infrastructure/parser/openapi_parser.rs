@@ -565,7 +565,7 @@ impl OpenApiParser {
                                 let scheme_token_urls =
                                     oauth_token_urls.get(name).cloned().unwrap_or_default();
                                 let oauth_flows =
-                                    Self::parse_oauth_flows_with_urls(&flows, &scheme_token_urls);
+                                    Self::parse_oauth_flows_with_urls(flows, &scheme_token_urls);
                                 SecuritySchemeType::OAuth2 { flows: oauth_flows }
                             }
                             oas3::spec::SecurityScheme::OpenIdConnect {
