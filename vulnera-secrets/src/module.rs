@@ -84,6 +84,7 @@ impl AnalysisModule for SecretDetectionModule {
                 },
                 description: f.description,
                 recommendation: f.recommendation,
+                enrichment: None,
             })
             .collect();
 
