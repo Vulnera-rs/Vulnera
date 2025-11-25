@@ -70,7 +70,7 @@ mod tests {
     fn test_generate_token_length() {
         let service = CsrfService::new(32);
         let token = service.generate_token();
-        
+
         // 32 bytes = 43 base64 characters (URL-safe, no padding)
         assert_eq!(token.len(), 43);
     }
@@ -80,7 +80,7 @@ mod tests {
         let service = CsrfService::new(32);
         let token1 = service.generate_token();
         let token2 = service.generate_token();
-        
+
         // Tokens should be unique (with overwhelming probability)
         assert_ne!(token1, token2);
     }
@@ -89,7 +89,7 @@ mod tests {
     fn test_validate_token_matching() {
         let service = CsrfService::new(32);
         let token = service.generate_token();
-        
+
         // Same token should validate
         assert!(service.validate_token(&token, &token));
     }
@@ -99,7 +99,7 @@ mod tests {
         let service = CsrfService::new(32);
         let token1 = service.generate_token();
         let token2 = service.generate_token();
-        
+
         // Different tokens should not validate
         assert!(!service.validate_token(&token1, &token2));
     }
@@ -109,7 +109,7 @@ mod tests {
         let service = CsrfService::new(32);
         let token = service.generate_token();
         let short_token = &token[..10];
-        
+
         // Different length tokens should not validate
         assert!(!service.validate_token(short_token, &token));
     }
@@ -118,11 +118,11 @@ mod tests {
     fn test_validate_token_empty() {
         let service = CsrfService::new(32);
         let token = service.generate_token();
-        
+
         // Empty token should not validate
         assert!(!service.validate_token("", &token));
         assert!(!service.validate_token(&token, ""));
-        
+
         // Both empty should match (edge case)
         assert!(service.validate_token("", ""));
     }
@@ -130,16 +130,18 @@ mod tests {
     #[test]
     fn test_token_is_url_safe() {
         let service = CsrfService::new(32);
-        
+
         // Generate many tokens to check URL safety
         for _ in 0..100 {
             let token = service.generate_token();
-            
+
             // Should only contain URL-safe base64 characters
-            assert!(token.chars().all(|c| {
-                c.is_ascii_alphanumeric() || c == '-' || c == '_'
-            }));
-            
+            assert!(
+                token
+                    .chars()
+                    .all(|c| { c.is_ascii_alphanumeric() || c == '-' || c == '_' })
+            );
+
             // Should not contain padding
             assert!(!token.contains('='));
         }

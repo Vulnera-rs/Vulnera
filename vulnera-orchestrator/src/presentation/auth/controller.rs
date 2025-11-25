@@ -112,14 +112,20 @@ impl AuthAppState {
                 self.cookie_path,
                 self.cookie_same_site.as_str(),
                 if self.cookie_secure { "; Secure" } else { "" },
-                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+                self.cookie_domain
+                    .as_ref()
+                    .map(|d| format!("; Domain={}", d))
+                    .unwrap_or_default()
             ),
             // Clear refresh token
             format!(
                 "refresh_token=; HttpOnly; Path={}; Max-Age=0; SameSite=Strict{}{}",
                 self.refresh_cookie_path,
                 if self.cookie_secure { "; Secure" } else { "" },
-                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+                self.cookie_domain
+                    .as_ref()
+                    .map(|d| format!("; Domain={}", d))
+                    .unwrap_or_default()
             ),
             // Clear CSRF token
             format!(
@@ -127,7 +133,10 @@ impl AuthAppState {
                 self.cookie_path,
                 self.cookie_same_site.as_str(),
                 if self.cookie_secure { "; Secure" } else { "" },
-                self.cookie_domain.as_ref().map(|d| format!("; Domain={}", d)).unwrap_or_default()
+                self.cookie_domain
+                    .as_ref()
+                    .map(|d| format!("; Domain={}", d))
+                    .unwrap_or_default()
             ),
         ]
     }
@@ -209,23 +218,26 @@ pub async fn login(
 
     // Build response with cookies
     let mut headers = HeaderMap::new();
-    
+
     headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_access_token_cookie(&result.access_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(
+            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )
+        .unwrap(),
     );
-    
+
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(
+            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
+        )
+        .unwrap(),
     );
-    
+
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
     );
 
     let body = AuthResponse {
@@ -277,7 +289,9 @@ pub async fn register(
         .map_err(|e| {
             let status = match e {
                 AuthError::EmailAlreadyExists { .. } => StatusCode::CONFLICT,
-                AuthError::WeakPassword | AuthError::PasswordRequirementsNotMet { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+                AuthError::WeakPassword | AuthError::PasswordRequirementsNotMet { .. } => {
+                    StatusCode::UNPROCESSABLE_ENTITY
+                }
                 AuthError::InvalidEmail { .. } => StatusCode::UNPROCESSABLE_ENTITY,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
@@ -303,27 +317,32 @@ pub async fn register(
 
     // Build response with cookies
     let mut headers = HeaderMap::new();
-    
+
     headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_access_token_cookie(&result.access_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(
+            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )
+        .unwrap(),
     );
-    
+
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(
+            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
+        )
+        .unwrap(),
     );
-    
+
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
     );
 
     // Get roles for response
-    let roles = request.roles.unwrap_or_else(|| vec![vulnera_core::domain::auth::value_objects::UserRole::User]);
+    let roles = request
+        .roles
+        .unwrap_or_else(|| vec![vulnera_core::domain::auth::value_objects::UserRole::User]);
 
     let body = AuthResponse {
         csrf_token,
@@ -390,17 +409,18 @@ pub async fn refresh_token(
 
     // Build response with new cookies
     let mut response_headers = HeaderMap::new();
-    
+
     response_headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_access_token_cookie(&access_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(
+            &state.build_access_token_cookie(&access_token, access_token_max_age),
+        )
+        .unwrap(),
     );
-    
+
     response_headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age))
-            .unwrap(),
+        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
     );
 
     let body = RefreshResponse {
@@ -426,12 +446,9 @@ pub async fn logout(
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     // Build response with cleared cookies
     let mut response_headers = HeaderMap::new();
-    
+
     for cookie in state.build_clear_cookies() {
-        response_headers.append(
-            header::SET_COOKIE,
-            HeaderValue::from_str(&cookie).unwrap(),
-        );
+        response_headers.append(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
     }
 
     let body = LogoutResponse {

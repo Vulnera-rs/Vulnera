@@ -106,7 +106,7 @@ impl LexicographicOptimizer {
                     continue; // Skip downgrades
                 }
 
-                if let Some(ref current_best) = best {
+                if let Some(current_best) = best {
                     if Self::is_better_upgrade(current_version, candidate, current_best) {
                         best = Some(candidate);
                     }
@@ -125,10 +125,11 @@ impl LexicographicOptimizer {
     /// Check if candidate1 is a better upgrade than candidate2
     fn is_better_upgrade(current: &Version, candidate1: &Version, candidate2: &Version) -> bool {
         // Prefer patch upgrades
-        if candidate1.0.major == current.0.major && candidate1.0.minor == current.0.minor {
-            if candidate2.0.major != current.0.major || candidate2.0.minor != current.0.minor {
-                return true; // candidate1 is patch, candidate2 is not
-            }
+        if candidate1.0.major == current.0.major
+            && candidate1.0.minor == current.0.minor
+            && (candidate2.0.major != current.0.major || candidate2.0.minor != current.0.minor)
+        {
+            return true; // candidate1 is patch, candidate2 is not
         }
 
         // Prefer minor upgrades over major

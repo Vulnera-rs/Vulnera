@@ -58,7 +58,7 @@ impl BatchRegistryClient for BatchRegistryClientWrapper {
         for query in queries {
             queries_by_ecosystem
                 .entry(query.ecosystem.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(query);
         }
 

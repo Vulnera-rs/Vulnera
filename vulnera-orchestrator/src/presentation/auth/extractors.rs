@@ -89,8 +89,8 @@ where
             })?;
 
         // Extract access token from cookie
-        let token = extract_cookie_from_parts(parts, "access_token")
-            .ok_or_else(|| AuthErrorResponse {
+        let token =
+            extract_cookie_from_parts(parts, "access_token").ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
                     vulnera_core::domain::auth::errors::AuthError::InvalidToken,
@@ -302,10 +302,7 @@ where
             })?;
 
         // Try to extract API key from X-API-Key header only
-        let api_key = parts
-            .headers
-            .get("X-API-Key")
-            .and_then(|h| h.to_str().ok());
+        let api_key = parts.headers.get("X-API-Key").and_then(|h| h.to_str().ok());
 
         // If no API key found, return None (optional auth)
         let api_key = match api_key {
