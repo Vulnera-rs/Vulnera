@@ -203,6 +203,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             llm_rate_limit_middleware,
         ));
 
+    // Dependencies routes (no CSRF validation - designed for cross-origin requests)
+    let dependencies_routes = Router::new()
+        .route("/dependencies/analyze", post(analyze_dependencies));
+
     // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
@@ -211,14 +215,14 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             "/jobs/{id}",
             get(crate::presentation::controllers::jobs::get_job),
         )
-        .route("/dependencies/analyze", post(analyze_dependencies))
         .merge(llm_routes)
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
         ))
         .merge(public_auth_routes)
-        .merge(protected_auth_routes);
+        .merge(protected_auth_routes)
+        .merge(dependencies_routes);
 
     // Root route - redirect to docs if enabled, otherwise show API info
     async fn root_handler() -> Response {
@@ -242,14 +246,16 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/metrics", get(metrics));
 
     // Build CORS layer from configuration
-    // Note: For cookie-based auth, we need allow_credentials(true) which requires
+    // Note: For cookie-based auth with credentials, we MUST use specific origins, not "*"
+    // The browser will reject wildcard + credentials combination
     let cors_layer = if config.server.allowed_origins.len() == 1
         && config.server.allowed_origins[0] == "*"
     {
-        // Development mode: allow all origins but without credentials
-        // In development, cookies may not work across origins without proper config
+        // Wildcard origin without credentials (for API-only access without cookies)
         tracing::warn!(
-            "CORS: Using wildcard origin (*) - cookies won't work cross-origin. Configure specific origins for production."
+            "CORS: Using wildcard origin (*) - HttpOnly cookie authentication will NOT work cross-origin. \
+             Use specific origins in config for development/production with credentials. \
+             For API key auth only, this configuration is acceptable."
         );
         CorsLayer::new()
             .allow_origin(tower_http::cors::AllowOrigin::any())
@@ -275,7 +281,12 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             .allow_credentials(false) // Cannot use credentials with wildcard origin
             .max_age(Duration::from_secs(3600))
     } else {
-        // Production mode: specific origins with credentials enabled
+        // Specific origins with credentials enabled (supports HttpOnly cookies)
+        tracing::info!(
+            origins = ?config.server.allowed_origins,
+            "CORS: Configured with specific origins and credentials enabled"
+        );
+        
         let origins: Vec<axum::http::HeaderValue> = config
             .server
             .allowed_origins
@@ -310,7 +321,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
                 axum::http::HeaderName::from_static("x-api-key"),
                 axum::http::HeaderName::from_static("x-csrf-token"),
             ])
-            .allow_credentials(true) // Enable credentials for cookie-based auth
+            .allow_credentials(true) // Enable credentials for HttpOnly cookie-based auth
             .max_age(Duration::from_secs(3600))
     };
     let mut router = Router::new()
