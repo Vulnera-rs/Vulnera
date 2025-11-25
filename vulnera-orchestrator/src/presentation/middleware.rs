@@ -2,7 +2,7 @@
 
 use axum::{
     extract::{Request, State},
-    http::{HeaderValue, StatusCode},
+    http::{HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Json, Redirect, Response},
 };
@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::config::{RateLimitConfig, RateLimitStrategy};
+use vulnera_core::infrastructure::auth::CsrfService;
 
 use crate::presentation::models::ErrorResponse;
 
@@ -584,4 +585,120 @@ pub async fn rate_limit_middleware(
             response
         }
     }
+}
+
+/// State for CSRF validation middleware
+#[derive(Debug, Clone)]
+pub struct CsrfMiddlewareState {
+    /// CSRF service for token validation
+    pub csrf_service: Arc<CsrfService>,
+}
+
+impl CsrfMiddlewareState {
+    pub fn new(csrf_service: Arc<CsrfService>) -> Self {
+        Self { csrf_service }
+    }
+}
+
+/// CSRF validation middleware
+/// 
+/// Validates CSRF tokens for state-changing requests (POST, PUT, PATCH, DELETE).
+/// The CSRF token must be provided in the `X-CSRF-Token` header and must match
+/// the token stored in the `csrf_token` cookie (set during authentication).
+///
+/// Safe methods (GET, HEAD, OPTIONS, TRACE) are allowed without CSRF validation.
+/// Requests with `X-API-Key` header bypass CSRF (programmatic API access).
+pub async fn csrf_validation_middleware(
+    State(state): State<Arc<CsrfMiddlewareState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let method = request.method().clone();
+
+    // Safe methods don't need CSRF validation
+    if matches!(
+        method,
+        Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
+    ) {
+        return next.run(request).await;
+    }
+
+    // API key requests bypass CSRF (programmatic access)
+    if request.headers().contains_key("x-api-key") {
+        return next.run(request).await;
+    }
+
+    // Extract CSRF token from header
+    let header_token = request
+        .headers()
+        .get("x-csrf-token")
+        .and_then(|h| h.to_str().ok());
+
+    // Extract CSRF token from cookie
+    let cookie_token = extract_cookie(&request, "csrf_token");
+
+    // Validate both tokens are present
+    let (header_token, cookie_token) = match (header_token, cookie_token) {
+        (Some(h), Some(c)) => (h.to_string(), c),
+        (None, _) => {
+            tracing::warn!(
+                method = %method,
+                uri = %request.uri(),
+                "CSRF validation failed: missing X-CSRF-Token header"
+            );
+            return csrf_error_response("Missing CSRF token in X-CSRF-Token header");
+        }
+        (_, None) => {
+            tracing::warn!(
+                method = %method,
+                uri = %request.uri(),
+                "CSRF validation failed: missing csrf_token cookie"
+            );
+            return csrf_error_response("Missing CSRF token cookie");
+        }
+    };
+
+    // Validate that header token matches cookie token (using constant-time comparison)
+    if !state.csrf_service.validate_token(&header_token, &cookie_token) {
+        tracing::warn!(
+            method = %method,
+            uri = %request.uri(),
+            "CSRF validation failed: token mismatch"
+        );
+        return csrf_error_response("Invalid CSRF token");
+    }
+
+    // CSRF validation passed, continue with request
+    next.run(request).await
+}
+
+/// Extract a cookie value from the request
+fn extract_cookie(request: &Request, name: &str) -> Option<String> {
+    request
+        .headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let cookie = cookie.trim();
+                if let Some(value) = cookie.strip_prefix(&format!("{}=", name)) {
+                    Some(value.to_string())
+                } else {
+                    None
+                }
+            })
+        })
+}
+
+/// Generate a 403 Forbidden response for CSRF validation failures
+fn csrf_error_response(message: &str) -> Response {
+    let error_response = ErrorResponse {
+        code: "CSRF_VALIDATION_FAILED".to_string(),
+        message: message.to_string(),
+        details: None,
+        request_id: Uuid::new_v4(),
+        timestamp: Utc::now(),
+    };
+
+    (StatusCode::FORBIDDEN, Json(error_response)).into_response()
 }

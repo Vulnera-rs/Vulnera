@@ -179,7 +179,7 @@ mod tests {
     fn test_constant_time_compare() {
         let generator = ApiKeyGenerator::new();
         let (key1, hash1) = generator.generate();
-        let (key2, hash2) = generator.generate();
+        let (_key2, hash2) = generator.generate();
 
         // Same hashes should match
         let hash1_copy = generator.hash_key(&key1);

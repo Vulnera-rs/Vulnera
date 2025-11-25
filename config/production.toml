@@ -35,6 +35,15 @@ refresh_token_ttl_hours = 720 # 30 days
 api_key_length = 32
 api_key_ttl_days = 365
 
+# Cookie-based authentication settings (production)
+cookie_domain = "${COOKIE_DOMAIN}"  # Set to your domain (e.g., "vulnera.io")
+cookie_secure = true                # HTTPS required in production
+cookie_same_site = "lax"            # Options: "strict", "lax", "none"
+cookie_path = "/"
+refresh_cookie_path = "/api/v1/auth/refresh"
+csrf_token_bytes = 32
+blacklist_tokens_on_logout = true
+
 [database]
 # Production: MUST override via DATABASE_URL or VULNERA__DATABASE__URL environment variable
 url = "${DATABASE_URL}"
