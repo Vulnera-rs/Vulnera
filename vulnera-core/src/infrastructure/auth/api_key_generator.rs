@@ -196,6 +196,9 @@ mod tests {
         let long_hash = ApiKeyHash::from("abc123def456".to_string());
 
         // Different length hashes should not match
-        assert!(!ApiKeyGenerator::constant_time_compare(&short_hash, &long_hash));
+        assert!(!ApiKeyGenerator::constant_time_compare(
+            &short_hash,
+            &long_hash
+        ));
     }
 }

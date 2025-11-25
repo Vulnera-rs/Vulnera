@@ -35,14 +35,21 @@ dragonfly_connection_timeout_seconds = 5
 
 [analysis]
 max_concurrent_packages = 8
-max_concurrent_registry_queries = 5
-max_concurrent_api_calls = 10
+max_concurrent_registry_queries = 10
+max_concurrent_api_calls = 12
 job_queue_capacity = 64
-max_job_workers = 4
+max_job_workers = 8
 # Extension-friendly settings
 extension_batch_size_limit = 25    # Max files per batch for extension requests
 enable_response_compression = true # Enable gzip compression for responses
 cache_extension_results = true     # Cache results for faster repeated analysis
+
+[sync]
+# Background vulnerability data synchronization
+enabled = true
+interval_hours = 6            # Re-sync every 6 hours
+on_startup = true             # Sync immediately on server start
+shutdown_timeout_seconds = 30 # Max wait time for sync task on shutdown
 
 [auth]
 # JWT secret key - MUST be set via VULNERA__AUTH__JWT_SECRET environment variable
@@ -96,86 +103,4 @@ format = "json"
 # Popular packages configuration for vulnerability listing
 [popular_packages]
 # Cache TTL for popular package vulnerability listings (in hours)
-cache_ttl_hours = 6
-
-# NPM packages
-[[popular_packages.npm]]
-name = "react"
-version = "18.0.0"
-
-[[popular_packages.npm]]
-name = "lodash"
-version = "4.17.20"
-
-[[popular_packages.npm]]
-name = "express"
-version = "4.17.0"
-
-[[popular_packages.npm]]
-name = "axios"
-version = "0.21.0"
-
-[[popular_packages.npm]]
-name = "moment"
-version = "2.24.0"
-
-# Python packages
-[[popular_packages.pypi]]
-name = "django"
-version = "3.0.0"
-
-[[popular_packages.pypi]]
-name = "flask"
-version = "1.1.0"
-
-[[popular_packages.pypi]]
-name = "requests"
-version = "2.24.0"
-
-[[popular_packages.pypi]]
-name = "numpy"
-version = "1.19.0"
-
-[[popular_packages.pypi]]
-name = "pillow"
-version = "8.0.0"
-
-# Maven packages
-[[popular_packages.maven]]
-name = "org.springframework:spring-core"
-version = "5.2.0"
-
-[[popular_packages.maven]]
-name = "com.fasterxml.jackson.core:jackson-core"
-version = "2.10.0"
-
-[[popular_packages.maven]]
-name = "org.apache.commons:commons-lang3"
-version = "3.10"
-
-# Go packages
-[[popular_packages.go]]
-name = "github.com/gin-gonic/gin"
-version = "1.6.0"
-
-[[popular_packages.go]]
-name = "github.com/gorilla/mux"
-version = "1.7.0"
-
-# Rust packages
-[[popular_packages.cargo]]
-name = "serde"
-version = "1.0.100"
-
-[[popular_packages.cargo]]
-name = "tokio"
-version = "1.0.0"
-
-# PHP packages
-[[popular_packages.packagist]]
-name = "symfony/console"
-version = "5.0.0"
-
-[[popular_packages.packagist]]
-name = "guzzlehttp/guzzle"
-version = "7.0.0"
+cache_ttl_hours = 24

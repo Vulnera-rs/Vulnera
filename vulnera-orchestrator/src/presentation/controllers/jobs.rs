@@ -59,13 +59,20 @@ pub async fn get_job(
                 invocation_context: snapshot
                     .invocation_context
                     .map(JobInvocationContextDto::from),
-                summary: snapshot.summary.unwrap_or_else(|| crate::domain::entities::Summary {
-                    total_findings: 0,
-                    by_severity: Default::default(),
-                    by_type: crate::domain::entities::TypeBreakdown { sast: 0, secrets: 0, dependencies: 0, api: 0 },
-                    modules_completed: 0,
-                    modules_failed: 0,
-                }),
+                summary: snapshot
+                    .summary
+                    .unwrap_or_else(|| crate::domain::entities::Summary {
+                        total_findings: 0,
+                        by_severity: Default::default(),
+                        by_type: crate::domain::entities::TypeBreakdown {
+                            sast: 0,
+                            secrets: 0,
+                            dependencies: 0,
+                            api: 0,
+                        },
+                        modules_completed: 0,
+                        modules_failed: 0,
+                    }),
                 modules,
                 findings_by_type: snapshot.findings_by_type.unwrap_or_else(|| {
                     crate::domain::entities::FindingsByType {

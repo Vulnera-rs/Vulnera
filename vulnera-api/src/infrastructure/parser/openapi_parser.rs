@@ -304,10 +304,8 @@ impl OpenApiParser {
         // Operation-level security overrides path-level security (handled in parse_paths_with_security)
 
         let parameters = Self::parse_parameters(&operation.parameters, schema_resolver);
-        let request_body = Self::parse_request_body(
-            operation.request_body.as_ref(),
-            schema_resolver,
-        );
+        let request_body =
+            Self::parse_request_body(operation.request_body.as_ref(), schema_resolver);
         let responses = Self::parse_responses(
             operation
                 .responses

@@ -44,7 +44,9 @@ pub enum AuthError {
     #[error("Password does not meet requirements: {requirements}")]
     PasswordRequirementsNotMet { requirements: String },
 
-    #[error("Account temporarily locked due to too many failed login attempts. Try again in {retry_after_seconds} seconds.")]
+    #[error(
+        "Account temporarily locked due to too many failed login attempts. Try again in {retry_after_seconds} seconds."
+    )]
     AccountLocked { retry_after_seconds: u64 },
 
     #[error("User ID not found: {user_id}")]
