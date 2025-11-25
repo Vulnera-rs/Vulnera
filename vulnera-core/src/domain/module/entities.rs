@@ -21,6 +21,32 @@ pub struct ModuleResult {
     pub error: Option<String>,
 }
 
+/// LLM-generated enrichment data for a finding
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct FindingEnrichment {
+    /// LLM-generated explanation of the vulnerability
+    #[schema(
+        example = "This SQL injection vulnerability allows attackers to execute arbitrary SQL commands..."
+    )]
+    pub explanation: Option<String>,
+    /// LLM-generated remediation suggestion
+    #[schema(
+        example = "Use parameterized queries or prepared statements instead of string concatenation..."
+    )]
+    pub remediation_suggestion: Option<String>,
+    /// Risk assessment summary
+    #[schema(
+        example = "High risk: This vulnerability could lead to data breach and unauthorized access."
+    )]
+    pub risk_summary: Option<String>,
+    /// Whether enrichment was successful
+    pub enrichment_successful: bool,
+    /// Error message if enrichment failed
+    pub error: Option<String>,
+    /// Timestamp when enrichment was performed
+    pub enriched_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 /// Finding from a module (unified format)
 ///
 /// All analysis modules produce findings in this unified format, allowing
@@ -43,6 +69,9 @@ pub struct Finding {
     pub description: String,
     /// Recommended remediation (if available)
     pub recommendation: Option<String>,
+    /// LLM-generated enrichment data (populated on-demand via enrichment endpoint)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrichment: Option<FindingEnrichment>,
 }
 
 /// Finding type

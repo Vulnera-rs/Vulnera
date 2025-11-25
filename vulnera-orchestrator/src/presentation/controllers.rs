@@ -2,6 +2,7 @@
 
 pub mod health;
 pub mod jobs;
+pub mod llm;
 pub mod repository;
 
 use std::sync::Arc;
@@ -70,6 +71,15 @@ pub struct OrchestratorState {
 
     // Version resolution service
     pub version_resolution_service: Arc<dyn VersionResolutionService>,
+
+    // LLM use cases
+    pub generate_code_fix_use_case:
+        Arc<vulnera_llm::application::use_cases::GenerateCodeFixUseCase>,
+    pub explain_vulnerability_use_case:
+        Arc<vulnera_llm::application::use_cases::ExplainVulnerabilityUseCase>,
+    pub natural_language_query_use_case:
+        Arc<vulnera_llm::application::use_cases::NaturalLanguageQueryUseCase>,
+    pub enrich_findings_use_case: Arc<vulnera_llm::application::use_cases::EnrichFindingsUseCase>,
 
     // Auth-related state
     pub db_pool: Arc<sqlx::PgPool>,

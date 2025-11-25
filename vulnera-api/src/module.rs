@@ -142,6 +142,7 @@ impl AnalysisModule for ApiSecurityModule {
                 confidence: FindingConfidence::High, // API spec findings are high confidence
                 description: f.description,
                 recommendation: Some(f.recommendation),
+                enrichment: None,
             })
             .collect();
 

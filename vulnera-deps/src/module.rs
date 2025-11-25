@@ -172,6 +172,7 @@ impl AnalysisModule for DependencyAnalyzerModule {
                             None
                         }
                     },
+                    enrichment: None,
                 };
                 findings.push(finding);
             }

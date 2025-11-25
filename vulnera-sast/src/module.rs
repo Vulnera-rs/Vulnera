@@ -84,6 +84,7 @@ impl AnalysisModule for SastModule {
                 },
                 description: f.description,
                 recommendation: f.recommendation,
+                enrichment: None,
             })
             .collect();
 

