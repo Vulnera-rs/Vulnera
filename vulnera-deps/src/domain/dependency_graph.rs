@@ -167,10 +167,8 @@ impl DependencyGraph {
     /// Add a package node to the graph
     pub fn add_node(&mut self, node: PackageNode) {
         let id = node.id.clone();
-        if node.metadata.is_direct {
-            if !self.root_packages.contains(&id) {
-                self.root_packages.push(id.clone());
-            }
+        if node.metadata.is_direct && !self.root_packages.contains(&id) {
+            self.root_packages.push(id.clone());
         }
         self.nodes.insert(id, node);
     }

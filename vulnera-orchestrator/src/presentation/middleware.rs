@@ -601,7 +601,7 @@ impl CsrfMiddlewareState {
 }
 
 /// CSRF validation middleware
-/// 
+///
 /// Validates CSRF tokens for state-changing requests (POST, PUT, PATCH, DELETE).
 /// The CSRF token must be provided in the `X-CSRF-Token` header and must match
 /// the token stored in the `csrf_token` cookie (set during authentication).
@@ -659,7 +659,10 @@ pub async fn csrf_validation_middleware(
     };
 
     // Validate that header token matches cookie token (using constant-time comparison)
-    if !state.csrf_service.validate_token(&header_token, &cookie_token) {
+    if !state
+        .csrf_service
+        .validate_token(&header_token, &cookie_token)
+    {
         tracing::warn!(
             method = %method,
             uri = %request.uri(),
@@ -681,11 +684,9 @@ fn extract_cookie(request: &Request, name: &str) -> Option<String> {
         .and_then(|cookies| {
             cookies.split(';').find_map(|cookie| {
                 let cookie = cookie.trim();
-                if let Some(value) = cookie.strip_prefix(&format!("{}=", name)) {
-                    Some(value.to_string())
-                } else {
-                    None
-                }
+                cookie
+                    .strip_prefix(&format!("{}=", name))
+                    .map(|value| value.to_string())
             })
         })
 }

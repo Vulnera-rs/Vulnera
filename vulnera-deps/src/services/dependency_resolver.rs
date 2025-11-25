@@ -150,7 +150,7 @@ pub async fn build_graph_from_lockfile(
     }
 
     // Add nodes to graph
-    for (_, node) in &package_map {
+    for node in package_map.values() {
         graph.add_node(node.clone());
     }
 

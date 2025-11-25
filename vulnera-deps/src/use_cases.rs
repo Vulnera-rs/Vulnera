@@ -669,7 +669,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         > = JoinSet::new();
 
         // Fetch versions for each package in the graph
-        for (package_id, _node) in &graph.nodes {
+        for package_id in graph.nodes.keys() {
             let package_id_clone = package_id.clone();
             let package_name = package_id.name.clone();
             let ecosystem_clone = ecosystem.clone();

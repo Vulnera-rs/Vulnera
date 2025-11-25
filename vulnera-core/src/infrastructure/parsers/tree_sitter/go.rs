@@ -108,9 +108,9 @@ impl TreeSitterGoParser {
     }
 
     /// Recursively find require nodes in the AST
-    fn find_require_nodes<'a>(
+    fn find_require_nodes(
         &self,
-        node: &'a Node,
+        node: &Node,
         content: &str,
         packages: &mut Vec<Package>,
     ) -> Result<(), ParseError> {
@@ -142,9 +142,9 @@ impl TreeSitterGoParser {
     }
 
     /// Parse a require block (multi-line format)
-    fn parse_require_block<'a>(
+    fn parse_require_block(
         &self,
-        block_node: &'a Node,
+        block_node: &Node,
         content: &str,
     ) -> Result<Vec<Package>, ParseError> {
         let mut packages = Vec::new();
@@ -169,9 +169,9 @@ impl TreeSitterGoParser {
 
     /// Parse a single require directive
     /// Format: require module/path v1.2.3 [// indirect]
-    fn parse_require_directive<'a>(
+    fn parse_require_directive(
         &self,
-        directive_node: &'a Node,
+        directive_node: &Node,
         content: &str,
     ) -> Result<Option<Package>, ParseError> {
         // Tree-sitter-go structure can vary:
@@ -192,7 +192,7 @@ impl TreeSitterGoParser {
                     let text = content[child.byte_range()].trim();
                     // Check if it looks like a version (starts with v or is a version number)
                     if text.starts_with('v')
-                        || text.chars().next().map_or(false, |c| c.is_ascii_digit())
+                        || text.chars().next().is_some_and(|c| c.is_ascii_digit())
                     {
                         version = Some(text.to_string());
                     }
@@ -208,7 +208,7 @@ impl TreeSitterGoParser {
                         }
                         // If it looks like a version (starts with v or is a version number)
                         else if (text.starts_with('v')
-                            || text.chars().next().map_or(false, |c| c.is_ascii_digit()))
+                            || text.chars().next().is_some_and(|c| c.is_ascii_digit()))
                             && version.is_none()
                         {
                             version = Some(text.to_string());

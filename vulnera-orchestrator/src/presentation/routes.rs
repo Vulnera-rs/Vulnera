@@ -17,15 +17,17 @@ use vulnera_core::infrastructure::auth::CsrfService;
 
 use crate::presentation::{
     auth::controller::{
-        AuthAppState, create_api_key, list_api_keys, login, logout, refresh_token, register, revoke_api_key,
+        AuthAppState, create_api_key, list_api_keys, login, logout, refresh_token, register,
+        revoke_api_key,
     },
     controllers::{
         OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
     },
     middleware::{
-        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware, 
-        https_enforcement_middleware, logging_middleware, rate_limit_middleware, security_headers_middleware,
+        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware,
+        https_enforcement_middleware, logging_middleware, rate_limit_middleware,
+        security_headers_middleware,
     },
     models::*,
 };
@@ -129,10 +131,10 @@ async fn inject_auth_state_middleware(
 pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>) -> Router {
     // Create CSRF service for auth endpoints
     let csrf_service = Arc::new(CsrfService::new(config.auth.csrf_token_bytes));
-    
+
     // Create CSRF middleware state
     let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
-    
+
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
         login_use_case: orchestrator_state.login_use_case.clone(),
@@ -154,7 +156,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/auth/login", post(login))
         .route("/auth/register", post(register))
         .with_state(auth_app_state.clone());
-    
+
     // Protected auth routes (CSRF required for state-changing operations)
     let protected_auth_routes = Router::new()
         .route("/auth/refresh", post(refresh_token))
@@ -210,73 +212,76 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Build CORS layer from configuration
     // Note: For cookie-based auth, we need allow_credentials(true) which requires
     // specific origins (not wildcard) in production
-    let cors_layer =
-        if config.server.allowed_origins.len() == 1 && config.server.allowed_origins[0] == "*" {
-            // Development mode: allow all origins but without credentials
-            // In development, cookies may not work across origins without proper config
-            tracing::warn!("CORS: Using wildcard origin (*) - cookies won't work cross-origin. Configure specific origins for production.");
-            CorsLayer::new()
-                .allow_origin(tower_http::cors::AllowOrigin::any())
-                .allow_methods([
-                    axum::http::Method::GET,
-                    axum::http::Method::POST,
-                    axum::http::Method::PUT,
-                    axum::http::Method::DELETE,
-                    axum::http::Method::OPTIONS,
-                ])
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::ACCEPT,
-                    axum::http::header::USER_AGENT,
-                    axum::http::header::ORIGIN,
-                    axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
-                    axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
-                    axum::http::HeaderName::from_static("x-ghsa-token"),
-                    axum::http::HeaderName::from_static("x-github-token"),
-                    axum::http::HeaderName::from_static("x-api-key"),
-                    axum::http::HeaderName::from_static("x-csrf-token"),
-                ])
-                .allow_credentials(false) // Cannot use credentials with wildcard origin
-                .max_age(Duration::from_secs(3600))
-        } else {
-            // Production mode: specific origins with credentials enabled
-            let origins: Vec<axum::http::HeaderValue> = config
-                .server
-                .allowed_origins
-                .iter()
-                .filter_map(|origin| {
-                    axum::http::HeaderValue::from_str(origin)
-                        .map_err(|_| {
-                            tracing::warn!(origin, "Invalid CORS origin in config; skipping");
-                        })
-                        .ok()
-                })
-                .collect();
-            
-            CorsLayer::new()
-                .allow_origin(origins)
-                .allow_methods([
-                    axum::http::Method::GET,
-                    axum::http::Method::POST,
-                    axum::http::Method::PUT,
-                    axum::http::Method::DELETE,
-                    axum::http::Method::OPTIONS,
-                ])
-                .allow_headers([
-                    axum::http::header::CONTENT_TYPE,
-                    axum::http::header::ACCEPT,
-                    axum::http::header::USER_AGENT,
-                    axum::http::header::ORIGIN,
-                    axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
-                    axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
-                    axum::http::HeaderName::from_static("x-ghsa-token"),
-                    axum::http::HeaderName::from_static("x-github-token"),
-                    axum::http::HeaderName::from_static("x-api-key"),
-                    axum::http::HeaderName::from_static("x-csrf-token"),
-                ])
-                .allow_credentials(true) // Enable credentials for cookie-based auth
-                .max_age(Duration::from_secs(3600))
-        };
+    let cors_layer = if config.server.allowed_origins.len() == 1
+        && config.server.allowed_origins[0] == "*"
+    {
+        // Development mode: allow all origins but without credentials
+        // In development, cookies may not work across origins without proper config
+        tracing::warn!(
+            "CORS: Using wildcard origin (*) - cookies won't work cross-origin. Configure specific origins for production."
+        );
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::AllowOrigin::any())
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::PUT,
+                axum::http::Method::DELETE,
+                axum::http::Method::OPTIONS,
+            ])
+            .allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+                axum::http::header::USER_AGENT,
+                axum::http::header::ORIGIN,
+                axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
+                axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                axum::http::HeaderName::from_static("x-ghsa-token"),
+                axum::http::HeaderName::from_static("x-github-token"),
+                axum::http::HeaderName::from_static("x-api-key"),
+                axum::http::HeaderName::from_static("x-csrf-token"),
+            ])
+            .allow_credentials(false) // Cannot use credentials with wildcard origin
+            .max_age(Duration::from_secs(3600))
+    } else {
+        // Production mode: specific origins with credentials enabled
+        let origins: Vec<axum::http::HeaderValue> = config
+            .server
+            .allowed_origins
+            .iter()
+            .filter_map(|origin| {
+                axum::http::HeaderValue::from_str(origin)
+                    .map_err(|_| {
+                        tracing::warn!(origin, "Invalid CORS origin in config; skipping");
+                    })
+                    .ok()
+            })
+            .collect();
+
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods([
+                axum::http::Method::GET,
+                axum::http::Method::POST,
+                axum::http::Method::PUT,
+                axum::http::Method::DELETE,
+                axum::http::Method::OPTIONS,
+            ])
+            .allow_headers([
+                axum::http::header::CONTENT_TYPE,
+                axum::http::header::ACCEPT,
+                axum::http::header::USER_AGENT,
+                axum::http::header::ORIGIN,
+                axum::http::header::ACCESS_CONTROL_REQUEST_METHOD,
+                axum::http::header::ACCESS_CONTROL_REQUEST_HEADERS,
+                axum::http::HeaderName::from_static("x-ghsa-token"),
+                axum::http::HeaderName::from_static("x-github-token"),
+                axum::http::HeaderName::from_static("x-api-key"),
+                axum::http::HeaderName::from_static("x-csrf-token"),
+            ])
+            .allow_credentials(true) // Enable credentials for cookie-based auth
+            .max_age(Duration::from_secs(3600))
+    };
     let mut router = Router::new()
         .nest("/api/v1", api_routes)
         .merge(health_routes);
