@@ -45,12 +45,14 @@ enable_response_compression = true # Enable gzip compression for responses
 cache_extension_results = true     # Cache results for faster repeated analysis
 
 [auth]
-# JWT secret key (must be at least 16 characters, 32+ recommended for production)
-jwt_secret = "change-me-in-production-use-strong-random-secret-key"
+# JWT secret key - MUST be set via VULNERA__AUTH__JWT_SECRET environment variable
+# The secret should be at least 32 characters long and randomly generated
+# Example: openssl rand -hex 32
+jwt_secret = "${JWT_SECRET:-MUST_SET_JWT_SECRET_IN_ENVIRONMENT}"
 token_ttl_hours = 24
-refresh_token_ttl_hours = 720                                       # 30 days
+refresh_token_ttl_hours = 720                                    # 30 days
 api_key_length = 32
-api_key_ttl_days = 365                                              # 1 year, set to null for no expiration
+api_key_ttl_days = 365                                           # 1 year, set to null for no expiration
 
 [database]
 # Database connection URL (can also be set via DATABASE_URL env var)

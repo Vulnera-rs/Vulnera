@@ -8,7 +8,7 @@ use crate::domain::auth::{
     entities::{ApiKey, User},
     errors::AuthError,
     repositories::{IApiKeyRepository, IUserRepository},
-    value_objects::{ApiKeyId, Email, UserId, UserRole},
+    value_objects::{ApiKeyId, Email, Password, UserId, UserRole},
 };
 use crate::infrastructure::auth::{ApiKeyGenerator, JwtService, PasswordHasher};
 
@@ -90,6 +90,8 @@ pub struct RegisterUserUseCase {
     user_repository: Arc<dyn IUserRepository>,
     password_hasher: Arc<PasswordHasher>,
     jwt_service: Arc<JwtService>,
+    /// Whether to allow role assignment during registration (should be false in production)
+    allow_role_assignment: bool,
 }
 
 impl RegisterUserUseCase {
@@ -102,6 +104,22 @@ impl RegisterUserUseCase {
             user_repository,
             password_hasher,
             jwt_service,
+            allow_role_assignment: false, // Default to secure behavior
+        }
+    }
+
+    /// Create with explicit role assignment control (for testing or admin-created users)
+    pub fn with_role_assignment(
+        user_repository: Arc<dyn IUserRepository>,
+        password_hasher: Arc<PasswordHasher>,
+        jwt_service: Arc<JwtService>,
+        allow_role_assignment: bool,
+    ) -> Self {
+        Self {
+            user_repository,
+            password_hasher,
+            jwt_service,
+            allow_role_assignment,
         }
     }
 
@@ -118,10 +136,24 @@ impl RegisterUserUseCase {
             });
         }
 
-        // Validate password strength (minimum 8 characters)
-        if password.len() < 8 {
-            return Err(AuthError::WeakPassword);
-        }
+        // Validate password strength using the new Password value object
+        Password::validate(&password).map_err(|e| AuthError::PasswordRequirementsNotMet {
+            requirements: e.message,
+        })?;
+
+        // Determine roles - only allow role assignment if explicitly enabled
+        let user_roles = if let Some(requested_roles) = roles {
+            if !self.allow_role_assignment {
+                // Check if any non-default role is being requested
+                let has_elevated_roles = requested_roles.iter().any(|r| r.is_admin());
+                if has_elevated_roles {
+                    return Err(AuthError::RoleAssignmentNotAllowed);
+                }
+            }
+            requested_roles
+        } else {
+            vec![UserRole::User]
+        };
 
         // Hash password
         let password_hash = self.password_hasher.hash(&password)?;
@@ -131,7 +163,7 @@ impl RegisterUserUseCase {
             UserId::generate(),
             email.clone(),
             password_hash,
-            roles.unwrap_or_else(|| vec![UserRole::User]),
+            user_roles,
         );
 
         // Save user to repository

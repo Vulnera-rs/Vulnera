@@ -3,6 +3,7 @@
 use hex;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use crate::domain::auth::value_objects::ApiKeyHash;
 
@@ -66,6 +67,30 @@ impl ApiKeyGenerator {
         let hash_bytes = hasher.finalize();
         let key_hash = hex::encode(hash_bytes);
         ApiKeyHash::from(key_hash)
+    }
+
+    /// Compare two API key hashes in constant time to prevent timing attacks
+    ///
+    /// This method should be used when comparing a user-provided API key hash
+    /// against a stored hash to prevent timing-based side-channel attacks.
+    ///
+    /// # Arguments
+    /// * `provided_hash` - The hash of the user-provided API key
+    /// * `stored_hash` - The hash stored in the database
+    ///
+    /// # Returns
+    /// `true` if the hashes match, `false` otherwise
+    pub fn constant_time_compare(provided_hash: &ApiKeyHash, stored_hash: &ApiKeyHash) -> bool {
+        let provided_bytes = provided_hash.as_str().as_bytes();
+        let stored_bytes = stored_hash.as_str().as_bytes();
+
+        // If lengths differ, we still want to do a constant-time comparison
+        // to avoid leaking information about hash length
+        if provided_bytes.len() != stored_bytes.len() {
+            return false;
+        }
+
+        provided_bytes.ct_eq(stored_bytes).into()
     }
 
     /// Mask an API key for display (shows first 8 chars and last 4 chars)
@@ -148,5 +173,29 @@ mod tests {
 
         // Should be prefix + 16 bytes * 2 (hex) = prefix + 32 chars
         assert_eq!(key.len(), "vuln_".len() + 32);
+    }
+
+    #[test]
+    fn test_constant_time_compare() {
+        let generator = ApiKeyGenerator::new();
+        let (key1, hash1) = generator.generate();
+        let (key2, hash2) = generator.generate();
+
+        // Same hashes should match
+        let hash1_copy = generator.hash_key(&key1);
+        assert!(ApiKeyGenerator::constant_time_compare(&hash1, &hash1_copy));
+
+        // Different hashes should not match
+        assert!(!ApiKeyGenerator::constant_time_compare(&hash1, &hash2));
+    }
+
+    #[test]
+    fn test_constant_time_compare_different_lengths() {
+        // Create hashes of different lengths manually
+        let short_hash = ApiKeyHash::from("abc123".to_string());
+        let long_hash = ApiKeyHash::from("abc123def456".to_string());
+
+        // Different length hashes should not match
+        assert!(!ApiKeyGenerator::constant_time_compare(&short_hash, &long_hash));
     }
 }

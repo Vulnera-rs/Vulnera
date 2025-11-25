@@ -240,6 +240,31 @@ impl Validate for AuthConfig {
             ));
         }
 
+        // Reject known insecure default secrets
+        const INSECURE_SECRETS: &[&str] = &[
+            "change-me-in-production-use-strong-random-secret-key",
+            "change-me-in-production",
+            "secret",
+            "jwt-secret",
+            "your-secret-key",
+        ];
+
+        let secret_lower = self.jwt_secret.to_lowercase();
+        for insecure in INSECURE_SECRETS {
+            if secret_lower.contains(insecure) {
+                return Err(ValidationError::auth(
+                    "JWT secret appears to be an insecure default value. Please set a strong, random secret via VULNERA__AUTH__JWT_SECRET environment variable.".to_string(),
+                ));
+            }
+        }
+
+        // Warn if secret is too short for production (but don't fail)
+        if self.jwt_secret.len() < 32 {
+            tracing::warn!(
+                "JWT secret is shorter than recommended 32 characters. Consider using a longer secret for production."
+            );
+        }
+
         // Validate token TTL > 0
         if self.token_ttl_hours == 0 {
             return Err(ValidationError::auth(
