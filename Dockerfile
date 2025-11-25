@@ -28,17 +28,19 @@ COPY vulnera-orchestrator/Cargo.toml ./vulnera-orchestrator/
 COPY vulnera-sast/Cargo.toml ./vulnera-sast/
 COPY vulnera-secrets/Cargo.toml ./vulnera-secrets/
 COPY vulnera-api/Cargo.toml ./vulnera-api/
+COPY vulnera-llm/Cargo.toml ./vulnera-llm/
 
 # Create dummy source files to build dependencies only (layer caching optimization)
 RUN mkdir -p src vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
-    vulnera-sast/src vulnera-secrets/src vulnera-api/src && \
+    vulnera-sast/src vulnera-secrets/src vulnera-api/src vulnera-llm/src && \
     echo "fn main() {}" > src/main.rs && \
     echo "" > vulnera-core/src/lib.rs && \
     echo "" > vulnera-deps/src/lib.rs && \
     echo "" > vulnera-orchestrator/src/lib.rs && \
     echo "" > vulnera-sast/src/lib.rs && \
     echo "" > vulnera-secrets/src/lib.rs && \
-    echo "" > vulnera-api/src/lib.rs
+    echo "" > vulnera-api/src/lib.rs && \
+    echo "" > vulnera-llm/src/lib.rs
 
 # Build dependencies only with BuildKit cache mounts for faster builds
 # Cache Cargo registry (downloaded crates)
@@ -59,6 +61,7 @@ COPY vulnera-orchestrator ./vulnera-orchestrator
 COPY vulnera-sast ./vulnera-sast
 COPY vulnera-secrets ./vulnera-secrets
 COPY vulnera-api ./vulnera-api
+COPY vulnera-llm ./vulnera-llm
 COPY migrations ./migrations
 
 # Install sqlx-cli early for running migrations during build
@@ -91,7 +94,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -rf /app/target/release/deps/libvulnera_* \
     /app/target/release/incremental/vulnera_* 2>/dev/null || true && \
     find vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
-    vulnera-sast/src vulnera-secrets/src vulnera-api/src -type f -name "*.rs" \
+    vulnera-sast/src vulnera-secrets/src vulnera-api/src vulnera-llm/src -type f -name "*.rs" \
     -exec touch {} \; 2>/dev/null || true
 
 # Build workspace members first, then the main binary
@@ -105,7 +108,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     export DATABASE_URL='postgresql://postgres:postgres@localhost:5432/vulnera_build' && \
     cargo build --release --package vulnera-core --package vulnera-deps \
     --package vulnera-orchestrator --package vulnera-sast --package vulnera-secrets \
-    --package vulnera-api && \
+    --package vulnera-api --package vulnera-llm && \
     cargo build --release --package vulnera-rust && \
     sudo -u postgres /usr/lib/postgresql/\$PG_VERSION/bin/pg_ctl -D /var/lib/postgresql/data stop && \
     mkdir -p /app/bin && \
