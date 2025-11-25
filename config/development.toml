@@ -4,7 +4,14 @@ port = 3000
 workers = 0
 enable_docs = true
 request_timeout_seconds = 60
-allowed_origins = ["*"]
+# For development, specify origins explicitly to support credentials (cookies)
+# Wildcard "*" cannot be used with allow_credentials=true in CORS
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:8080",
+    "http://localhost:5173",
+]
 
 [server.security]
 enforce_https = false           # Don't enforce HTTPS in development
