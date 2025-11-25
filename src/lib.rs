@@ -4,7 +4,7 @@
 
 mod app;
 
-pub use app::create_app;
+pub use app::{AppHandle, create_app};
 pub use vulnera_core::{Config, init_tracing};
 pub use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 

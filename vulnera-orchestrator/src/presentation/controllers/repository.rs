@@ -416,7 +416,7 @@ async fn compute_repository_version_recommendations(
     }
 
     let mut unique_packages: Vec<Package> = packages.into_values().collect();
-    unique_packages.sort_by(|a, b| a.identifier().cmp(&b.identifier()));
+    unique_packages.sort_by_key(|a| a.identifier());
 
     let limit = max_queries.min(unique_packages.len());
     let mut recommendations = Vec::new();

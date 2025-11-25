@@ -14,9 +14,8 @@ tokio = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 
-# Sources
-osv = { workspace = true }
-nvd_cve = { workspace = true }
+# Vulnerability intelligence
+vulnera-advisor = { workspace = true }
 
 # HTTP client
 reqwest = { workspace = true }

@@ -156,10 +156,12 @@ impl AnalysisModule for DependencyAnalyzerModule {
                     recommendation: {
                         let current_version = &affected_pkg.package.version;
                         let latest_safe = affected_pkg.recommended_fix();
-                        let nearest_safe = affected_pkg.fixed_versions.iter()
+                        let nearest_safe = affected_pkg
+                            .fixed_versions
+                            .iter()
                             .filter(|v| *v > current_version)
                             .min();
-                        
+
                         if latest_safe.is_some() || nearest_safe.is_some() {
                             let json = serde_json::json!({
                                 "nearest_safe": nearest_safe.map(|v| v.to_string()),

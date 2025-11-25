@@ -171,11 +171,14 @@ impl PackageLockParser {
     }
 
     /// Extract packages and dependencies from lockfile
-    /// 
+    ///
     /// # Arguments
     /// * `deps` - The JSON value containing package data
     /// * `is_packages_section` - True if processing "packages" section (lockfileVersion 2/3), false for "dependencies" section (v1)
-    fn extract_lockfile_data(deps: &Value, is_packages_section: bool) -> Result<ParseResult, ParseError> {
+    fn extract_lockfile_data(
+        deps: &Value,
+        is_packages_section: bool,
+    ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
 
@@ -290,7 +293,8 @@ impl PackageLockParser {
                         if let Some(deps_obj) = nested_deps.as_object() {
                             if let Some((_, val)) = deps_obj.iter().next() {
                                 if val.is_object() {
-                                    let nested_result = Self::extract_lockfile_data(nested_deps, false)?;
+                                    let nested_result =
+                                        Self::extract_lockfile_data(nested_deps, false)?;
                                     packages.extend(nested_result.packages);
                                     dependencies.extend(nested_result.dependencies);
                                 }
@@ -669,16 +673,12 @@ lodash@~4.17.21:
         "#;
 
         let result = parser.parse_file(content).await.unwrap();
-        
+
         // Should have 3 packages: my-app, express, and accepts
         assert_eq!(result.packages.len(), 3);
 
         // Verify the root package is correctly named
-        let root_pkg = result
-            .packages
-            .iter()
-            .find(|p| p.name == "my-app")
-            .unwrap();
+        let root_pkg = result.packages.iter().find(|p| p.name == "my-app").unwrap();
         assert_eq!(root_pkg.version, Version::parse("1.0.0").unwrap());
 
         // Verify express package name is stripped of node_modules/ prefix

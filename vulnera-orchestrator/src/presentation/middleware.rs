@@ -217,11 +217,14 @@ pub async fn logging_middleware(request: Request<axum::body::Body>, next: Next) 
     response
 }
 
-/// Middleware to scope a per-request GHSA token from headers.
+/// Middleware to scope a per-request GitHub token from headers for git operations.
 /// Accepts X-GHSA-Token, X-GitHub-Token, or Authorization: Bearer|token <token>.
+///
+/// Note: Vulnerability queries now use vulnera-advisor which configures its token at startup.
+/// This middleware now only passes the token for git/repository operations.
 pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Next) -> Response {
     // Extract token from headers before moving the request into the next service
-    let ghsa_token = {
+    let git_token = {
         let headers = request.headers();
         headers
             .get("x-ghsa-token")
@@ -248,16 +251,10 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
             })
     };
 
-    if let Some(token) = ghsa_token {
-        let git_token = token.clone();
-        vulnera_core::infrastructure::api_clients::ghsa::with_request_ghsa_token(
+    if let Some(token) = git_token {
+        crate::infrastructure::git::with_request_git_token(
             token,
-            async move {
-                crate::infrastructure::git::with_request_git_token(git_token, async move {
-                    next.run(request).await
-                })
-                .await
-            },
+            async move { next.run(request).await },
         )
         .await
     } else {

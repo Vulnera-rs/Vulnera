@@ -94,6 +94,7 @@ pub struct Config {
     pub logging: LoggingConfig,
     pub recommendations: RecommendationsConfig,
     pub analysis: AnalysisConfig,
+    pub sync: SyncConfig,
     pub sast: SastConfig,
     pub secret_detection: SecretDetectionConfig,
     pub api_security: ApiSecurityConfig,
@@ -435,6 +436,31 @@ impl Default for AnalysisConfig {
     }
 }
 
+/// Vulnerability sync configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SyncConfig {
+    /// Whether background vulnerability sync is enabled
+    pub enabled: bool,
+    /// Interval between syncs in hours
+    pub interval_hours: u64,
+    /// Whether to run an initial sync on startup
+    pub on_startup: bool,
+    /// Maximum time to wait for sync to complete on shutdown (in seconds)
+    pub shutdown_timeout_seconds: u64,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,    // Opt-in by default
+            interval_hours: 6, // Sync every 6 hours
+            on_startup: true,  // Run initial sync immediately
+            shutdown_timeout_seconds: 30,
+        }
+    }
+}
+
 /// SAST (Static Application Security Testing) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -708,6 +734,7 @@ impl Default for Config {
                 job_queue_capacity: 32,
                 max_job_workers: 4,
             },
+            sync: SyncConfig::default(),
             sast: SastConfig::default(),
             secret_detection: SecretDetectionConfig::default(),
             api_security: ApiSecurityConfig::default(),

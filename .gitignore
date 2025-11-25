@@ -116,7 +116,6 @@ dmypy.json
 .pyre/
 .kiro/
 .vscode/
-.github/copilot-instructions.md
 
 
 # Rust

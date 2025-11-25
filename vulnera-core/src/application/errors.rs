@@ -84,6 +84,9 @@ pub enum VulnerabilityError {
 
     #[error("Domain object creation failed: {message}")]
     DomainCreation { message: String },
+
+    #[error("Repository error: {message}")]
+    Repository { message: String },
 }
 
 #[derive(Error, Debug)]

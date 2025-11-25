@@ -182,10 +182,7 @@ impl Password {
 
         if !missing.is_empty() {
             return Err(PasswordValidationError {
-                message: format!(
-                    "Password must contain: {}",
-                    missing.join(", ")
-                ),
+                message: format!("Password must contain: {}", missing.join(", ")),
                 missing_requirements: missing,
             });
         }
@@ -456,27 +453,57 @@ mod tests {
         // Too short
         let result = Password::new("Ab1!".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("8 characters")));
+        assert!(
+            result
+                .unwrap_err()
+                .missing_requirements
+                .iter()
+                .any(|r| r.contains("8 characters"))
+        );
 
         // No uppercase
         let result = Password::new("myp@ssw0rd!".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("uppercase")));
+        assert!(
+            result
+                .unwrap_err()
+                .missing_requirements
+                .iter()
+                .any(|r| r.contains("uppercase"))
+        );
 
         // No lowercase
         let result = Password::new("MYP@SSW0RD!".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("lowercase")));
+        assert!(
+            result
+                .unwrap_err()
+                .missing_requirements
+                .iter()
+                .any(|r| r.contains("lowercase"))
+        );
 
         // No digit
         let result = Password::new("MyP@ssword!".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("digit")));
+        assert!(
+            result
+                .unwrap_err()
+                .missing_requirements
+                .iter()
+                .any(|r| r.contains("digit"))
+        );
 
         // No special character
         let result = Password::new("MyPassword1".to_string());
         assert!(result.is_err());
-        assert!(result.unwrap_err().missing_requirements.iter().any(|r| r.contains("special")));
+        assert!(
+            result
+                .unwrap_err()
+                .missing_requirements
+                .iter()
+                .any(|r| r.contains("special"))
+        );
     }
 
     #[test]
