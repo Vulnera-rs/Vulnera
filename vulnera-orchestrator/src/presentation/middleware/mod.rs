@@ -501,12 +501,29 @@ impl RateLimiterState {
     }
 }
 
+/// Routes that should be excluded from rate limiting
+const RATE_LIMIT_EXCLUDED_PATHS: &[&str] =
+    &["/docs", "/api-docs", "/health", "/metrics", "/favicon.ico"];
+
+/// Check if a path should be excluded from rate limiting
+fn should_skip_rate_limit(path: &str) -> bool {
+    RATE_LIMIT_EXCLUDED_PATHS
+        .iter()
+        .any(|excluded| path.starts_with(excluded))
+}
+
 /// Rate limiting middleware
 pub async fn rate_limit_middleware(
     State(state): State<Arc<RateLimiterState>>,
     request: Request,
     next: Next,
 ) -> Response {
+    // Skip rate limiting for excluded paths (docs, health checks, static assets)
+    let path = request.uri().path();
+    if should_skip_rate_limit(path) {
+        return next.run(request).await;
+    }
+
     // Check rate limit
     let (key, is_authenticated) = state.get_key_and_auth(&request);
     match state.check_rate_limit(&key, is_authenticated).await {
