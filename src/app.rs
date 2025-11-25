@@ -43,6 +43,10 @@ use vulnera_deps::{
     },
     types::VersionResolutionService,
 };
+use vulnera_llm::{
+    ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, HuaweiLlmProvider,
+    NaturalLanguageQueryUseCase,
+};
 
 /// Handle returned from create_app for graceful shutdown coordination
 pub struct AppHandle {
@@ -382,6 +386,21 @@ pub async fn create_app(
         api_key_generator: api_key_generator.clone(),
     };
 
+    // Initialize LLM provider and use cases
+    let llm_provider = Arc::new(HuaweiLlmProvider::new(config.llm.clone()));
+    let generate_code_fix_use_case = Arc::new(GenerateCodeFixUseCase::new(
+        llm_provider.clone(),
+        config.llm.clone(),
+    ));
+    let explain_vulnerability_use_case = Arc::new(ExplainVulnerabilityUseCase::new(
+        llm_provider.clone(),
+        config.llm.clone(),
+    ));
+    let natural_language_query_use_case = Arc::new(NaturalLanguageQueryUseCase::new(
+        llm_provider.clone(),
+        config.llm.clone(),
+    ));
+
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
         create_job_use_case,
@@ -396,6 +415,9 @@ pub async fn create_app(
         dependency_analysis_use_case,
         repository_analysis_service,
         version_resolution_service,
+        generate_code_fix_use_case,
+        explain_vulnerability_use_case,
+        natural_language_query_use_case,
         db_pool,
         user_repository,
         api_key_repository,

@@ -5825,6 +5825,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "vulnera-llm"
+version = "0.3.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "futures",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "vulnera-core",
+]
+
+[[package]]
 name = "vulnera-orchestrator"
 version = "0.3.1"
 dependencies = [
@@ -5843,6 +5860,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-stream",
  "tokio-test",
  "tower",
  "tower-http",
@@ -5853,6 +5871,7 @@ dependencies = [
  "uuid",
  "vulnera-core",
  "vulnera-deps",
+ "vulnera-llm",
  "walkdir",
 ]
 
@@ -5871,6 +5890,7 @@ dependencies = [
  "vulnera-api",
  "vulnera-core",
  "vulnera-deps",
+ "vulnera-llm",
  "vulnera-orchestrator",
  "vulnera-sast",
  "vulnera-secrets",

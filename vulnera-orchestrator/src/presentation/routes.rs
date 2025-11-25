@@ -23,11 +23,12 @@ use crate::presentation::{
     controllers::{
         OrchestratorState, analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
+        llm::{explain_vulnerability, generate_code_fix, natural_language_query},
     },
     middleware::{
-        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware,
-        https_enforcement_middleware, logging_middleware, rate_limit_middleware,
-        security_headers_middleware,
+        CsrfMiddlewareState, LlmRateLimiterState, RateLimiterState, csrf_validation_middleware,
+        ghsa_token_middleware, https_enforcement_middleware, llm_rate_limit_middleware,
+        logging_middleware, rate_limit_middleware, security_headers_middleware,
     },
     models::*,
 };
@@ -51,7 +52,10 @@ use axum::{
         crate::presentation::auth::controller::logout,
         crate::presentation::auth::controller::create_api_key,
         crate::presentation::auth::controller::list_api_keys,
-        crate::presentation::auth::controller::revoke_api_key
+        crate::presentation::auth::controller::revoke_api_key,
+        crate::presentation::controllers::llm::generate_code_fix,
+        crate::presentation::controllers::llm::explain_vulnerability,
+        crate::presentation::controllers::llm::natural_language_query
     ),
     components(
         schemas(
@@ -76,6 +80,12 @@ use axum::{
             AnalysisMetadataDto,
             SeverityBreakdownDto,
             VersionRecommendationDto,
+            GenerateCodeFixRequest,
+            CodeFixResponse,
+            ExplainVulnerabilityRequest,
+            ExplanationResponse,
+            NaturalLanguageQueryRequest,
+            NaturalLanguageQueryResponse,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::AuthResponse,
@@ -93,7 +103,8 @@ use axum::{
         (name = "jobs", description = "Job retrieval and status endpoints"),
         (name = "dependencies", description = "Dependency analysis endpoints optimized for LSP/IDE extensions"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
-        (name = "auth", description = "Authentication and authorization endpoints (HttpOnly cookie-based)")
+        (name = "auth", description = "Authentication and authorization endpoints (HttpOnly cookie-based)"),
+        (name = "llm", description = "AI-powered vulnerability analysis and code generation")
     ),
     info(
         title = "Vulnera API",
@@ -135,6 +146,9 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Create CSRF middleware state
     let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
 
+    // Create LLM rate limiter state
+    let llm_rate_limiter_state = Arc::new(LlmRateLimiterState::new(config.llm.rate_limit.clone()));
+
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
         login_use_case: orchestrator_state.login_use_case.clone(),
@@ -172,6 +186,16 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         ))
         .with_state(auth_app_state);
 
+    // LLM routes with specific rate limiting
+    let llm_routes = Router::new()
+        .route("/llm/fix", post(generate_code_fix))
+        .route("/llm/explain", post(explain_vulnerability))
+        .route("/llm/query", post(natural_language_query))
+        .layer(middleware::from_fn_with_state(
+            llm_rate_limiter_state,
+            llm_rate_limit_middleware,
+        ));
+
     // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
     let api_routes = Router::new()
         .route("/analyze/job", post(analyze))
@@ -181,6 +205,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             get(crate::presentation::controllers::jobs::get_job),
         )
         .route("/dependencies/analyze", post(analyze_dependencies))
+        .merge(llm_routes)
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
@@ -211,7 +236,6 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
 
     // Build CORS layer from configuration
     // Note: For cookie-based auth, we need allow_credentials(true) which requires
-    // specific origins (not wildcard) in production
     let cors_layer = if config.server.allowed_origins.len() == 1
         && config.server.allowed_origins[0] == "*"
     {

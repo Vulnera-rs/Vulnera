@@ -101,6 +101,7 @@ pub struct Config {
     pub auth: AuthConfig,
     pub database: DatabaseConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
+    pub llm: LlmConfig,
 }
 
 /// Popular packages configuration for vulnerability listing
@@ -701,6 +702,79 @@ impl Default for DatabaseConfig {
     }
 }
 
+/// LLM configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmConfig {
+    /// Huawei ModelArts API URL
+    pub huawei_api_url: String,
+    /// Huawei ModelArts API Key
+    pub huawei_api_key: Option<String>,
+    /// Default model to use (qwen3-32b or deepseek-v3.1)
+    pub default_model: String,
+    /// Model to use for explanations (overrides default)
+    pub explanation_model: Option<String>,
+    /// Model to use for code fixes (overrides default)
+    pub code_fix_model: Option<String>,
+    /// Temperature for generation (0.0 to 1.0)
+    pub temperature: f64,
+    /// Maximum tokens to generate
+    pub max_tokens: u32,
+    /// Request timeout in seconds
+    pub timeout_seconds: u64,
+    /// Whether to enable streaming responses
+    pub enable_streaming: bool,
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limit: LlmRateLimitConfig,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            huawei_api_url: "https://api-ap-southeast-1.modelarts-maas.com/v1/chat/completions"
+                .to_string(),
+            huawei_api_key: None,
+            default_model: "deepseek-v3.1".to_string(),
+            explanation_model: Some("deepseek-v3.1".to_string()),
+            code_fix_model: Some("qwen3-32b".to_string()),
+            temperature: 0.3,
+            max_tokens: 2048,
+            timeout_seconds: 60,
+            enable_streaming: true,
+            rate_limit: LlmRateLimitConfig::default(),
+        }
+    }
+}
+
+/// LLM Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmRateLimitConfig {
+    /// Whether rate limiting is enabled
+    pub enabled: bool,
+    /// Requests allowed per minute
+    pub requests_per_minute: u32,
+    /// Requests allowed per hour
+    pub requests_per_hour: u32,
+    /// Burst size (max concurrent requests allowed above rate)
+    pub burst_size: u32,
+    /// Whether to enforce per-user limits
+    pub per_user_limit: bool,
+}
+
+impl Default for LlmRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            requests_per_minute: 20,
+            requests_per_hour: 200,
+            burst_size: 5,
+            per_user_limit: true,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -779,6 +853,7 @@ impl Default for Config {
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),
             popular_packages: None,
+            llm: LlmConfig::default(),
         }
     }
 }
@@ -793,6 +868,10 @@ impl Validate for Config {
         validation::Validate::validate(&self.api_security)?;
         validation::Validate::validate(&self.auth)?;
         validation::Validate::validate(&self.database)?;
+        // LLM config validation is simple for now, but we could add more checks
+        if self.llm.timeout_seconds == 0 {
+            return Err(ValidationError::api("LLM timeout must be > 0"));
+        }
         Ok(())
     }
 }

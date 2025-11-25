@@ -21,6 +21,9 @@ use vulnera_core::infrastructure::auth::CsrfService;
 
 use crate::presentation::models::ErrorResponse;
 
+pub mod llm_rate_limit;
+pub use llm_rate_limit::*;
+
 /// Convert ApplicationError to HTTP response
 pub fn application_error_to_response(error: ApplicationError) -> Response {
     // Default to sanitizing errors; handlers can access AppState to get actual config
