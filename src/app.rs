@@ -26,10 +26,30 @@ use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
 };
+use vulnera_core::application::analytics::use_cases::{
+    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
+};
+use vulnera_core::application::organization::use_cases::{
+    CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
+    InviteMemberUseCase, LeaveOrganizationUseCase, ListUserOrganizationsUseCase,
+    RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
+};
 use vulnera_core::application::reporting::ReportServiceImpl;
+use vulnera_core::application::analytics::AnalyticsAggregationService;
+use vulnera_core::domain::organization::repositories::{
+    IAnalysisEventRepository, IOrganizationMemberRepository, IOrganizationRepository,
+    IPersistedJobResultRepository, IPersonalStatsMonthlyRepository, ISubscriptionLimitsRepository,
+    IUserStatsMonthlyRepository,
+};
 use vulnera_core::infrastructure::{
     VulneraAdvisorRepository,
-    auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
+    auth::{
+        ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository,
+        SqlxOrganizationRepository, SqlxOrganizationMemberRepository,
+        SqlxAnalysisEventRepository, SqlxPersonalStatsMonthlyRepository,
+        SqlxUserStatsMonthlyRepository, SqlxSubscriptionLimitsRepository,
+        SqlxPersistedJobResultRepository,
+    },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
@@ -148,6 +168,62 @@ fn spawn_sync_worker(
             }
         });
     }
+}
+
+/// Spawns a background worker that periodically cleans up old analytics events.
+/// Uses the analytics config for retention period and cleanup interval.
+fn spawn_analytics_cleanup_worker(
+    analytics_service: Arc<AnalyticsAggregationService>,
+    config: &Config,
+    shutdown_token: CancellationToken,
+) {
+    let retention_days = config.analytics.event_retention_days;
+    let interval_hours = config.analytics.cleanup_interval_hours;
+
+    // Convert retention days to months (approximate, 30 days per month)
+    let retention_months = ((retention_days / 30).max(1)) as u32;
+
+    let interval = Duration::from_secs(interval_hours * 3600);
+    let token = shutdown_token.clone();
+
+    tokio::spawn(async move {
+        let mut interval_timer = tokio::time::interval(interval);
+        // Skip the first immediate tick to avoid cleanup right at startup
+        interval_timer.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = interval_timer.tick() => {
+                    tracing::info!("Starting analytics event cleanup (retention: {} months)...", retention_months);
+
+                    tokio::select! {
+                        result = analytics_service.cleanup_old_events(retention_months) => {
+                            match result {
+                                Ok(deleted) => {
+                                    if deleted > 0 {
+                                        tracing::info!("Analytics cleanup completed: {} old events deleted", deleted);
+                                    } else {
+                                        tracing::debug!("Analytics cleanup completed: no old events to delete");
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::warn!("Analytics cleanup failed (non-fatal): {}", e);
+                                }
+                            }
+                        }
+                        _ = token.cancelled() => {
+                            tracing::info!("Analytics cleanup cancelled due to shutdown");
+                            return;
+                        }
+                    }
+                }
+                _ = token.cancelled() => {
+                    tracing::info!("Analytics cleanup worker shutting down gracefully");
+                    return;
+                }
+            }
+        }
+    });
 }
 
 /// Create the application router and return an AppHandle for shutdown coordination
@@ -329,7 +405,29 @@ pub async fn create_app(
     let execute_job_use_case = Arc::new(ExecuteAnalysisJobUseCase::new(Arc::new(module_registry)));
     let aggregate_results_use_case = Arc::new(AggregateResultsUseCase::new());
 
-    // Initialize background job queue and worker pool
+    // Initialize analytics repositories (needed before job worker)
+    let analysis_events_repository: Arc<dyn IAnalysisEventRepository> =
+        Arc::new(SqlxAnalysisEventRepository::new(db_pool.clone()));
+    let user_stats_repository: Arc<dyn IUserStatsMonthlyRepository> =
+        Arc::new(SqlxUserStatsMonthlyRepository::new(db_pool.clone()));
+    let personal_stats_repository: Arc<dyn IPersonalStatsMonthlyRepository> =
+        Arc::new(SqlxPersonalStatsMonthlyRepository::new(db_pool.clone()));
+
+    // Initialize analytics service
+    let analytics_service = Arc::new(AnalyticsAggregationService::new(
+        analysis_events_repository.clone(),
+        user_stats_repository.clone(),
+        personal_stats_repository.clone(),
+        config.analytics.enable_user_level_tracking,
+    ));
+
+    // Spawn analytics cleanup worker
+    spawn_analytics_cleanup_worker(
+        analytics_service.clone(),
+        &config,
+        shutdown_token.clone(),
+    );
+
     // Initialize background job queue and worker pool
     let job_queue_handle = JobQueueHandle::new(cache_service.clone());
     let worker_context = JobWorkerContext {
@@ -338,6 +436,7 @@ pub async fn create_app(
         job_store: job_store.clone(),
         git_service: git_service.clone(),
         cache_service: cache_service.clone(),
+        analytics_recorder: analytics_service.clone(),
     };
     spawn_job_worker_pool(worker_context, config.analysis.max_job_workers);
 
@@ -405,6 +504,69 @@ pub async fn create_app(
         config.llm.clone(),
     ));
 
+    // Initialize organization repositories
+    let organization_repository: Arc<dyn IOrganizationRepository> =
+        Arc::new(SqlxOrganizationRepository::new(db_pool.clone()));
+    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
+        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
+    let subscription_limits_repository: Arc<dyn ISubscriptionLimitsRepository> =
+        Arc::new(SqlxSubscriptionLimitsRepository::new(db_pool.clone()));
+    let persisted_job_repository: Arc<dyn IPersistedJobResultRepository> =
+        Arc::new(SqlxPersistedJobResultRepository::new(db_pool.clone()));
+
+    // Initialize organization use cases
+    let create_organization_use_case = Arc::new(CreateOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+    let get_organization_use_case = Arc::new(GetOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let list_user_organizations_use_case = Arc::new(ListUserOrganizationsUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let invite_member_use_case = Arc::new(InviteMemberUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let remove_member_use_case = Arc::new(RemoveMemberUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let leave_organization_use_case = Arc::new(LeaveOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let transfer_ownership_use_case = Arc::new(TransferOwnershipUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let delete_organization_use_case = Arc::new(DeleteOrganizationUseCase::new(
+        organization_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+    let update_organization_name_use_case = Arc::new(UpdateOrganizationNameUseCase::new(
+        organization_repository.clone(),
+    ));
+
+    // Initialize analytics use cases
+    let get_dashboard_overview_use_case = Arc::new(GetDashboardOverviewUseCase::new(
+        organization_repository.clone(),
+        user_stats_repository.clone(),
+        subscription_limits_repository.clone(),
+        persisted_job_repository.clone(),
+    ));
+    let get_monthly_analytics_use_case = Arc::new(GetMonthlyAnalyticsUseCase::new(
+        user_stats_repository.clone(),
+    ));
+    let check_quota_use_case = Arc::new(CheckQuotaUseCase::new(
+        user_stats_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
         create_job_use_case,
@@ -435,6 +597,23 @@ pub async fn create_app(
         refresh_token_use_case,
         validate_api_key_use_case,
         auth_state,
+        // Organization-related
+        organization_member_repository,
+        create_organization_use_case,
+        get_organization_use_case,
+        list_user_organizations_use_case,
+        invite_member_use_case,
+        remove_member_use_case,
+        leave_organization_use_case,
+        transfer_ownership_use_case,
+        delete_organization_use_case,
+        update_organization_name_use_case,
+        // Analytics-related
+        get_dashboard_overview_use_case,
+        get_monthly_analytics_use_case,
+        check_quota_use_case,
+        analytics_service,
+        // Config and metadata
         config: config_arc.clone(),
         startup_time,
     };

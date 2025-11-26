@@ -100,6 +100,7 @@ pub struct Config {
     pub api_security: ApiSecurityConfig,
     pub auth: AuthConfig,
     pub database: DatabaseConfig,
+    pub analytics: AnalyticsConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
     pub llm: LlmConfig,
 }
@@ -807,6 +808,34 @@ impl Default for LlmRateLimitConfig {
     }
 }
 
+/// Analytics configuration for usage tracking and cleanup
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnalyticsConfig {
+    /// Whether analytics tracking is enabled
+    pub enabled: bool,
+    /// Whether to enable user-level (personal) analytics tracking
+    pub enable_user_level_tracking: bool,
+    /// Retention period for analysis events in days (events older than this will be cleaned up)
+    pub event_retention_days: u64,
+    /// Interval between cleanup runs in hours
+    pub cleanup_interval_hours: u64,
+    /// Whether to run cleanup on startup
+    pub cleanup_on_startup: bool,
+}
+
+impl Default for AnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            enable_user_level_tracking: true,
+            event_retention_days: 180,  // 6 months
+            cleanup_interval_hours: 24, // Daily cleanup
+            cleanup_on_startup: false,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -884,6 +913,7 @@ impl Default for Config {
             api_security: ApiSecurityConfig::default(),
             auth: AuthConfig::default(),
             database: DatabaseConfig::default(),
+            analytics: AnalyticsConfig::default(),
             popular_packages: None,
             llm: LlmConfig::default(),
         }
@@ -903,6 +933,17 @@ impl Validate for Config {
         // LLM config validation is simple for now, but we could add more checks
         if self.llm.timeout_seconds == 0 {
             return Err(ValidationError::api("LLM timeout must be > 0"));
+        }
+        // Analytics config validation
+        if self.analytics.event_retention_days == 0 {
+            return Err(ValidationError::api(
+                "Analytics event_retention_days must be > 0",
+            ));
+        }
+        if self.analytics.cleanup_interval_hours == 0 {
+            return Err(ValidationError::api(
+                "Analytics cleanup_interval_hours must be > 0",
+            ));
         }
         Ok(())
     }
