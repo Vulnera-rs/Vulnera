@@ -50,7 +50,7 @@ impl Default for DistributedRateLimitConfig {
             authenticated_limit: 60,                            // 60 requests
             authenticated_window: Duration::from_secs(60),      // per minute
             unauthenticated_limit: 10,                          // 10 requests
-            unauthenticated_window: Duration::from_secs(86400), // per day
+            unauthenticated_window: Duration::from_secs(86400), // per day (24 hours)
             key_prefix: "rate_limit".to_string(),
         }
     }
