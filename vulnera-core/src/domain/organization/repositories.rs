@@ -6,7 +6,9 @@ use uuid::Uuid;
 
 use crate::domain::auth::value_objects::UserId;
 
-use super::entities::{AnalysisEvent, Organization, SubscriptionLimits, UserStatsMonthly};
+use super::entities::{
+    AnalysisEvent, Organization, PersonalStatsMonthly, SubscriptionLimits, UserStatsMonthly,
+};
 use super::errors::OrganizationError;
 use super::value_objects::{AnalysisEventType, OrganizationId, OrganizationMember};
 
@@ -132,6 +134,58 @@ pub trait IUserStatsMonthlyRepository: Send + Sync {
     async fn add_findings(
         &self,
         org_id: &OrganizationId,
+        year_month: &str,
+        critical: u32,
+        high: u32,
+        medium: u32,
+        low: u32,
+        info: u32,
+    ) -> Result<(), OrganizationError>;
+}
+
+/// Personal (user-level) monthly stats repository trait
+///
+/// This tracks analytics for individual users independent of organizations.
+/// Users can have personal stats even without belonging to any organization.
+#[async_trait]
+pub trait IPersonalStatsMonthlyRepository: Send + Sync {
+    /// Find stats for a user in a specific month
+    async fn find_by_user_and_month(
+        &self,
+        user_id: &UserId,
+        year_month: &str,
+    ) -> Result<Option<PersonalStatsMonthly>, OrganizationError>;
+
+    /// Find stats for a user within a month range
+    async fn find_by_user_range(
+        &self,
+        user_id: &UserId,
+        from_month: &str,
+        to_month: &str,
+    ) -> Result<Vec<PersonalStatsMonthly>, OrganizationError>;
+
+    /// Upsert monthly stats for a user
+    async fn upsert(&self, stats: &PersonalStatsMonthly) -> Result<(), OrganizationError>;
+
+    /// Increment scan count for current month
+    async fn increment_scan_completed(
+        &self,
+        user_id: &UserId,
+        year_month: &str,
+    ) -> Result<(), OrganizationError>;
+
+    /// Increment API call count for current month
+    async fn increment_api_calls(
+        &self,
+        user_id: &UserId,
+        year_month: &str,
+        count: u32,
+    ) -> Result<(), OrganizationError>;
+
+    /// Add findings for current month
+    async fn add_findings(
+        &self,
+        user_id: &UserId,
         year_month: &str,
         critical: u32,
         high: u32,

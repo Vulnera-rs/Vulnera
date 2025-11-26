@@ -1,7 +1,8 @@
 //! Analytics aggregation service
 //!
 //! Provides dual-write capability: records events and maintains aggregates
-//! for efficient dashboard queries.
+//! for efficient dashboard queries. Supports both organization-level and
+//! user-level (personal) analytics tracking.
 
 use std::sync::Arc;
 
@@ -11,26 +12,37 @@ use uuid::Uuid;
 
 use crate::domain::auth::value_objects::UserId;
 use crate::domain::organization::{
-    entities::{AnalysisEvent, UserStatsMonthly},
+    entities::{AnalysisEvent, PersonalStatsMonthly, UserStatsMonthly},
     errors::OrganizationError,
-    repositories::{IAnalysisEventRepository, IUserStatsMonthlyRepository},
-    value_objects::{AnalysisEventType, OrganizationId},
+    repositories::{
+        IAnalysisEventRepository, IPersonalStatsMonthlyRepository, IUserStatsMonthlyRepository,
+    },
+    value_objects::{AnalysisEventType, OrganizationId, StatsSubject},
 };
 
 /// Analytics aggregation service that handles dual-write for events and stats
+///
+/// Supports both organization-level analytics (for teams) and personal analytics
+/// (for individual users not in organizations).
 pub struct AnalyticsAggregationService {
     events_repository: Arc<dyn IAnalysisEventRepository>,
-    stats_repository: Arc<dyn IUserStatsMonthlyRepository>,
+    org_stats_repository: Arc<dyn IUserStatsMonthlyRepository>,
+    personal_stats_repository: Arc<dyn IPersonalStatsMonthlyRepository>,
+    enable_user_level_tracking: bool,
 }
 
 impl AnalyticsAggregationService {
     pub fn new(
         events_repository: Arc<dyn IAnalysisEventRepository>,
-        stats_repository: Arc<dyn IUserStatsMonthlyRepository>,
+        org_stats_repository: Arc<dyn IUserStatsMonthlyRepository>,
+        personal_stats_repository: Arc<dyn IPersonalStatsMonthlyRepository>,
+        enable_user_level_tracking: bool,
     ) -> Self {
         Self {
             events_repository,
-            stats_repository,
+            org_stats_repository,
+            personal_stats_repository,
+            enable_user_level_tracking,
         }
     }
 
@@ -44,26 +56,32 @@ impl AnalyticsAggregationService {
     ///
     /// This implements dual-write: the event is stored for detailed querying,
     /// and the aggregate stats are updated for fast dashboard loading.
-    #[instrument(skip(self, metadata), fields(org_id = %org_id, event_type = ?event_type))]
+    /// Supports both organization and personal (user-level) stats tracking.
+    #[instrument(skip(self, metadata), fields(subject = %subject, event_type = ?event_type))]
     pub async fn record_analysis_event(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
         event_type: AnalysisEventType,
         metadata: serde_json::Value,
     ) -> Result<(), OrganizationError> {
+        // Extract org_id and actual_user_id based on subject
+        let (org_id, actual_user_id) = match &subject {
+            StatsSubject::Organization(org) => (Some(*org), user_id),
+            StatsSubject::User(uid) => (None, Some(*uid)),
+        };
+
         // Create and store the event
-        let event = AnalysisEvent::new(Some(org_id), user_id, Some(job_id), event_type, metadata);
+        let event = AnalysisEvent::new(org_id, actual_user_id, Some(job_id), event_type, metadata);
         self.events_repository.record(&event).await?;
 
         let year_month = Self::current_year_month();
 
-        // Update aggregate stats based on event type
+        // Update aggregate stats based on subject type and event
         match event_type {
             AnalysisEventType::JobStarted | AnalysisEventType::JobCompleted => {
-                self.stats_repository
-                    .increment_scan_completed(&org_id, &year_month)
+                self.increment_scan_completed_for_subject(&subject, &year_month)
                     .await?;
             }
             AnalysisEventType::FindingsRecorded => {
@@ -73,8 +91,7 @@ impl AnalyticsAggregationService {
                 // Could add reports_generated increment here
             }
             AnalysisEventType::ApiCallMade => {
-                self.stats_repository
-                    .increment_api_calls(&org_id, &year_month, 1)
+                self.increment_api_calls_for_subject(&subject, &year_month, 1)
                     .await?;
             }
             AnalysisEventType::JobFailed => {
@@ -82,34 +99,108 @@ impl AnalyticsAggregationService {
             }
         }
 
-        info!("Recorded analysis event: {:?}", event_type);
+        info!("Recorded analysis event: {:?} for {}", event_type, subject);
         Ok(())
+    }
+
+    /// Internal helper to increment scan count based on subject type
+    async fn increment_scan_completed_for_subject(
+        &self,
+        subject: &StatsSubject,
+        year_month: &str,
+    ) -> Result<(), OrganizationError> {
+        match subject {
+            StatsSubject::Organization(org_id) => {
+                self.org_stats_repository
+                    .increment_scan_completed(org_id, year_month)
+                    .await
+            }
+            StatsSubject::User(user_id) => {
+                if self.enable_user_level_tracking {
+                    self.personal_stats_repository
+                        .increment_scan_completed(user_id, year_month)
+                        .await
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Internal helper to increment API calls based on subject type
+    async fn increment_api_calls_for_subject(
+        &self,
+        subject: &StatsSubject,
+        year_month: &str,
+        count: u32,
+    ) -> Result<(), OrganizationError> {
+        match subject {
+            StatsSubject::Organization(org_id) => {
+                self.org_stats_repository
+                    .increment_api_calls(org_id, year_month, count)
+                    .await
+            }
+            StatsSubject::User(user_id) => {
+                if self.enable_user_level_tracking {
+                    self.personal_stats_repository
+                        .increment_api_calls(user_id, year_month, count)
+                        .await
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    /// Internal helper to add findings based on subject type
+    async fn add_findings_for_subject(
+        &self,
+        subject: &StatsSubject,
+        year_month: &str,
+        critical: u32,
+        high: u32,
+        medium: u32,
+        low: u32,
+        info: u32,
+    ) -> Result<(), OrganizationError> {
+        match subject {
+            StatsSubject::Organization(org_id) => {
+                self.org_stats_repository
+                    .add_findings(org_id, year_month, critical, high, medium, low, info)
+                    .await
+            }
+            StatsSubject::User(user_id) => {
+                if self.enable_user_level_tracking {
+                    self.personal_stats_repository
+                        .add_findings(user_id, year_month, critical, high, medium, low, info)
+                        .await
+                } else {
+                    Ok(())
+                }
+            }
+        }
     }
 
     /// Batch record API calls (used for high-frequency operations)
     ///
     /// For very high-frequency events like API calls, this allows batching
     /// to reduce database pressure.
-    #[instrument(skip(self), fields(org_id = %org_id, count = count))]
+    #[instrument(skip(self), fields(subject = %subject, count = count))]
     pub async fn record_api_calls_batch(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         count: u32,
     ) -> Result<(), OrganizationError> {
         let year_month = Self::current_year_month();
-
-        self.stats_repository
-            .increment_api_calls(&org_id, &year_month, count)
-            .await?;
-
-        Ok(())
+        self.increment_api_calls_for_subject(&subject, &year_month, count)
+            .await
     }
 
     /// Records scan completion with findings breakdown
-    #[instrument(skip(self), fields(org_id = %org_id, job_id = %job_id))]
+    #[instrument(skip(self), fields(subject = %subject, job_id = %job_id))]
     pub async fn record_scan_completed(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
         findings_critical: u32,
@@ -129,7 +220,7 @@ impl AnalyticsAggregationService {
 
         // Record the event
         self.record_analysis_event(
-            org_id,
+            subject.clone(),
             user_id,
             job_id,
             AnalysisEventType::JobCompleted,
@@ -139,26 +230,25 @@ impl AnalyticsAggregationService {
 
         // Update findings aggregates
         let year_month = Self::current_year_month();
-        self.stats_repository
-            .add_findings(
-                &org_id,
-                &year_month,
-                findings_critical,
-                findings_high,
-                findings_medium,
-                findings_low,
-                findings_info,
-            )
-            .await?;
+        self.add_findings_for_subject(
+            &subject,
+            &year_month,
+            findings_critical,
+            findings_high,
+            findings_medium,
+            findings_low,
+            findings_info,
+        )
+        .await?;
 
         Ok(())
     }
 
     /// Records scan failure
-    #[instrument(skip(self), fields(org_id = %org_id, job_id = %job_id))]
+    #[instrument(skip(self), fields(subject = %subject, job_id = %job_id))]
     pub async fn record_scan_failed(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
         reason: String,
@@ -169,7 +259,7 @@ impl AnalyticsAggregationService {
         });
 
         self.record_analysis_event(
-            org_id,
+            subject,
             user_id,
             job_id,
             AnalysisEventType::JobFailed,
@@ -198,16 +288,29 @@ impl AnalyticsAggregationService {
         Ok(deleted)
     }
 
-    /// Get aggregate stats for a time range (for dashboard)
+    /// Get aggregate stats for organization for a time range (for dashboard)
     #[instrument(skip(self), fields(org_id = %org_id))]
-    pub async fn get_stats_for_range(
+    pub async fn get_org_stats_for_range(
         &self,
         org_id: OrganizationId,
         start_month: &str,
         end_month: &str,
     ) -> Result<Vec<UserStatsMonthly>, OrganizationError> {
-        self.stats_repository
+        self.org_stats_repository
             .find_by_org_range(&org_id, start_month, end_month)
+            .await
+    }
+
+    /// Get aggregate personal stats for a user for a time range (for dashboard)
+    #[instrument(skip(self), fields(user_id = %user_id))]
+    pub async fn get_personal_stats_for_range(
+        &self,
+        user_id: UserId,
+        start_month: &str,
+        end_month: &str,
+    ) -> Result<Vec<PersonalStatsMonthly>, OrganizationError> {
+        self.personal_stats_repository
+            .find_by_user_range(&user_id, start_month, end_month)
             .await
     }
 
@@ -224,13 +327,14 @@ impl AnalyticsAggregationService {
 /// Trait for components that need to record analytics events
 ///
 /// This allows modules to record events without taking a direct dependency
-/// on the analytics service.
+/// on the analytics service. Uses `StatsSubject` to support both organization
+/// and personal analytics tracking.
 #[async_trait::async_trait]
 pub trait AnalyticsRecorder: Send + Sync {
     /// Record a scan started event
     async fn on_scan_started(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
     ) -> Result<(), OrganizationError>;
@@ -238,7 +342,7 @@ pub trait AnalyticsRecorder: Send + Sync {
     /// Record a scan completed event with findings breakdown
     async fn on_scan_completed(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
         findings_critical: u32,
@@ -249,12 +353,12 @@ pub trait AnalyticsRecorder: Send + Sync {
     ) -> Result<(), OrganizationError>;
 
     /// Record an API call
-    async fn on_api_call(&self, org_id: OrganizationId) -> Result<(), OrganizationError>;
+    async fn on_api_call(&self, subject: StatsSubject) -> Result<(), OrganizationError>;
 
     /// Record a report generated
     async fn on_report_generated(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
     ) -> Result<(), OrganizationError>;
@@ -264,12 +368,12 @@ pub trait AnalyticsRecorder: Send + Sync {
 impl AnalyticsRecorder for AnalyticsAggregationService {
     async fn on_scan_started(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
     ) -> Result<(), OrganizationError> {
         self.record_analysis_event(
-            org_id,
+            subject,
             user_id,
             job_id,
             AnalysisEventType::JobStarted,
@@ -280,7 +384,7 @@ impl AnalyticsRecorder for AnalyticsAggregationService {
 
     async fn on_scan_completed(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
         findings_critical: u32,
@@ -290,7 +394,7 @@ impl AnalyticsRecorder for AnalyticsAggregationService {
         findings_info: u32,
     ) -> Result<(), OrganizationError> {
         self.record_scan_completed(
-            org_id,
+            subject,
             user_id,
             job_id,
             findings_critical,
@@ -302,18 +406,18 @@ impl AnalyticsRecorder for AnalyticsAggregationService {
         .await
     }
 
-    async fn on_api_call(&self, org_id: OrganizationId) -> Result<(), OrganizationError> {
-        self.record_api_calls_batch(org_id, 1).await
+    async fn on_api_call(&self, subject: StatsSubject) -> Result<(), OrganizationError> {
+        self.record_api_calls_batch(subject, 1).await
     }
 
     async fn on_report_generated(
         &self,
-        org_id: OrganizationId,
+        subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
     ) -> Result<(), OrganizationError> {
         self.record_analysis_event(
-            org_id,
+            subject,
             user_id,
             job_id,
             AnalysisEventType::ReportGenerated,
@@ -330,7 +434,7 @@ pub struct NoOpAnalyticsRecorder;
 impl AnalyticsRecorder for NoOpAnalyticsRecorder {
     async fn on_scan_started(
         &self,
-        _org_id: OrganizationId,
+        _subject: StatsSubject,
         _user_id: Option<UserId>,
         _job_id: Uuid,
     ) -> Result<(), OrganizationError> {
@@ -339,7 +443,7 @@ impl AnalyticsRecorder for NoOpAnalyticsRecorder {
 
     async fn on_scan_completed(
         &self,
-        _org_id: OrganizationId,
+        _subject: StatsSubject,
         _user_id: Option<UserId>,
         _job_id: Uuid,
         _findings_critical: u32,
@@ -351,13 +455,13 @@ impl AnalyticsRecorder for NoOpAnalyticsRecorder {
         Ok(())
     }
 
-    async fn on_api_call(&self, _org_id: OrganizationId) -> Result<(), OrganizationError> {
+    async fn on_api_call(&self, _subject: StatsSubject) -> Result<(), OrganizationError> {
         Ok(())
     }
 
     async fn on_report_generated(
         &self,
-        _org_id: OrganizationId,
+        _subject: StatsSubject,
         _user_id: Option<UserId>,
         _job_id: Uuid,
     ) -> Result<(), OrganizationError> {

@@ -16,7 +16,7 @@ use crate::presentation::auth::Auth;
 use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::{
     DashboardStatsResponse, ErrorResponse, MonthlyUsageDto, OrganizationUsageResponse,
-    QuotaItemDto, QuotaUsageResponse,
+    PersonalDashboardStatsResponse, PersonalUsageResponse, QuotaItemDto, QuotaUsageResponse,
 };
 
 /// Query parameters for usage endpoint
@@ -252,6 +252,169 @@ pub async fn get_quota(
         api_calls,
         members,
         is_over_limit,
+    }))
+}
+
+// =============================================================================
+// Personal Analytics Endpoints (for users without organizations)
+// =============================================================================
+
+/// GET /api/v1/me/analytics/dashboard - Get personal dashboard statistics
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/analytics/dashboard",
+    responses(
+        (status = 200, description = "Personal dashboard stats retrieved", body = PersonalDashboardStatsResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "personal-analytics",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
+)]
+#[instrument(skip(state, auth), fields(user_id = %auth.user_id.as_uuid()))]
+pub async fn get_personal_dashboard_stats(
+    State(state): State<OrchestratorState>,
+    auth: Auth,
+) -> Result<Json<PersonalDashboardStatsResponse>, Response> {
+    let now = Utc::now();
+    let current_month = format!("{:04}-{:02}", now.year(), now.month());
+    let prev_month_date = now - chrono::Months::new(1);
+    let prev_month = format!("{:04}-{:02}", prev_month_date.year(), prev_month_date.month());
+
+    // Get current month stats
+    let current_stats = state
+        .analytics_service
+        .get_personal_stats_for_range(auth.user_id.clone(), &current_month, &current_month)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to get personal dashboard stats");
+            map_organization_error(e)
+        })?;
+
+    // Get previous month for trend calculation
+    let prev_stats = state
+        .analytics_service
+        .get_personal_stats_for_range(auth.user_id.clone(), &prev_month, &prev_month)
+        .await
+        .ok()
+        .and_then(|v| v.into_iter().next());
+
+    let stats = current_stats.into_iter().next();
+
+    let (scans_this_month, findings_this_month, critical, high, medium, low) = stats
+        .as_ref()
+        .map(|s| {
+            (
+                s.scans_completed as i64,
+                s.findings_count as i64,
+                s.findings_critical as i64,
+                s.findings_high as i64,
+                s.findings_medium as i64,
+                s.findings_low as i64,
+            )
+        })
+        .unwrap_or((0, 0, 0, 0, 0, 0));
+
+    // Calculate trends
+    let scans_trend_percent = prev_stats.as_ref().and_then(|prev| {
+        if prev.scans_completed > 0 {
+            Some(((scans_this_month - prev.scans_completed as i64) as f64 / prev.scans_completed as f64) * 100.0)
+        } else if scans_this_month > 0 {
+            Some(100.0)
+        } else {
+            None
+        }
+    });
+
+    let findings_trend_percent = prev_stats.as_ref().and_then(|prev| {
+        if prev.findings_count > 0 {
+            Some(((findings_this_month - prev.findings_count as i64) as f64 / prev.findings_count as f64) * 100.0)
+        } else if findings_this_month > 0 {
+            Some(100.0)
+        } else {
+            None
+        }
+    });
+
+    Ok(Json(PersonalDashboardStatsResponse {
+        user_id: auth.user_id.as_uuid(),
+        scans_this_month,
+        findings_this_month,
+        critical_this_month: critical,
+        high_this_month: high,
+        medium_this_month: medium,
+        low_this_month: low,
+        scans_trend_percent,
+        findings_trend_percent,
+        current_month,
+    }))
+}
+
+/// GET /api/v1/me/analytics/usage - Get personal historical usage data
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/analytics/usage",
+    params(
+        ("months" = Option<u32>, Query, description = "Number of months to include (default: 6, max: 24)")
+    ),
+    responses(
+        (status = 200, description = "Personal usage data retrieved", body = PersonalUsageResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "personal-analytics",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
+)]
+#[instrument(skip(state, auth, params), fields(user_id = %auth.user_id.as_uuid()))]
+pub async fn get_personal_usage(
+    State(state): State<OrchestratorState>,
+    auth: Auth,
+    Query(params): Query<UsageQueryParams>,
+) -> Result<Json<PersonalUsageResponse>, Response> {
+    // Clamp months to 1-24 range
+    let months_count = params.months.unwrap_or(6).clamp(1, 24);
+
+    // Calculate date range
+    let now = Utc::now();
+    let end_month = format!("{:04}-{:02}", now.year(), now.month());
+    let start_date = now - chrono::Months::new(months_count);
+    let start_month = format!("{:04}-{:02}", start_date.year(), start_date.month());
+
+    let stats = state
+        .analytics_service
+        .get_personal_stats_for_range(auth.user_id.clone(), &start_month, &end_month)
+        .await
+        .map_err(|e| {
+            error!(error = %e, "Failed to get personal usage data");
+            map_organization_error(e)
+        })?;
+
+    // Convert to DTOs
+    let months_data: Vec<MonthlyUsageDto> = stats
+        .into_iter()
+        .map(|s| MonthlyUsageDto {
+            month: s.year_month,
+            scans_completed: s.scans_completed as i64,
+            scans_failed: s.scans_failed as i64,
+            total_findings: s.findings_count as i64,
+            critical_findings: s.findings_critical as i64,
+            high_findings: s.findings_high as i64,
+            medium_findings: s.findings_medium as i64,
+            low_findings: s.findings_low as i64,
+            api_calls: s.api_calls_used as i64,
+            reports_generated: s.reports_generated as i64,
+        })
+        .collect();
+
+    Ok(Json(PersonalUsageResponse {
+        user_id: auth.user_id.as_uuid(),
+        months: months_data,
     }))
 }
 

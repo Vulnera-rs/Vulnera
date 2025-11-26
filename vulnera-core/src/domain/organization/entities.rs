@@ -340,6 +340,155 @@ impl UserStatsMonthly {
     }
 }
 
+/// Personal monthly statistics for a user (without organization context)
+///
+/// Tracks individual user analytics when they perform scans outside of an organization.
+/// Personal stats are kept separate from org stats even when a user joins an organization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonalStatsMonthly {
+    /// Unique identifier
+    pub id: Uuid,
+    /// User this stats belong to
+    pub user_id: UserId,
+    /// Year-month key (format: YYYY-MM)
+    pub year_month: String,
+
+    /// Total findings discovered
+    pub findings_count: u32,
+    /// Critical severity findings
+    pub findings_critical: u32,
+    /// High severity findings
+    pub findings_high: u32,
+    /// Medium severity findings
+    pub findings_medium: u32,
+    /// Low severity findings
+    pub findings_low: u32,
+    /// Info severity findings
+    pub findings_info: u32,
+
+    /// Reports generated
+    pub reports_generated: u32,
+    /// API calls made
+    pub api_calls_used: u32,
+    /// Scans completed successfully
+    pub scans_completed: u32,
+    /// Scans that failed
+    pub scans_failed: u32,
+
+    /// SAST module findings
+    pub sast_findings: u32,
+    /// Secrets module findings
+    pub secrets_findings: u32,
+    /// Dependency module findings
+    pub dependency_findings: u32,
+    /// API security module findings
+    pub api_findings: u32,
+
+    /// Record creation timestamp
+    pub created_at: DateTime<Utc>,
+    /// Last update timestamp
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for PersonalStatsMonthly {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            user_id: UserId::generate(),
+            year_month: String::new(),
+            findings_count: 0,
+            findings_critical: 0,
+            findings_high: 0,
+            findings_medium: 0,
+            findings_low: 0,
+            findings_info: 0,
+            reports_generated: 0,
+            api_calls_used: 0,
+            scans_completed: 0,
+            scans_failed: 0,
+            sast_findings: 0,
+            secrets_findings: 0,
+            dependency_findings: 0,
+            api_findings: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+impl PersonalStatsMonthly {
+    /// Create new monthly stats for a user
+    pub fn new(user_id: UserId, year_month: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            user_id,
+            year_month,
+            findings_count: 0,
+            findings_critical: 0,
+            findings_high: 0,
+            findings_medium: 0,
+            findings_low: 0,
+            findings_info: 0,
+            reports_generated: 0,
+            api_calls_used: 0,
+            scans_completed: 0,
+            scans_failed: 0,
+            sast_findings: 0,
+            secrets_findings: 0,
+            dependency_findings: 0,
+            api_findings: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Increment scan completed count
+    pub fn increment_scans_completed(&mut self) {
+        self.scans_completed += 1;
+        self.updated_at = Utc::now();
+    }
+
+    /// Increment scan failed count
+    pub fn increment_scans_failed(&mut self) {
+        self.scans_failed += 1;
+        self.updated_at = Utc::now();
+    }
+
+    /// Increment API calls
+    pub fn increment_api_calls(&mut self, count: u32) {
+        self.api_calls_used += count;
+        self.updated_at = Utc::now();
+    }
+
+    /// Increment reports generated
+    pub fn increment_reports(&mut self) {
+        self.reports_generated += 1;
+        self.updated_at = Utc::now();
+    }
+
+    /// Add findings by severity
+    pub fn add_findings(&mut self, critical: u32, high: u32, medium: u32, low: u32, info: u32) {
+        self.findings_critical += critical;
+        self.findings_high += high;
+        self.findings_medium += medium;
+        self.findings_low += low;
+        self.findings_info += info;
+        self.findings_count += critical + high + medium + low + info;
+        self.updated_at = Utc::now();
+    }
+
+    /// Add findings by module type
+    pub fn add_module_findings(&mut self, sast: u32, secrets: u32, dependency: u32, api: u32) {
+        self.sast_findings += sast;
+        self.secrets_findings += secrets;
+        self.dependency_findings += dependency;
+        self.api_findings += api;
+        self.updated_at = Utc::now();
+    }
+}
+
 /// Subscription limits for an organization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubscriptionLimits {

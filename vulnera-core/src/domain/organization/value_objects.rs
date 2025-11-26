@@ -263,6 +263,68 @@ impl std::str::FromStr for AnalysisEventType {
     }
 }
 
+/// Subject for analytics tracking - either a user (personal) or organization
+///
+/// This enum allows the analytics system to track statistics for both:
+/// - Individual users (personal dashboard, users without organizations)
+/// - Organizations (team-level analytics)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StatsSubject {
+    /// Track stats for an individual user (personal analytics)
+    User(UserId),
+    /// Track stats for an organization (team analytics)
+    Organization(OrganizationId),
+}
+
+impl StatsSubject {
+    /// Check if this is a user subject
+    pub fn is_user(&self) -> bool {
+        matches!(self, StatsSubject::User(_))
+    }
+
+    /// Check if this is an organization subject
+    pub fn is_organization(&self) -> bool {
+        matches!(self, StatsSubject::Organization(_))
+    }
+
+    /// Get the user ID if this is a user subject
+    pub fn as_user(&self) -> Option<&UserId> {
+        match self {
+            StatsSubject::User(id) => Some(id),
+            StatsSubject::Organization(_) => None,
+        }
+    }
+
+    /// Get the organization ID if this is an org subject
+    pub fn as_organization(&self) -> Option<&OrganizationId> {
+        match self {
+            StatsSubject::User(_) => None,
+            StatsSubject::Organization(id) => Some(id),
+        }
+    }
+}
+
+impl fmt::Display for StatsSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StatsSubject::User(id) => write!(f, "user:{}", id),
+            StatsSubject::Organization(id) => write!(f, "org:{}", id),
+        }
+    }
+}
+
+impl From<UserId> for StatsSubject {
+    fn from(id: UserId) -> Self {
+        StatsSubject::User(id)
+    }
+}
+
+impl From<OrganizationId> for StatsSubject {
+    fn from(id: OrganizationId) -> Self {
+        StatsSubject::Organization(id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

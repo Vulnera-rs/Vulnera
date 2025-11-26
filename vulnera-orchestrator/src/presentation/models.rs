@@ -126,6 +126,7 @@ pub struct JobInvocationContextDto {
     pub email: Option<String>,
     pub auth_strategy: Option<String>,
     pub api_key_id: Option<String>,
+    pub organization_id: Option<Uuid>,
 }
 
 impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContextDto {
@@ -140,6 +141,7 @@ impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContex
                 JobAuthStrategy::ApiKey => "api_key".to_string(),
             }),
             api_key_id: context.api_key_id.map(|id| id.as_str()),
+            organization_id: context.organization_id.map(|id| id.as_uuid()),
         }
     }
 }
@@ -1198,4 +1200,63 @@ pub struct QuotaItemDto {
 
     /// Whether this quota is exceeded
     pub is_exceeded: bool,
+}
+
+// =============================================================================
+// Personal Analytics DTOs (for users without organizations)
+// =============================================================================
+
+/// Personal dashboard statistics response
+#[derive(Serialize, ToSchema)]
+pub struct PersonalDashboardStatsResponse {
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+
+    /// Total scans performed this month
+    #[schema(example = 12)]
+    pub scans_this_month: i64,
+
+    /// Total findings this month
+    #[schema(example = 45)]
+    pub findings_this_month: i64,
+
+    /// Critical findings this month
+    #[schema(example = 2)]
+    pub critical_this_month: i64,
+
+    /// High findings this month
+    #[schema(example = 8)]
+    pub high_this_month: i64,
+
+    /// Medium findings this month
+    #[schema(example = 15)]
+    pub medium_this_month: i64,
+
+    /// Low findings this month
+    #[schema(example = 20)]
+    pub low_this_month: i64,
+
+    /// Scans trend (compared to last month, as percentage)
+    #[schema(example = 10.0)]
+    pub scans_trend_percent: Option<f64>,
+
+    /// Findings trend (compared to last month, as percentage)
+    #[schema(example = -5.5)]
+    pub findings_trend_percent: Option<f64>,
+
+    /// Current month (YYYY-MM)
+    #[schema(example = "2024-01")]
+    pub current_month: String,
+}
+
+/// Personal usage response
+#[derive(Serialize, ToSchema)]
+pub struct PersonalUsageResponse {
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+
+    /// Monthly usage data
+    pub months: Vec<MonthlyUsageDto>,
 }

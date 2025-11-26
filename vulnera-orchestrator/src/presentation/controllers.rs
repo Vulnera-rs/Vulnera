@@ -127,6 +127,9 @@ pub struct OrchestratorState {
     pub get_monthly_analytics_use_case: Arc<GetMonthlyAnalyticsUseCase>,
     pub check_quota_use_case: Arc<CheckQuotaUseCase>,
 
+    // Analytics service (for personal analytics)
+    pub analytics_service: Arc<vulnera_core::application::analytics::AnalyticsAggregationService>,
+
     // Config and metadata
     pub config: Arc<vulnera_core::Config>,
     pub startup_time: Instant,
@@ -214,6 +217,7 @@ fn invocation_context_from_api_key(
         email: Some(auth.email),
         auth_strategy: Some(JobAuthStrategy::ApiKey),
         api_key_id: Some(auth.api_key_id),
+        organization_id: None, // TODO: Fetch user's organization when needed
     })
 }
 

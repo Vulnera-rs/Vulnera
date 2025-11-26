@@ -22,7 +22,7 @@ use crate::presentation::{
     },
     controllers::{
         OrchestratorState,
-        analytics::{get_dashboard_stats, get_quota, get_usage},
+        analytics::{get_dashboard_stats, get_personal_dashboard_stats, get_personal_usage, get_quota, get_usage},
         analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
         llm::{
@@ -79,7 +79,9 @@ use axum::{
         crate::presentation::controllers::organization::get_organization_stats,
         crate::presentation::controllers::analytics::get_dashboard_stats,
         crate::presentation::controllers::analytics::get_usage,
-        crate::presentation::controllers::analytics::get_quota
+        crate::presentation::controllers::analytics::get_quota,
+        crate::presentation::controllers::analytics::get_personal_dashboard_stats,
+        crate::presentation::controllers::analytics::get_personal_usage
     ),
     components(
         schemas(
@@ -127,6 +129,8 @@ use axum::{
             MonthlyUsageDto,
             QuotaUsageResponse,
             QuotaItemDto,
+            PersonalDashboardStatsResponse,
+            PersonalUsageResponse,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::AuthResponse,
@@ -272,7 +276,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             get(get_dashboard_stats),
         )
         .route("/organizations/{id}/analytics/usage", get(get_usage))
-        .route("/organizations/{id}/analytics/quota", get(get_quota));
+        .route("/organizations/{id}/analytics/quota", get(get_quota))
+        // Personal analytics routes (for users without organizations)
+        .route("/me/analytics/dashboard", get(get_personal_dashboard_stats))
+        .route("/me/analytics/usage", get(get_personal_usage));
 
     // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
     let api_routes = Router::new()
