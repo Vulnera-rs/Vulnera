@@ -502,8 +502,15 @@ impl RateLimiterState {
 }
 
 /// Routes that should be excluded from rate limiting
-const RATE_LIMIT_EXCLUDED_PATHS: &[&str] =
-    &["/docs", "/api-docs", "/health", "/metrics", "/favicon.ico"];
+const RATE_LIMIT_EXCLUDED_PATHS: &[&str] = &[
+    "/docs",
+    "/api-docs",
+    "/health",
+    "/metrics",
+    "/favicon.ico",
+    "/api/v1/auth/register",
+    "/api/v1/auth/login",
+];
 
 /// Check if a path should be excluded from rate limiting
 fn should_skip_rate_limit(path: &str) -> bool {
