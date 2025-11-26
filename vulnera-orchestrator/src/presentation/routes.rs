@@ -248,8 +248,12 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         ));
 
     // Dependencies routes (no CSRF validation - designed for cross-origin requests)
-    let dependencies_routes =
-        Router::new().route("/dependencies/analyze", post(analyze_dependencies));
+    // Applied with extended timeout for dependency analysis operations
+    let dependencies_routes = Router::new()
+        .route("/dependencies/analyze", post(analyze_dependencies))
+        .layer(TimeoutLayer::new(Duration::from_secs(
+            config.server.dependencies_analysis_timeout_seconds,
+        )));
 
     // Organization routes (protected by CSRF for POST/PUT/DELETE)
     let organization_routes = Router::new()
@@ -285,12 +289,16 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/me/analytics/usage", get(get_personal_usage));
 
     // Routes that need CSRF validation
+    // Applied with extended timeout for analysis operations
     let csrf_protected_routes = Router::new()
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
         .merge(llm_routes)
         .merge(organization_routes)
         .merge(protected_auth_routes)
+        .layer(TimeoutLayer::new(Duration::from_secs(
+            config.server.general_analysis_timeout_seconds,
+        )))
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
