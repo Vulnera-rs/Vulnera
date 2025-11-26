@@ -126,6 +126,7 @@ pub struct JobInvocationContextDto {
     pub email: Option<String>,
     pub auth_strategy: Option<String>,
     pub api_key_id: Option<String>,
+    pub organization_id: Option<Uuid>,
 }
 
 impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContextDto {
@@ -140,6 +141,7 @@ impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContex
                 JobAuthStrategy::ApiKey => "api_key".to_string(),
             }),
             api_key_id: context.api_key_id.map(|id| id.as_str()),
+            organization_id: context.organization_id.map(|id| id.as_uuid()),
         }
     }
 }
@@ -897,4 +899,364 @@ pub struct EnrichedFindingDto {
 
     /// Error message if enrichment failed
     pub enrichment_error: Option<String>,
+}
+
+// =============================================================================
+// Organization DTOs
+// =============================================================================
+
+/// Request to create a new organization
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateOrganizationRequest {
+    /// Organization name (3-100 characters)
+    #[schema(example = "Acme Corp")]
+    pub name: String,
+
+    /// Optional organization description
+    #[schema(example = "Our main development team")]
+    pub description: Option<String>,
+}
+
+/// Request to update an organization
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateOrganizationRequest {
+    /// New organization name (3-100 characters)
+    #[schema(example = "Acme Corporation")]
+    pub name: String,
+}
+
+/// Request to invite a member to an organization
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct InviteMemberRequest {
+    /// Email of the user to invite
+    #[schema(example = "developer@example.com")]
+    pub email: String,
+}
+
+/// Request to transfer organization ownership
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TransferOwnershipRequest {
+    /// User ID of the new owner (must be an existing member)
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub new_owner_id: Uuid,
+}
+
+/// Organization response DTO
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub id: Uuid,
+
+    /// Organization name
+    #[schema(example = "Acme Corp")]
+    pub name: String,
+
+    /// Organization description
+    #[schema(example = "Our main development team")]
+    pub description: Option<String>,
+
+    /// Owner user ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440001")]
+    pub owner_id: Uuid,
+
+    /// Number of members in the organization
+    #[schema(example = 5)]
+    pub member_count: usize,
+
+    /// Subscription tier
+    #[schema(example = "Professional")]
+    pub tier: String,
+
+    /// Organization creation timestamp
+    pub created_at: DateTime<Utc>,
+
+    /// Last update timestamp
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Organization list response
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationListResponse {
+    /// List of organizations
+    pub organizations: Vec<OrganizationResponse>,
+
+    /// Total count
+    #[schema(example = 3)]
+    pub total: usize,
+}
+
+/// Organization member DTO
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationMemberDto {
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+
+    /// User email
+    #[schema(example = "developer@example.com")]
+    pub email: String,
+
+    /// Member role (Owner or Member)
+    #[schema(example = "Member")]
+    pub role: String,
+
+    /// When the user joined
+    pub joined_at: DateTime<Utc>,
+}
+
+/// Organization members list response
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationMembersResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub organization_id: Uuid,
+
+    /// List of members
+    pub members: Vec<OrganizationMemberDto>,
+
+    /// Total member count
+    #[schema(example = 5)]
+    pub total: usize,
+}
+
+/// Organization statistics response
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationStatsResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub organization_id: Uuid,
+
+    /// Total scans performed
+    #[schema(example = 150)]
+    pub total_scans: i64,
+
+    /// Total findings discovered
+    #[schema(example = 423)]
+    pub total_findings: i64,
+
+    /// Critical findings count
+    #[schema(example = 12)]
+    pub critical_findings: i64,
+
+    /// High findings count
+    #[schema(example = 45)]
+    pub high_findings: i64,
+
+    /// Medium findings count
+    #[schema(example = 89)]
+    pub medium_findings: i64,
+
+    /// Low findings count
+    #[schema(example = 277)]
+    pub low_findings: i64,
+
+    /// Total API calls this month
+    #[schema(example = 5420)]
+    pub api_calls_this_month: i64,
+
+    /// Member count
+    #[schema(example = 5)]
+    pub member_count: usize,
+}
+
+// =============================================================================
+// Analytics DTOs
+// =============================================================================
+
+/// Dashboard statistics response
+#[derive(Serialize, ToSchema)]
+pub struct DashboardStatsResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub organization_id: Uuid,
+
+    /// Total scans performed this month
+    #[schema(example = 45)]
+    pub scans_this_month: i64,
+
+    /// Total findings this month
+    #[schema(example = 123)]
+    pub findings_this_month: i64,
+
+    /// Critical findings this month
+    #[schema(example = 5)]
+    pub critical_this_month: i64,
+
+    /// High findings this month
+    #[schema(example = 18)]
+    pub high_this_month: i64,
+
+    /// Scans trend (compared to last month, as percentage)
+    #[schema(example = 15.5)]
+    pub scans_trend_percent: Option<f64>,
+
+    /// Findings trend (compared to last month, as percentage)
+    #[schema(example = -8.2)]
+    pub findings_trend_percent: Option<f64>,
+
+    /// Current month (YYYY-MM)
+    #[schema(example = "2024-01")]
+    pub current_month: String,
+}
+
+/// Organization usage response
+#[derive(Serialize, ToSchema)]
+pub struct OrganizationUsageResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub organization_id: Uuid,
+
+    /// Monthly usage data
+    pub months: Vec<MonthlyUsageDto>,
+}
+
+/// Monthly usage breakdown
+#[derive(Serialize, ToSchema)]
+pub struct MonthlyUsageDto {
+    /// Month (YYYY-MM)
+    #[schema(example = "2024-01")]
+    pub month: String,
+
+    /// Scans completed
+    #[schema(example = 45)]
+    pub scans_completed: i64,
+
+    /// Scans failed
+    #[schema(example = 2)]
+    pub scans_failed: i64,
+
+    /// Total findings
+    #[schema(example = 123)]
+    pub total_findings: i64,
+
+    /// Critical findings
+    #[schema(example = 5)]
+    pub critical_findings: i64,
+
+    /// High findings
+    #[schema(example = 18)]
+    pub high_findings: i64,
+
+    /// Medium findings
+    #[schema(example = 42)]
+    pub medium_findings: i64,
+
+    /// Low findings
+    #[schema(example = 58)]
+    pub low_findings: i64,
+
+    /// API calls
+    #[schema(example = 1250)]
+    pub api_calls: i64,
+
+    /// Reports generated
+    #[schema(example = 12)]
+    pub reports_generated: i64,
+}
+
+/// Quota usage response
+#[derive(Serialize, ToSchema)]
+pub struct QuotaUsageResponse {
+    /// Organization ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub organization_id: Uuid,
+
+    /// Subscription tier
+    #[schema(example = "Professional")]
+    pub tier: String,
+
+    /// Current month (YYYY-MM)
+    #[schema(example = "2024-01")]
+    pub current_month: String,
+
+    /// Scan usage
+    pub scans: QuotaItemDto,
+
+    /// API call usage
+    pub api_calls: QuotaItemDto,
+
+    /// Member usage
+    pub members: QuotaItemDto,
+
+    /// Whether any quota is exceeded
+    pub is_over_limit: bool,
+}
+
+/// Individual quota item
+#[derive(Serialize, ToSchema)]
+pub struct QuotaItemDto {
+    /// Current usage
+    #[schema(example = 45)]
+    pub used: i64,
+
+    /// Maximum allowed (null = unlimited)
+    #[schema(example = 100)]
+    pub limit: Option<i64>,
+
+    /// Usage percentage (0-100+)
+    #[schema(example = 45.0)]
+    pub usage_percent: f64,
+
+    /// Whether this quota is exceeded
+    pub is_exceeded: bool,
+}
+
+// =============================================================================
+// Personal Analytics DTOs (for users without organizations)
+// =============================================================================
+
+/// Personal dashboard statistics response
+#[derive(Serialize, ToSchema)]
+pub struct PersonalDashboardStatsResponse {
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+
+    /// Total scans performed this month
+    #[schema(example = 12)]
+    pub scans_this_month: i64,
+
+    /// Total findings this month
+    #[schema(example = 45)]
+    pub findings_this_month: i64,
+
+    /// Critical findings this month
+    #[schema(example = 2)]
+    pub critical_this_month: i64,
+
+    /// High findings this month
+    #[schema(example = 8)]
+    pub high_this_month: i64,
+
+    /// Medium findings this month
+    #[schema(example = 15)]
+    pub medium_this_month: i64,
+
+    /// Low findings this month
+    #[schema(example = 20)]
+    pub low_this_month: i64,
+
+    /// Scans trend (compared to last month, as percentage)
+    #[schema(example = 10.0)]
+    pub scans_trend_percent: Option<f64>,
+
+    /// Findings trend (compared to last month, as percentage)
+    #[schema(example = -5.5)]
+    pub findings_trend_percent: Option<f64>,
+
+    /// Current month (YYYY-MM)
+    #[schema(example = "2024-01")]
+    pub current_month: String,
+}
+
+/// Personal usage response
+#[derive(Serialize, ToSchema)]
+pub struct PersonalUsageResponse {
+    /// User ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub user_id: Uuid,
+
+    /// Monthly usage data
+    pub months: Vec<MonthlyUsageDto>,
 }

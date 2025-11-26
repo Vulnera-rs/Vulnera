@@ -4,6 +4,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
+use vulnera_core::application::analytics::AnalyticsRecorder;
+use vulnera_core::domain::organization::value_objects::StatsSubject;
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
@@ -101,6 +103,7 @@ pub struct JobWorkerContext {
     pub job_store: Arc<dyn JobStore>,
     pub git_service: Arc<GitService>,
     pub cache_service: Arc<CacheServiceImpl>,
+    pub analytics_recorder: Arc<dyn AnalyticsRecorder>,
 }
 
 /// Spawn a worker pool that consumes queued jobs and processes them in the background.
@@ -163,6 +166,35 @@ async fn process_job(
 
     info!(job_id = %job_id, "Processing analysis job");
 
+    // Determine analytics subject from invocation context
+    let analytics_subject = payload
+        .invocation_context
+        .as_ref()
+        .and_then(|ctx| {
+            // Prefer organization_id if present, otherwise use user_id for personal stats
+            if let Some(org_id) = ctx.organization_id {
+                Some(StatsSubject::Organization(org_id))
+            } else {
+                ctx.user_id.map(StatsSubject::User)
+            }
+        });
+
+    let user_id = payload
+        .invocation_context
+        .as_ref()
+        .and_then(|ctx| ctx.user_id);
+
+    // Record scan started event (if we have analytics context)
+    if let Some(ref subject) = analytics_subject {
+        if let Err(e) = ctx
+            .analytics_recorder
+            .on_scan_started(subject.clone(), user_id, job_id)
+            .await
+        {
+            warn!(job_id = %job_id, error = %e, "Failed to record scan started analytics");
+        }
+    }
+
     // Execute modules via orchestrator use case
     match ctx
         .execute_job_use_case
@@ -194,6 +226,27 @@ async fn process_job(
                 },
             )
             .await?;
+
+            // Record scan completed with findings breakdown
+            if let Some(ref subject) = analytics_subject {
+                let severity = &report.summary.by_severity;
+                if let Err(e) = ctx
+                    .analytics_recorder
+                    .on_scan_completed(
+                        subject.clone(),
+                        user_id,
+                        job_id,
+                        severity.critical as u32,
+                        severity.high as u32,
+                        severity.medium as u32,
+                        severity.low as u32,
+                        severity.info as u32,
+                    )
+                    .await
+                {
+                    warn!(job_id = %job_id, error = %e, "Failed to record scan completed analytics");
+                }
+            }
 
             if let Some(callback_url) = payload.callback_url.as_deref() {
                 info!(
@@ -230,6 +283,22 @@ async fn process_job(
                 },
             )
             .await?;
+
+            // Record scan failed (with zero findings)
+            if let Some(ref subject) = analytics_subject {
+                if let Err(e) = ctx
+                    .analytics_recorder
+                    .on_scan_completed(
+                        subject.clone(),
+                        user_id,
+                        job_id,
+                        0, 0, 0, 0, 0, // No findings on failure
+                    )
+                    .await
+                {
+                    warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
+                }
+            }
 
             warn!(job_id = %job_id, error = %err, "Analysis job failed");
         }
