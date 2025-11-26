@@ -154,7 +154,24 @@ where
                 ),
             })?;
 
-        // Validate API key
+        // Check if this is the master API key (dev/extension use)
+        if vulnera_core::infrastructure::auth::is_master_key(&api_key) {
+            // Create a synthetic master user with admin privileges
+            let master_user_id = UserId::generate();
+            let master_email = Email::new("master@vulnera.local".to_string())
+                .unwrap_or_else(|_| Email::new("master@local".to_string()).unwrap());
+            let master_api_key_id = ApiKeyId::generate();
+
+            tracing::info!("Master API key authenticated from {:?}", parts.uri);
+
+            return Ok(ApiKeyAuth {
+                user_id: master_user_id,
+                email: master_email,
+                api_key_id: master_api_key_id,
+            });
+        }
+
+        // Validate API key against database (normal flow)
         let validation = auth_state
             .validate_api_key
             .execute(&api_key)
@@ -309,6 +326,23 @@ where
             Some(key) => key,
             None => return Ok(OptionalApiKeyAuth(None)),
         };
+
+        // Check if this is the master API key (dev/extension use)
+        if vulnera_core::infrastructure::auth::is_master_key(api_key) {
+            // Create a synthetic master user with admin privileges
+            let master_user_id = UserId::generate();
+            let master_email = Email::new("master@vulnera.local".to_string())
+                .unwrap_or_else(|_| Email::new("master@local".to_string()).unwrap());
+            let master_api_key_id = ApiKeyId::generate();
+
+            tracing::info!("Master API key authenticated from {:?}", parts.uri);
+
+            return Ok(OptionalApiKeyAuth(Some(ApiKeyAuth {
+                user_id: master_user_id,
+                email: master_email,
+                api_key_id: master_api_key_id,
+            })));
+        }
 
         // Validate API key
         let validation = auth_state

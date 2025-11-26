@@ -22,12 +22,13 @@ use vulnera_orchestrator::presentation::routes::create_router;
 use vulnera_sast::SastModule;
 use vulnera_secrets::SecretDetectionModule;
 
+use vulnera_core::application::analytics::AnalyticsAggregationService;
+use vulnera_core::application::analytics::use_cases::{
+    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
+};
 use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
-};
-use vulnera_core::application::analytics::use_cases::{
-    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
 };
 use vulnera_core::application::organization::use_cases::{
     CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
@@ -35,7 +36,6 @@ use vulnera_core::application::organization::use_cases::{
     RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
-use vulnera_core::application::analytics::AnalyticsAggregationService;
 use vulnera_core::domain::organization::repositories::{
     IAnalysisEventRepository, IOrganizationMemberRepository, IOrganizationRepository,
     IPersistedJobResultRepository, IPersonalStatsMonthlyRepository, ISubscriptionLimitsRepository,
@@ -44,11 +44,10 @@ use vulnera_core::domain::organization::repositories::{
 use vulnera_core::infrastructure::{
     VulneraAdvisorRepository,
     auth::{
-        ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository,
-        SqlxOrganizationRepository, SqlxOrganizationMemberRepository,
-        SqlxAnalysisEventRepository, SqlxPersonalStatsMonthlyRepository,
-        SqlxUserStatsMonthlyRepository, SqlxSubscriptionLimitsRepository,
-        SqlxPersistedJobResultRepository,
+        ApiKeyGenerator, JwtService, PasswordHasher, SqlxAnalysisEventRepository,
+        SqlxApiKeyRepository, SqlxOrganizationMemberRepository, SqlxOrganizationRepository,
+        SqlxPersistedJobResultRepository, SqlxPersonalStatsMonthlyRepository,
+        SqlxSubscriptionLimitsRepository, SqlxUserRepository, SqlxUserStatsMonthlyRepository,
     },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
@@ -233,6 +232,9 @@ pub async fn create_app(
     let startup_time = Instant::now();
     let config_arc = Arc::new(config.clone());
     let shutdown_token = CancellationToken::new();
+
+    // Initialize master API key (development/extension use)
+    vulnera_core::infrastructure::auth::initialize_master_key();
 
     // Initialize database pool
     let db_pool = Arc::new(
@@ -422,11 +424,7 @@ pub async fn create_app(
     ));
 
     // Spawn analytics cleanup worker
-    spawn_analytics_cleanup_worker(
-        analytics_service.clone(),
-        &config,
-        shutdown_token.clone(),
-    );
+    spawn_analytics_cleanup_worker(analytics_service.clone(), &config, shutdown_token.clone());
 
     // Initialize background job queue and worker pool
     let job_queue_handle = JobQueueHandle::new(cache_service.clone());
