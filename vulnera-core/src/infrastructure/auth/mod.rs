@@ -6,6 +6,7 @@ pub mod brute_force_protection;
 pub mod csrf_service;
 pub mod distributed_rate_limiter;
 pub mod jwt_service;
+pub mod master_key;
 pub mod password_hasher;
 pub mod token_blacklist;
 pub mod user_repository;
@@ -31,6 +32,7 @@ pub use distributed_rate_limiter::{
     RateLimitResult,
 };
 pub use jwt_service::JwtService;
+pub use master_key::{initialize_master_key, is_master_key};
 pub use password_hasher::PasswordHasher;
 pub use token_blacklist::{CacheTokenBlacklistService, TokenBlacklistService};
 pub use user_repository::SqlxUserRepository;
