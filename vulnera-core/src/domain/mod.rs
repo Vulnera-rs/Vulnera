@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod module;
+pub mod organization;
 pub mod vulnerability;
 
 // Re-export common types from both modules
@@ -12,5 +13,7 @@ pub mod vulnerability;
 pub use auth::*;
 #[allow(ambiguous_glob_reexports)]
 pub use module::*;
+#[allow(ambiguous_glob_reexports)]
+pub use organization::*;
 #[allow(ambiguous_glob_reexports)]
 pub use vulnerability::*;

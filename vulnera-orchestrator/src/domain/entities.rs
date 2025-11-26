@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId};
 use vulnera_core::domain::module::{Finding, ModuleResult};
+use vulnera_core::domain::organization::value_objects::OrganizationId;
 
 use super::value_objects::{AnalysisDepth, JobStatus, SourceType};
 
@@ -34,6 +35,8 @@ pub struct JobInvocationContext {
     pub email: Option<Email>,
     pub auth_strategy: Option<JobAuthStrategy>,
     pub api_key_id: Option<ApiKeyId>,
+    /// Organization context for the job (if user is part of an organization)
+    pub organization_id: Option<OrganizationId>,
 }
 
 /// Project metadata
