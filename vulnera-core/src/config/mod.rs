@@ -181,6 +181,11 @@ pub struct ServerConfig {
     pub enable_docs: bool,
     /// Global request timeout in seconds applied at the HTTP layer.
     pub request_timeout_seconds: u64,
+    /// Per-endpoint timeout for dependency analysis (in seconds). Overrides global timeout.
+    /// Set this higher than global timeout since dependency analysis with many packages can be slow.
+    pub dependencies_analysis_timeout_seconds: u64,
+    /// Per-endpoint timeout for general analysis (in seconds). Overrides global timeout.
+    pub general_analysis_timeout_seconds: u64,
     /// Allowed CORS origins. Use ["*"] to allow any (development only). Empty vector -> no external origins.
     pub allowed_origins: Vec<String>,
 
@@ -199,6 +204,8 @@ impl Default for ServerConfig {
             workers: None,
             enable_docs: true,
             request_timeout_seconds: 30,
+            dependencies_analysis_timeout_seconds: 120, // 2 minutes for dependency analysis
+            general_analysis_timeout_seconds: 60,       // 1 minute for general analysis
             allowed_origins: vec!["*".to_string()],
             security: SecurityConfig::default(),
             rate_limit: RateLimitConfig::default(),
@@ -845,6 +852,8 @@ impl Default for Config {
                 workers: None,
                 enable_docs: true,
                 request_timeout_seconds: 30,
+                dependencies_analysis_timeout_seconds: 120,
+                general_analysis_timeout_seconds: 60,
                 allowed_origins: vec!["*".to_string()],
                 security: SecurityConfig {
                     enforce_https: false, // Disabled by default for development
