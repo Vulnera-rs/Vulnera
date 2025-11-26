@@ -22,7 +22,10 @@ use crate::presentation::{
     },
     controllers::{
         OrchestratorState,
-        analytics::{get_dashboard_stats, get_personal_dashboard_stats, get_personal_usage, get_quota, get_usage},
+        analytics::{
+            get_dashboard_stats, get_personal_dashboard_stats, get_personal_usage, get_quota,
+            get_usage,
+        },
         analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
         llm::{
@@ -281,22 +284,26 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/me/analytics/dashboard", get(get_personal_dashboard_stats))
         .route("/me/analytics/usage", get(get_personal_usage));
 
-    // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
-    let api_routes = Router::new()
+    // Routes that need CSRF validation
+    let csrf_protected_routes = Router::new()
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
+        .merge(llm_routes)
+        .merge(organization_routes)
+        .merge(protected_auth_routes)
+        .layer(middleware::from_fn_with_state(
+            csrf_middleware_state,
+            csrf_validation_middleware,
+        ));
+
+    // Orchestrator job-based analysis route
+    let api_routes = Router::new()
         .route(
             "/jobs/{id}",
             get(crate::presentation::controllers::jobs::get_job),
         )
-        .merge(llm_routes)
-        .merge(organization_routes)
-        .layer(middleware::from_fn_with_state(
-            csrf_middleware_state,
-            csrf_validation_middleware,
-        ))
+        .merge(csrf_protected_routes)
         .merge(public_auth_routes)
-        .merge(protected_auth_routes)
         .merge(dependencies_routes);
 
     // Root route - redirect to docs if enabled, otherwise show API info

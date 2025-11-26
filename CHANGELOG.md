@@ -3,6 +3,145 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.3.2] - 2025-11-26
+
+### Added
+
+- **VulneraAdvisor Integration for Vulnerability Management:**
+  - Created new `vulnera-advisor` crate for unified vulnerability data management and opensourced it as a contribution to the community.
+  - New `VulneraAdvisorRepository` wrapping the `vulnera-advisor` crate
+  - Implementation of `IVulnerabilityRepository` trait for vulnerability data management
+  - `VulneraAdvisorConfig` for managing external dependencies (Redis, API tokens)
+  - Methods for syncing vulnerability sources and converting advisories to domain vulnerabilities
+  - Enhanced error handling and logging throughout repository methods
+
+- **LLM-Powered Code Analysis and Vulnerability Explanation:**
+  - LLM controllers for code fix generation and vulnerability explanation
+  - Token bucket rate limiting middleware for LLM request management
+  - Request/response models: `GenerateCodeFixRequest`, `CodeFixResponse`, `ExplainVulnerabilityRequest`, `NaturalLanguageQueryRequest`
+  - Finding enrichment use case with LLM-generated insights
+  - Support for multiple LLM providers (HuaweiLlmProvider with wiremock testing)
+  - Comprehensive unit and integration tests for LLM interactions using MockLlmProvider
+  - Prompt builder and template system for generating context-aware AI queries
+
+- **Organization and Team Management:**
+  - Database migrations for organizations, organization members, job results, analysis events, and user stats
+  - Organization CRUD operations: `CreateOrganization`, `ListOrganizations`, `UpdateOrganization`, `DeleteOrganization`
+  - Organization member management: inviting, removing, and listing members
+  - Organization statistics and analytics endpoints
+  - `IOrganizationRepository` and `SqlxOrganizationRepository` for database persistence
+  - `IOrganizationMemberRepository` with member operations
+  - `Persisted Job Results` repository for tracking job results
+  - `Subscription Limits` repository for managing subscription tiers
+
+- **Personal Analytics and Usage Tracking:**
+  - `PersonalStatsMonthly` struct for tracking user-level statistics
+  - `IPersonalStatsMonthlyRepository` trait and `SqlxPersonalStatsMonthlyRepository` implementation
+  - Analytics recording integrated in job processing for both user and organization contexts
+  - Personal analytics endpoints: dashboard and usage statistics retrieval
+  - Enhanced `JobInvocationContext` to include organization context for proper analytics attribution
+
+- **Enhanced Rate Limiting Configuration:**
+  - Additional excluded paths for rate limiting middleware
+  - Improved route exclusions supporting more endpoints
+  - Fine-grained control over rate limiting per endpoint
+
+- **Security Enhancements with CSRF Protection:**
+  - `CsrfService` for generating and validating CSRF tokens
+  - CSRF token lifecycle integration with authentication (set during login/registration)
+  - CSRF validation middleware protecting state-changing requests
+  - Separation of public and protected authentication endpoints
+  - Enhanced cookie-based authentication with CSRF tokens in responses
+  - Updated CORS settings to support cookie-based authentication with credentials
+
+### Changed
+
+- **Development Configuration Improvements:**
+  - Updated CORS configuration for development to specify allowed origins
+  - Enhanced cookie handling for secure token transmission
+  - Improved authentication controller response structures for CSRF support
+
+- **Code Quality and Readability:**
+  - Simplified function signatures across multiple modules for better maintainability
+  - Improved code readability in authentication, orchestrator, and analysis modules
+  - Refactored recommendation logic to use `sort_by_key` for better performance
+  - Reformatted job controller summary initialization for consistency
+
+- **Middleware Documentation:**
+  - Clarified GHSA token middleware purpose and Git operation relationship
+  - Improved documentation for GitHub token handling in middleware stack
+
+### Technical Details
+
+- **VulneraAdvisor Integration:**
+  - Ecosystem and severity conversions with comprehensive test coverage
+  - Mock repository trait updated to use `IVulnerabilityRepository`
+  - Integration with existing vulnerability management pipeline
+
+- **LLM Implementation:**
+  - Uses Huawei LLM provider with configurable API endpoints
+  - Prompt builder generates context-aware queries with vulnerability metadata
+  - Rate limiting via token bucket with configurable limits per endpoint
+  - Testing infrastructure with wiremock for API simulation
+
+- **Analytics Implementation:**
+  - Job invocation context tracks both user and organization for proper attribution
+  - Personal statistics aggregation at monthly granularity
+  - Subscription limits stored per organization for usage enforcement
+
+- **CSRF Implementation:**
+  - Token generation on login/registration endpoints
+  - Token validation before state-modifying operations
+  - Secure cookie transmission with HTTP-only flags
+  - Compatible with both form-based and JSON-based requests
+
+### Testing
+
+- Added unit and integration tests for LLM provider interactions
+- Integration tests for organization management endpoints
+- Tests for CSRF token generation and validation
+- MockLlmProvider for testing LLM use cases
+- Wiremock integration for API provider simulation
+
+### Configuration
+
+New environment variables:
+
+```bash
+# LLM Configuration
+VULNERA__LLM__ENABLED=true
+VULNERA__LLM__PROVIDER=huawei
+VULNERA__LLM__HUAWEI_API_KEY=<your-api-key>
+VULNERA__LLM__HUAWEI_API_URL=https://api.huaweicloud.com/...
+
+# Rate Limiting (LLM)
+VULNERA__RATE_LIMITING__LLM_REQUESTS_PER_MINUTE=60
+VULNERA__RATE_LIMITING__EXCLUDED_PATHS='["/health", "/docs"]'
+
+# Analytics
+VULNERA__ANALYTICS__ENABLED=true
+VULNERA__ANALYTICS__GRANULARITY=monthly
+
+# CSRF Protection
+VULNERA__AUTH__CSRF_ENABLED=true
+VULNERA__AUTH__CSRF_TOKEN_TTL_MINUTES=30
+```
+
+### Dependencies Added
+
+- `vulnera-llm` crate for LLM-based analysis features
+- Testing dependencies: `mockall`, `proptest`, `rstest`, `tokio-test`, `wiremock`
+
+### Dockerfile
+
+- Updated to include `vulnera-llm` module in dependency management and build stages
+
+### Contributors
+
+- Khaled Alam
+
+---
+
 ## [0.3.1] - 2025-11-24
 
 ### Added
@@ -133,6 +272,7 @@ VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
 ### Testing
 
 Added comprehensive test suites:
+
 - 95 files changed, 6858 insertions, 803 deletions
 - New test fixtures for OpenAPI validation scenarios
 - Integration tests for dependency resolution across ecosystems
@@ -179,12 +319,14 @@ Added comprehensive test suites:
 For upgrading from 0.3.0 to 0.3.1:
 
 1. **Ensure Dragonfly/Redis is running:**
+
    ```bash
    # Docker example
    docker run -p 6379:6379 docker.dragonflydb.io/dragonflydb/dragonfly
    ```
 
 2. **Update environment variables:**
+
    ```bash
    VULNERA__CACHE__DRAGONFLY_URL="redis://127.0.0.1:6379"
    VULNERA__ANALYSIS__MAX_JOB_WORKERS=4
@@ -194,6 +336,7 @@ For upgrading from 0.3.0 to 0.3.1:
    - Job submission now returns immediately with `job_id`
    - Implement job status polling or webhook handling
    - Example:
+
      ```bash
      # Submit job (returns immediately)
      JOB_ID=$(curl -X POST .../analyze/job ... | jq -r .job_id)
@@ -207,6 +350,7 @@ For upgrading from 0.3.0 to 0.3.1:
 ### Contributors
 
 - Only and the only one Khaled Alam
+
 ---
 
 ## [0.3.0] - 2025-11-09
