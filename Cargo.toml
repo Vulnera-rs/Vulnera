@@ -24,6 +24,21 @@ categories.workspace = true
 name = "vulnera-rust"
 path = "src/main.rs"
 
+[features]
+default = []
+cli = [
+    "dep:clap",
+    "dep:dialoguer",
+    "dep:comfy-table",
+    "dep:keyring",
+    "dep:aes-gcm",
+    "dep:indicatif",
+    "dep:directories",
+    "dep:console",
+    "dep:hostname",
+    "dep:dirs",
+]
+
 [dependencies]
 vulnera-core = { path = "vulnera-core" }
 vulnera-deps = { path = "vulnera-deps" }
@@ -50,6 +65,38 @@ tracing = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
+
+# Serialization (needed for CLI JSON output)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time handling (for quota UTC reset)
+chrono = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Hashing (for machine ID in quota)
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# File system traversal
+walkdir = { workspace = true }
+
+# Base64 encoding (for encrypted credentials)
+base64 = { workspace = true }
+
+# CLI dependencies (optional, enabled by 'cli' feature)
+clap = { workspace = true, optional = true }
+dialoguer = { workspace = true, optional = true }
+comfy-table = { workspace = true, optional = true }
+keyring = { workspace = true, optional = true }
+aes-gcm = { workspace = true, optional = true }
+indicatif = { workspace = true, optional = true }
+directories = { workspace = true, optional = true }
+console = { workspace = true, optional = true }
+hostname = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
 
 [workspace.package]
 version = "0.3.2"
@@ -95,8 +142,8 @@ config = "0.15"
 dotenvy = "0.15"
 
 # Logging and tracing
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
+tracing = "0.1.42"
+tracing-subscriber = { version = "0.3.21", features = ["env-filter", "json"] }
 
 # Time handling
 chrono = { version = "0.4.40", features = ["serde"] }
@@ -158,9 +205,21 @@ proc-macro2 = "1.0"
 walkdir = "2.5"
 bytes = "1.4.0"
 
+# CLI dependencies
+clap = { version = "4.5", features = ["derive", "env", "color"] }
+dialoguer = { version = "0.12.0", features = ["password"] }
+comfy-table = "7.1"
+keyring = "3.6"
+aes-gcm = "0.10"
+indicatif = { version = "0.18.3", features = ["rayon"] }
+directories = "6.0.0"
+console = "0.16.1"
+hostname = "0.4"
+dirs = "6.0"
+
 # Testing crates (for use in dev-dependencies)
 proptest = "1.5.1"
-mockall = "0.13.1"
+mockall = "0.14.0"
 criterion = { version = "0.7.0", features = ["html_reports", "async_tokio"] }
 insta = { version = "1.40.0", features = ["redactions", "json"] }
 datatest-stable = "0.3.3"
