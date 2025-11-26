@@ -26,10 +26,27 @@ use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
 };
+use vulnera_core::application::analytics::use_cases::{
+    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
+};
+use vulnera_core::application::organization::use_cases::{
+    CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
+    InviteMemberUseCase, LeaveOrganizationUseCase, ListUserOrganizationsUseCase,
+    RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
+};
 use vulnera_core::application::reporting::ReportServiceImpl;
+use vulnera_core::domain::organization::repositories::{
+    IOrganizationMemberRepository, IOrganizationRepository, IPersistedJobResultRepository,
+    ISubscriptionLimitsRepository, IUserStatsMonthlyRepository,
+};
 use vulnera_core::infrastructure::{
     VulneraAdvisorRepository,
-    auth::{ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository},
+    auth::{
+        ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository,
+        SqlxOrganizationRepository, SqlxOrganizationMemberRepository,
+        SqlxUserStatsMonthlyRepository, SqlxSubscriptionLimitsRepository,
+        SqlxPersistedJobResultRepository,
+    },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     registries::MultiplexRegistryClient,
@@ -405,6 +422,71 @@ pub async fn create_app(
         config.llm.clone(),
     ));
 
+    // Initialize organization repositories
+    let organization_repository: Arc<dyn IOrganizationRepository> =
+        Arc::new(SqlxOrganizationRepository::new(db_pool.clone()));
+    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
+        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
+    let user_stats_repository: Arc<dyn IUserStatsMonthlyRepository> =
+        Arc::new(SqlxUserStatsMonthlyRepository::new(db_pool.clone()));
+    let subscription_limits_repository: Arc<dyn ISubscriptionLimitsRepository> =
+        Arc::new(SqlxSubscriptionLimitsRepository::new(db_pool.clone()));
+    let persisted_job_repository: Arc<dyn IPersistedJobResultRepository> =
+        Arc::new(SqlxPersistedJobResultRepository::new(db_pool.clone()));
+
+    // Initialize organization use cases
+    let create_organization_use_case = Arc::new(CreateOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+    let get_organization_use_case = Arc::new(GetOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let list_user_organizations_use_case = Arc::new(ListUserOrganizationsUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let invite_member_use_case = Arc::new(InviteMemberUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let remove_member_use_case = Arc::new(RemoveMemberUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let leave_organization_use_case = Arc::new(LeaveOrganizationUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let transfer_ownership_use_case = Arc::new(TransferOwnershipUseCase::new(
+        organization_repository.clone(),
+        organization_member_repository.clone(),
+    ));
+    let delete_organization_use_case = Arc::new(DeleteOrganizationUseCase::new(
+        organization_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+    let update_organization_name_use_case = Arc::new(UpdateOrganizationNameUseCase::new(
+        organization_repository.clone(),
+    ));
+
+    // Initialize analytics use cases
+    let get_dashboard_overview_use_case = Arc::new(GetDashboardOverviewUseCase::new(
+        organization_repository.clone(),
+        user_stats_repository.clone(),
+        subscription_limits_repository.clone(),
+        persisted_job_repository.clone(),
+    ));
+    let get_monthly_analytics_use_case = Arc::new(GetMonthlyAnalyticsUseCase::new(
+        user_stats_repository.clone(),
+    ));
+    let check_quota_use_case = Arc::new(CheckQuotaUseCase::new(
+        user_stats_repository.clone(),
+        subscription_limits_repository.clone(),
+    ));
+
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
         create_job_use_case,
@@ -435,6 +517,22 @@ pub async fn create_app(
         refresh_token_use_case,
         validate_api_key_use_case,
         auth_state,
+        // Organization-related
+        organization_member_repository,
+        create_organization_use_case,
+        get_organization_use_case,
+        list_user_organizations_use_case,
+        invite_member_use_case,
+        remove_member_use_case,
+        leave_organization_use_case,
+        transfer_ownership_use_case,
+        delete_organization_use_case,
+        update_organization_name_use_case,
+        // Analytics-related
+        get_dashboard_overview_use_case,
+        get_monthly_analytics_use_case,
+        check_quota_use_case,
+        // Config and metadata
         config: config_arc.clone(),
         startup_time,
     };

@@ -21,10 +21,17 @@ use crate::presentation::{
         revoke_api_key,
     },
     controllers::{
-        OrchestratorState, analyze, analyze_dependencies, analyze_repository,
+        OrchestratorState,
+        analytics::{get_dashboard_stats, get_quota, get_usage},
+        analyze, analyze_dependencies, analyze_repository,
         health::{health_check, metrics},
         llm::{
             enrich_job_findings, explain_vulnerability, generate_code_fix, natural_language_query,
+        },
+        organization::{
+            create_organization, delete_organization, get_organization, get_organization_stats,
+            invite_member, leave_organization, list_members, list_organizations, remove_member,
+            transfer_ownership, update_organization,
         },
     },
     middleware::{
@@ -58,7 +65,21 @@ use axum::{
         crate::presentation::controllers::llm::generate_code_fix,
         crate::presentation::controllers::llm::explain_vulnerability,
         crate::presentation::controllers::llm::natural_language_query,
-        crate::presentation::controllers::llm::enrich_job_findings
+        crate::presentation::controllers::llm::enrich_job_findings,
+        crate::presentation::controllers::organization::create_organization,
+        crate::presentation::controllers::organization::list_organizations,
+        crate::presentation::controllers::organization::get_organization,
+        crate::presentation::controllers::organization::update_organization,
+        crate::presentation::controllers::organization::delete_organization,
+        crate::presentation::controllers::organization::list_members,
+        crate::presentation::controllers::organization::invite_member,
+        crate::presentation::controllers::organization::remove_member,
+        crate::presentation::controllers::organization::leave_organization,
+        crate::presentation::controllers::organization::transfer_ownership,
+        crate::presentation::controllers::organization::get_organization_stats,
+        crate::presentation::controllers::analytics::get_dashboard_stats,
+        crate::presentation::controllers::analytics::get_usage,
+        crate::presentation::controllers::analytics::get_quota
     ),
     components(
         schemas(
@@ -92,6 +113,20 @@ use axum::{
             EnrichFindingsRequest,
             EnrichFindingsResponse,
             EnrichedFindingDto,
+            CreateOrganizationRequest,
+            UpdateOrganizationRequest,
+            InviteMemberRequest,
+            TransferOwnershipRequest,
+            OrganizationResponse,
+            OrganizationListResponse,
+            OrganizationMemberDto,
+            OrganizationMembersResponse,
+            OrganizationStatsResponse,
+            DashboardStatsResponse,
+            OrganizationUsageResponse,
+            MonthlyUsageDto,
+            QuotaUsageResponse,
+            QuotaItemDto,
             crate::presentation::auth::models::LoginRequest,
             crate::presentation::auth::models::RegisterRequest,
             crate::presentation::auth::models::AuthResponse,
@@ -110,7 +145,9 @@ use axum::{
         (name = "dependencies", description = "Dependency analysis endpoints optimized for LSP/IDE extensions"),
         (name = "health", description = "System health monitoring and metrics endpoints"),
         (name = "auth", description = "Authentication and authorization endpoints (HttpOnly cookie-based)"),
-        (name = "llm", description = "AI-powered vulnerability analysis and code generation")
+        (name = "llm", description = "AI-powered vulnerability analysis and code generation"),
+        (name = "organizations", description = "Organization management endpoints"),
+        (name = "analytics", description = "Usage analytics and quota tracking endpoints")
     ),
     info(
         title = "Vulnera API",
@@ -204,8 +241,38 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         ));
 
     // Dependencies routes (no CSRF validation - designed for cross-origin requests)
-    let dependencies_routes = Router::new()
-        .route("/dependencies/analyze", post(analyze_dependencies));
+    let dependencies_routes =
+        Router::new().route("/dependencies/analyze", post(analyze_dependencies));
+
+    // Organization routes (protected by CSRF for POST/PUT/DELETE)
+    let organization_routes = Router::new()
+        .route(
+            "/organizations",
+            post(create_organization).get(list_organizations),
+        )
+        .route(
+            "/organizations/{id}",
+            get(get_organization)
+                .put(update_organization)
+                .delete(delete_organization),
+        )
+        .route(
+            "/organizations/{id}/members",
+            get(list_members).post(invite_member),
+        )
+        .route(
+            "/organizations/{id}/members/{user_id}",
+            axum::routing::delete(remove_member),
+        )
+        .route("/organizations/{id}/leave", post(leave_organization))
+        .route("/organizations/{id}/transfer", post(transfer_ownership))
+        .route("/organizations/{id}/stats", get(get_organization_stats))
+        .route(
+            "/organizations/{id}/analytics/dashboard",
+            get(get_dashboard_stats),
+        )
+        .route("/organizations/{id}/analytics/usage", get(get_usage))
+        .route("/organizations/{id}/analytics/quota", get(get_quota));
 
     // Orchestrator job-based analysis route (protected by CSRF for POST/PUT/DELETE)
     let api_routes = Router::new()
@@ -216,6 +283,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             get(crate::presentation::controllers::jobs::get_job),
         )
         .merge(llm_routes)
+        .merge(organization_routes)
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
@@ -281,12 +349,12 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             .allow_credentials(false) // Cannot use credentials with wildcard origin
             .max_age(Duration::from_secs(3600))
     } else {
-        // Specific origins with credentials enabled (supports HttpOnly cookies)
+        // Specific origins with credentials enabled
         tracing::info!(
             origins = ?config.server.allowed_origins,
             "CORS: Configured with specific origins and credentials enabled"
         );
-        
+
         let origins: Vec<axum::http::HeaderValue> = config
             .server
             .allowed_origins

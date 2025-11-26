@@ -241,6 +241,33 @@ pub struct UserStatsMonthly {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Default for UserStatsMonthly {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            organization_id: OrganizationId::generate(),
+            year_month: String::new(),
+            findings_count: 0,
+            findings_critical: 0,
+            findings_high: 0,
+            findings_medium: 0,
+            findings_low: 0,
+            findings_info: 0,
+            reports_generated: 0,
+            api_calls_used: 0,
+            scans_completed: 0,
+            scans_failed: 0,
+            sast_findings: 0,
+            secrets_findings: 0,
+            dependency_findings: 0,
+            api_findings: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
 impl UserStatsMonthly {
     /// Create new monthly stats for an organization
     pub fn new(organization_id: OrganizationId, year_month: String) -> Self {

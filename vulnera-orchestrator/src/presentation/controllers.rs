@@ -1,19 +1,30 @@
 //! Orchestrator API controllers
 
+pub mod analytics;
 pub mod health;
 pub mod jobs;
 pub mod llm;
+pub mod organization;
 pub mod repository;
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{extract::State, response::Json};
+use vulnera_core::application::analytics::use_cases::{
+    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
+};
 use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
 };
+use vulnera_core::application::organization::use_cases::{
+    CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
+    InviteMemberUseCase, LeaveOrganizationUseCase, ListUserOrganizationsUseCase,
+    RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
+};
 use vulnera_core::application::reporting::ReportServiceImpl;
+use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
 use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
 use vulnera_core::infrastructure::auth::{ApiKeyGenerator, JwtService, PasswordHasher};
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
@@ -96,6 +107,25 @@ pub struct OrchestratorState {
 
     // Auth state (for extractors)
     pub auth_state: AuthState,
+
+    // Organization-related repositories
+    pub organization_member_repository: Arc<dyn IOrganizationMemberRepository>,
+
+    // Organization use cases
+    pub create_organization_use_case: Arc<CreateOrganizationUseCase>,
+    pub get_organization_use_case: Arc<GetOrganizationUseCase>,
+    pub list_user_organizations_use_case: Arc<ListUserOrganizationsUseCase>,
+    pub invite_member_use_case: Arc<InviteMemberUseCase>,
+    pub remove_member_use_case: Arc<RemoveMemberUseCase>,
+    pub leave_organization_use_case: Arc<LeaveOrganizationUseCase>,
+    pub transfer_ownership_use_case: Arc<TransferOwnershipUseCase>,
+    pub delete_organization_use_case: Arc<DeleteOrganizationUseCase>,
+    pub update_organization_name_use_case: Arc<UpdateOrganizationNameUseCase>,
+
+    // Analytics use cases
+    pub get_dashboard_overview_use_case: Arc<GetDashboardOverviewUseCase>,
+    pub get_monthly_analytics_use_case: Arc<GetMonthlyAnalyticsUseCase>,
+    pub check_quota_use_case: Arc<CheckQuotaUseCase>,
 
     // Config and metadata
     pub config: Arc<vulnera_core::Config>,
