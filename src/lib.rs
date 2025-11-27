@@ -4,6 +4,9 @@
 
 mod app;
 
+#[cfg(feature = "cli")]
+pub mod cli;
+
 pub use app::{AppHandle, create_app};
 pub use vulnera_core::{Config, init_tracing};
 pub use vulnera_orchestrator::presentation::controllers::OrchestratorState;

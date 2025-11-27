@@ -38,9 +38,9 @@ use crate::presentation::{
         },
     },
     middleware::{
-        CsrfMiddlewareState, LlmRateLimiterState, RateLimiterState, csrf_validation_middleware,
-        ghsa_token_middleware, https_enforcement_middleware, llm_rate_limit_middleware,
-        logging_middleware, rate_limit_middleware, security_headers_middleware,
+        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware,
+        https_enforcement_middleware, logging_middleware, rate_limit_middleware,
+        security_headers_middleware,
     },
     models::*,
 };
@@ -196,9 +196,6 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Create CSRF middleware state
     let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
 
-    // Create LLM rate limiter state
-    let llm_rate_limiter_state = Arc::new(LlmRateLimiterState::new(config.llm.rate_limit.clone()));
-
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
         login_use_case: orchestrator_state.login_use_case.clone(),
@@ -236,20 +233,22 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         ))
         .with_state(auth_app_state);
 
-    // LLM routes with specific rate limiting
+    // LLM routes (will use unified rate limiting with higher cost via request cost weighting)
     let llm_routes = Router::new()
         .route("/llm/fix", post(generate_code_fix))
         .route("/llm/explain", post(explain_vulnerability))
         .route("/llm/query", post(natural_language_query))
-        .route("/jobs/{job_id}/enrich", post(enrich_job_findings))
-        .layer(middleware::from_fn_with_state(
-            llm_rate_limiter_state,
-            llm_rate_limit_middleware,
-        ));
+        .route("/jobs/{job_id}/enrich", post(enrich_job_findings));
+    // Note: LLM requests will be rate limited by the unified rate limiter
+    // with RequestCost::Llm (10 tokens per request)
 
     // Dependencies routes (no CSRF validation - designed for cross-origin requests)
-    let dependencies_routes =
-        Router::new().route("/dependencies/analyze", post(analyze_dependencies));
+    // Applied with extended timeout for dependency analysis operations
+    let dependencies_routes = Router::new()
+        .route("/dependencies/analyze", post(analyze_dependencies))
+        .layer(TimeoutLayer::new(Duration::from_secs(
+            config.server.dependencies_analysis_timeout_seconds,
+        )));
 
     // Organization routes (protected by CSRF for POST/PUT/DELETE)
     let organization_routes = Router::new()
@@ -285,12 +284,16 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .route("/me/analytics/usage", get(get_personal_usage));
 
     // Routes that need CSRF validation
+    // Applied with extended timeout for analysis operations
     let csrf_protected_routes = Router::new()
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
         .merge(llm_routes)
         .merge(organization_routes)
         .merge(protected_auth_routes)
+        .layer(TimeoutLayer::new(Duration::from_secs(
+            config.server.general_analysis_timeout_seconds,
+        )))
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
@@ -446,10 +449,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     }
 
     // Conditionally add rate limiting middleware
-    if config.server.rate_limit.enabled {
-        let rate_limiter_state = Arc::new(RateLimiterState::new(config.server.rate_limit.clone()));
+    if let Some(rate_limiter_service) = &orchestrator_state.rate_limiter_service {
+        let rate_limiter_state = Arc::new(RateLimiterState::new(Arc::clone(rate_limiter_service)));
         router = router.layer(middleware::from_fn_with_state(
-            rate_limiter_state.clone(),
+            rate_limiter_state,
             rate_limit_middleware,
         ));
     }

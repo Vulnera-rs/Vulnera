@@ -28,6 +28,7 @@ use vulnera_core::domain::organization::repositories::IOrganizationMemberReposit
 use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
 use vulnera_core::infrastructure::auth::{ApiKeyGenerator, JwtService, PasswordHasher};
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
+use vulnera_core::infrastructure::rate_limiter::RateLimiterService;
 use vulnera_deps::types::VersionResolutionService;
 
 use crate::application::use_cases::{
@@ -129,6 +130,9 @@ pub struct OrchestratorState {
 
     // Analytics service (for personal analytics)
     pub analytics_service: Arc<vulnera_core::application::analytics::AnalyticsAggregationService>,
+
+    // Rate limiting service
+    pub rate_limiter_service: Option<Arc<RateLimiterService>>,
 
     // Config and metadata
     pub config: Arc<vulnera_core::Config>,

@@ -1,4 +1,8 @@
 //! Vulnera Rust - Main application entry point
+//!
+//! This application can run in two modes:
+//! 1. Server mode (default): Starts the HTTP API server
+//! 2. CLI mode (with --cli feature): Runs command-line vulnerability analysis
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -9,6 +13,50 @@ use vulnera_rust::{Config, create_app, init_tracing};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Check if we're in CLI mode
+    #[cfg(feature = "cli")]
+    {
+        // When CLI feature is enabled, use CLI as the default mode
+        // Server mode is started via `vulnera-rust serve` or when no args provided
+        // and VULNERA_SERVER_MODE env is set
+        let args: Vec<String> = std::env::args().collect();
+        
+        // If VULNERA_SERVER_MODE is set, run as server
+        if std::env::var("VULNERA_SERVER_MODE").is_ok() {
+            return run_server().await;
+        }
+        
+        // If no arguments or just help flags, run CLI (clap will handle --help)
+        // If "serve" subcommand is provided, run server
+        let is_server_mode = args.len() > 1 && args[1] == "serve";
+        
+        if !is_server_mode {
+            return run_cli().await;
+        }
+    }
+
+    // Server mode (non-CLI feature or explicit serve command)
+    run_server().await
+}
+
+/// Run the CLI application
+#[cfg(feature = "cli")]
+async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
+    use vulnera_rust::cli::CliApp;
+
+    // Load .env for any environment variables
+    let _ = dotenvy::dotenv();
+
+    // Run the CLI
+    let app = CliApp::new().await?;
+    let exit_code = app.run().await?;
+
+    // Exit with the appropriate code for CI integration
+    std::process::exit(exit_code);
+}
+
+/// Run the HTTP server
+async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = dotenvy::dotenv() {
         // Only warn if it's not a "file not found" error
         if !e.not_found() {
