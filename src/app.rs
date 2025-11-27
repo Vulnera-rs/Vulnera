@@ -22,12 +22,13 @@ use vulnera_orchestrator::presentation::routes::create_router;
 use vulnera_sast::SastModule;
 use vulnera_secrets::SecretDetectionModule;
 
+use vulnera_core::application::analytics::AnalyticsAggregationService;
+use vulnera_core::application::analytics::use_cases::{
+    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
+};
 use vulnera_core::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
-};
-use vulnera_core::application::analytics::use_cases::{
-    CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
 };
 use vulnera_core::application::organization::use_cases::{
     CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
@@ -35,7 +36,6 @@ use vulnera_core::application::organization::use_cases::{
     RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
 };
 use vulnera_core::application::reporting::ReportServiceImpl;
-use vulnera_core::application::analytics::AnalyticsAggregationService;
 use vulnera_core::domain::organization::repositories::{
     IAnalysisEventRepository, IOrganizationMemberRepository, IOrganizationRepository,
     IPersistedJobResultRepository, IPersonalStatsMonthlyRepository, ISubscriptionLimitsRepository,
@@ -44,14 +44,14 @@ use vulnera_core::domain::organization::repositories::{
 use vulnera_core::infrastructure::{
     VulneraAdvisorRepository,
     auth::{
-        ApiKeyGenerator, JwtService, PasswordHasher, SqlxApiKeyRepository, SqlxUserRepository,
-        SqlxOrganizationRepository, SqlxOrganizationMemberRepository,
-        SqlxAnalysisEventRepository, SqlxPersonalStatsMonthlyRepository,
-        SqlxUserStatsMonthlyRepository, SqlxSubscriptionLimitsRepository,
-        SqlxPersistedJobResultRepository,
+        ApiKeyGenerator, JwtService, PasswordHasher, SqlxAnalysisEventRepository,
+        SqlxApiKeyRepository, SqlxOrganizationMemberRepository, SqlxOrganizationRepository,
+        SqlxPersistedJobResultRepository, SqlxPersonalStatsMonthlyRepository,
+        SqlxSubscriptionLimitsRepository, SqlxUserRepository, SqlxUserStatsMonthlyRepository,
     },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
+    rate_limiter::RateLimiterService,
     registries::MultiplexRegistryClient,
     repository_source::github_client::GitHubRepositoryClient,
 };
@@ -422,11 +422,7 @@ pub async fn create_app(
     ));
 
     // Spawn analytics cleanup worker
-    spawn_analytics_cleanup_worker(
-        analytics_service.clone(),
-        &config,
-        shutdown_token.clone(),
-    );
+    spawn_analytics_cleanup_worker(analytics_service.clone(), &config, shutdown_token.clone());
 
     // Initialize background job queue and worker pool
     let job_queue_handle = JobQueueHandle::new(cache_service.clone());
@@ -567,6 +563,26 @@ pub async fn create_app(
         subscription_limits_repository.clone(),
     ));
 
+    // Initialize rate limiter service if enabled
+    let rate_limiter_service = if config.server.rate_limit.enabled {
+        match RateLimiterService::new(config.server.rate_limit.clone()).await {
+            Ok(service) => {
+                tracing::info!("Rate limiter service initialized");
+                Some(Arc::new(service))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to initialize rate limiter service, rate limiting disabled: {}",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        tracing::info!("Rate limiting is disabled");
+        None
+    };
+
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
         create_job_use_case,
@@ -613,6 +629,8 @@ pub async fn create_app(
         get_monthly_analytics_use_case,
         check_quota_use_case,
         analytics_service,
+        // Rate limiting
+        rate_limiter_service,
         // Config and metadata
         config: config_arc.clone(),
         startup_time,

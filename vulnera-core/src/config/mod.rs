@@ -126,46 +126,168 @@ pub struct PackageConfig {
     pub version: String,
 }
 
-/// Rate limit strategy
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Storage backend for rate limiting
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum RateLimitStrategy {
-    /// Rate limit per IP address
+pub enum RateLimitStorageBackend {
+    /// Use Dragonfly/Redis for distributed rate limiting (recommended for production)
     #[default]
-    Ip,
-    /// Rate limit per API key
-    ApiKey,
-    /// Global rate limit for all requests
-    Global,
+    Dragonfly,
+    /// Use in-memory storage (suitable for development/single instance)
+    Memory,
 }
 
-/// Rate limiting configuration
+/// Single tier limit configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct RateLimitConfig {
-    /// Whether rate limiting is enabled
-    pub enabled: bool,
+pub struct TierLimitConfig {
     /// Requests allowed per minute
     pub requests_per_minute: u32,
     /// Requests allowed per hour
     pub requests_per_hour: u32,
-    /// Requests allowed per day for unauthenticated users
-    pub unauthenticated_requests_per_day: u32,
-    /// Rate limit strategy (IP-based, API key, or global)
-    pub strategy: RateLimitStrategy,
-    /// Cleanup interval for expired entries in seconds (default: 300 = 5 minutes)
-    pub cleanup_interval_seconds: u64,
+    /// Burst size (max concurrent requests allowed above rate)
+    pub burst_size: u32,
 }
 
-impl Default for RateLimitConfig {
+impl Default for TierLimitConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
             requests_per_minute: 60,
             requests_per_hour: 1000,
-            unauthenticated_requests_per_day: 10,
-            strategy: RateLimitStrategy::Ip,
-            cleanup_interval_seconds: 300,
+            burst_size: 10,
+        }
+    }
+}
+
+/// All tier limits configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TierLimitsConfig {
+    /// API key authentication (CLI/Extensions) - highest limits
+    pub api_key: TierLimitConfig,
+    /// Cookie-based authentication (web users) - medium limits
+    pub authenticated: TierLimitConfig,
+    /// Unauthenticated users - lowest limits
+    pub anonymous: TierLimitConfig,
+    /// Bonus percentage for organization members (applied on top of tier limits)
+    pub org_bonus_percent: u8,
+}
+
+impl Default for TierLimitsConfig {
+    fn default() -> Self {
+        Self {
+            api_key: TierLimitConfig {
+                requests_per_minute: 100,
+                requests_per_hour: 2000,
+                burst_size: 20,
+            },
+            authenticated: TierLimitConfig {
+                requests_per_minute: 60,
+                requests_per_hour: 1000,
+                burst_size: 10,
+            },
+            anonymous: TierLimitConfig {
+                requests_per_minute: 20,
+                requests_per_hour: 100,
+                burst_size: 5,
+            },
+            org_bonus_percent: 20,
+        }
+    }
+}
+
+/// Request cost weights for different operation types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RequestCostsConfig {
+    /// Cost for GET requests (read operations)
+    pub get: u32,
+    /// Cost for POST/PUT/DELETE requests (write operations)
+    pub post: u32,
+    /// Cost for analysis operations (dependency scanning, SAST, etc.)
+    pub analysis: u32,
+    /// Cost for LLM operations (explanations, code fixes)
+    pub llm: u32,
+}
+
+impl Default for RequestCostsConfig {
+    fn default() -> Self {
+        Self {
+            get: 1,
+            post: 2,
+            analysis: 5,
+            llm: 10,
+        }
+    }
+}
+
+/// Auth endpoint brute-force protection configuration (sliding window)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuthProtectionConfig {
+    /// Whether auth brute-force protection is enabled
+    pub enabled: bool,
+    /// Maximum login attempts per minute per IP
+    pub login_attempts_per_minute: u32,
+    /// Maximum login attempts per hour per IP
+    pub login_attempts_per_hour: u32,
+    /// Maximum registration attempts per minute per IP
+    pub register_attempts_per_minute: u32,
+    /// Maximum registration attempts per hour per IP
+    pub register_attempts_per_hour: u32,
+    /// Lockout duration in minutes after exceeding limits
+    pub lockout_duration_minutes: u32,
+}
+
+impl Default for AuthProtectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            login_attempts_per_minute: 5,
+            login_attempts_per_hour: 20,
+            register_attempts_per_minute: 3,
+            register_attempts_per_hour: 10,
+            lockout_duration_minutes: 15,
+        }
+    }
+}
+
+/// Tiered rate limiting configuration
+///
+/// This unified configuration replaces the old RateLimitConfig and LlmRateLimitConfig
+/// with a tier-based system that provides different limits based on authentication type:
+/// - API Key (CLI/Extensions): Highest limits, programmatic access
+/// - Authenticated (Cookie): Medium limits, web users
+/// - Anonymous: Lowest limits, unauthenticated users
+///
+/// Uses token bucket algorithm for general rate limiting (allows bursts),
+/// and sliding window for auth endpoint protection (stricter, no bursts).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TieredRateLimitConfig {
+    /// Whether rate limiting is enabled
+    pub enabled: bool,
+    /// Storage backend for rate limit counters
+    pub storage_backend: RateLimitStorageBackend,
+    /// Cleanup interval for expired entries in seconds
+    pub cleanup_interval_seconds: u64,
+    /// Per-tier rate limits
+    pub tiers: TierLimitsConfig,
+    /// Request cost weights by operation type
+    pub costs: RequestCostsConfig,
+    /// Auth endpoint brute-force protection
+    pub auth_protection: AuthProtectionConfig,
+}
+
+impl Default for TieredRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            storage_backend: RateLimitStorageBackend::Dragonfly,
+            cleanup_interval_seconds: 300, // 5 minutes
+            tiers: TierLimitsConfig::default(),
+            costs: RequestCostsConfig::default(),
+            auth_protection: AuthProtectionConfig::default(),
         }
     }
 }
@@ -191,9 +313,9 @@ pub struct ServerConfig {
 
     /// Security configuration
     pub security: SecurityConfig,
-    /// Rate limiting configuration
+    /// Tiered rate limiting configuration
     #[serde(default)]
-    pub rate_limit: RateLimitConfig,
+    pub rate_limit: TieredRateLimitConfig,
 }
 
 impl Default for ServerConfig {
@@ -208,7 +330,7 @@ impl Default for ServerConfig {
             general_analysis_timeout_seconds: 60,       // 1 minute for general analysis
             allowed_origins: vec!["*".to_string()],
             security: SecurityConfig::default(),
-            rate_limit: RateLimitConfig::default(),
+            rate_limit: TieredRateLimitConfig::default(),
         }
     }
 }
@@ -734,9 +856,6 @@ pub struct LlmConfig {
     pub timeout_seconds: u64,
     /// Whether to enable streaming responses
     pub enable_streaming: bool,
-    /// Rate limiting configuration
-    #[serde(default)]
-    pub rate_limit: LlmRateLimitConfig,
     /// Finding enrichment configuration
     #[serde(default)]
     pub enrichment: LlmEnrichmentConfig,
@@ -756,7 +875,6 @@ impl Default for LlmConfig {
             max_tokens: 2048,
             timeout_seconds: 60,
             enable_streaming: true,
-            rate_limit: LlmRateLimitConfig::default(),
             enrichment: LlmEnrichmentConfig::default(),
         }
     }
@@ -783,34 +901,6 @@ impl Default for LlmEnrichmentConfig {
             max_concurrent_enrichments: 3,
             include_code_context: true,
             max_code_context_chars: 2000,
-        }
-    }
-}
-
-/// LLM Rate limiting configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LlmRateLimitConfig {
-    /// Whether rate limiting is enabled
-    pub enabled: bool,
-    /// Requests allowed per minute
-    pub requests_per_minute: u32,
-    /// Requests allowed per hour
-    pub requests_per_hour: u32,
-    /// Burst size (max concurrent requests allowed above rate)
-    pub burst_size: u32,
-    /// Whether to enforce per-user limits
-    pub per_user_limit: bool,
-}
-
-impl Default for LlmRateLimitConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            requests_per_minute: 20,
-            requests_per_hour: 200,
-            burst_size: 5,
-            per_user_limit: true,
         }
     }
 }
@@ -862,7 +952,7 @@ impl Default for Config {
                     hsts_max_age: 31536000, // 1 year
                     hsts_include_subdomains: true,
                 },
-                rate_limit: RateLimitConfig::default(),
+                rate_limit: TieredRateLimitConfig::default(),
             },
             cache: CacheConfig {
                 ttl_hours: 24,
@@ -939,6 +1029,7 @@ impl Validate for Config {
         validation::Validate::validate(&self.api_security)?;
         validation::Validate::validate(&self.auth)?;
         validation::Validate::validate(&self.database)?;
+        validation::Validate::validate(&self.server.rate_limit)?;
         // LLM config validation is simple for now, but we could add more checks
         if self.llm.timeout_seconds == 0 {
             return Err(ValidationError::api("LLM timeout must be > 0"));
