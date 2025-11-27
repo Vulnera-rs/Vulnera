@@ -3,6 +3,7 @@
 use crate::config::{
     AnalysisConfig, ApiConfig, ApiSecurityConfig, AuthConfig, CacheConfig, DatabaseConfig,
     GhsaConfig, GitHubConfig, NvdConfig, SecretDetectionConfig, ServerConfig,
+    TieredRateLimitConfig,
 };
 
 /// Trait for validating configuration sections
@@ -33,6 +34,9 @@ pub enum ValidationError {
 
     #[error("Secret detection configuration error: {message}")]
     SecretDetection { message: String },
+
+    #[error("Rate limiting configuration error: {message}")]
+    RateLimit { message: String },
 }
 
 impl ValidationError {
@@ -74,6 +78,12 @@ impl ValidationError {
 
     pub fn secret_detection(message: impl Into<String>) -> Self {
         Self::SecretDetection {
+            message: message.into(),
+        }
+    }
+
+    pub fn rate_limit(message: impl Into<String>) -> Self {
+        Self::RateLimit {
             message: message.into(),
         }
     }
@@ -462,6 +472,116 @@ impl Validate for ApiSecurityConfig {
     }
 }
 
+impl Validate for TieredRateLimitConfig {
+    fn validate(&self) -> Result<(), ValidationError> {
+        // Skip validation if rate limiting is disabled
+        if !self.enabled {
+            return Ok(());
+        }
+
+        // Validate tier limits
+        fn validate_tier(
+            tier_name: &str,
+            tier: &crate::config::TierLimitConfig,
+        ) -> Result<(), ValidationError> {
+            if tier.requests_per_minute == 0 {
+                return Err(ValidationError::rate_limit(format!(
+                    "{} tier requests_per_minute must be greater than 0",
+                    tier_name
+                )));
+            }
+            if tier.requests_per_hour == 0 {
+                return Err(ValidationError::rate_limit(format!(
+                    "{} tier requests_per_hour must be greater than 0",
+                    tier_name
+                )));
+            }
+            if tier.requests_per_hour < tier.requests_per_minute {
+                return Err(ValidationError::rate_limit(format!(
+                    "{} tier requests_per_hour ({}) must be >= requests_per_minute ({})",
+                    tier_name, tier.requests_per_hour, tier.requests_per_minute
+                )));
+            }
+            Ok(())
+        }
+
+        validate_tier("api_key", &self.tiers.api_key)?;
+        validate_tier("authenticated", &self.tiers.authenticated)?;
+        validate_tier("anonymous", &self.tiers.anonymous)?;
+
+        // Validate tier hierarchy (api_key >= authenticated >= anonymous)
+        if self.tiers.authenticated.requests_per_minute > self.tiers.api_key.requests_per_minute {
+            return Err(ValidationError::rate_limit(
+                "authenticated tier limits cannot exceed api_key tier limits".to_string(),
+            ));
+        }
+        if self.tiers.anonymous.requests_per_minute > self.tiers.authenticated.requests_per_minute {
+            return Err(ValidationError::rate_limit(
+                "anonymous tier limits cannot exceed authenticated tier limits".to_string(),
+            ));
+        }
+
+        // Validate org bonus percentage (0-100)
+        if self.tiers.org_bonus_percent > 100 {
+            return Err(ValidationError::rate_limit(
+                "org_bonus_percent must be between 0 and 100".to_string(),
+            ));
+        }
+
+        // Validate request costs
+        if self.costs.get == 0 {
+            return Err(ValidationError::rate_limit(
+                "GET request cost must be greater than 0".to_string(),
+            ));
+        }
+        if self.costs.post == 0 {
+            return Err(ValidationError::rate_limit(
+                "POST request cost must be greater than 0".to_string(),
+            ));
+        }
+
+        // Validate auth protection if enabled
+        if self.auth_protection.enabled {
+            if self.auth_protection.login_attempts_per_minute == 0 {
+                return Err(ValidationError::rate_limit(
+                    "login_attempts_per_minute must be greater than 0".to_string(),
+                ));
+            }
+            if self.auth_protection.login_attempts_per_hour == 0 {
+                return Err(ValidationError::rate_limit(
+                    "login_attempts_per_hour must be greater than 0".to_string(),
+                ));
+            }
+            if self.auth_protection.login_attempts_per_hour
+                < self.auth_protection.login_attempts_per_minute
+            {
+                return Err(ValidationError::rate_limit(
+                    "login_attempts_per_hour must be >= login_attempts_per_minute".to_string(),
+                ));
+            }
+            if self.auth_protection.register_attempts_per_minute == 0 {
+                return Err(ValidationError::rate_limit(
+                    "register_attempts_per_minute must be greater than 0".to_string(),
+                ));
+            }
+            if self.auth_protection.lockout_duration_minutes == 0 {
+                return Err(ValidationError::rate_limit(
+                    "lockout_duration_minutes must be greater than 0".to_string(),
+                ));
+            }
+        }
+
+        // Validate cleanup interval
+        if self.cleanup_interval_seconds == 0 {
+            return Err(ValidationError::rate_limit(
+                "cleanup_interval_seconds must be greater than 0".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,9 +596,11 @@ mod tests {
             workers: None,
             enable_docs: true,
             request_timeout_seconds: 30,
+            dependencies_analysis_timeout_seconds: 120,
+            general_analysis_timeout_seconds: 60,
             allowed_origins: vec![],
             security: crate::config::SecurityConfig::default(),
-            rate_limit: crate::config::RateLimitConfig::default(),
+            rate_limit: crate::config::TieredRateLimitConfig::default(),
         };
         assert!(valid.validate().is_ok());
 
