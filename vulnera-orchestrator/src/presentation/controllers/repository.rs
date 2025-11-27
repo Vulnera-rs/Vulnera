@@ -14,6 +14,7 @@ use tracing::{info, warn};
 use url::Url;
 use uuid::Uuid;
 
+use crate::presentation::auth::extractors::Auth;
 use crate::presentation::controllers::{
     OrchestratorState, version_recommendation_to_dto, vulnerability_to_dto,
 };
@@ -37,14 +38,20 @@ use vulnera_deps::types::VersionResolutionService;
     responses(
         (status = 200, description = "Repository analysis completed", body = RepositoryAnalysisResponse),
         (status = 400, description = "Invalid request", body = ErrorResponse),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Repository not found", body = ErrorResponse),
         (status = 429, description = "Upstream rate limited", body = ErrorResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse)
     ),
-    tag = "analysis"
+    tag = "analysis",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn analyze_repository(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Json(request): Json<RepositoryAnalysisRequest>,
 ) -> Result<Json<RepositoryAnalysisResponse>, Response> {
     let RepositoryAnalysisRequest {

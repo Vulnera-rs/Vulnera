@@ -38,7 +38,7 @@ use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
 use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
 use crate::infrastructure::job_store::{JobSnapshot, JobStore};
-use crate::presentation::auth::extractors::{ApiKeyAuth, AuthState, OptionalApiKeyAuth};
+use crate::presentation::auth::extractors::{Auth, AuthState, OptionalApiKeyAuth};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
@@ -147,13 +147,17 @@ pub struct OrchestratorState {
     responses(
         (status = 202, description = "Analysis job accepted for asynchronous execution", body = JobAcceptedResponse),
         (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "analysis"
+    tag = "analysis",
+    security(
+        ("cookie_auth" = [])
+    )
 )]
 pub async fn analyze(
     State(state): State<OrchestratorState>,
-    OptionalApiKeyAuth(api_key_auth): OptionalApiKeyAuth,
+    auth: Auth,
     Json(request): Json<AnalysisRequest>,
 ) -> Result<(StatusCode, Json<JobAcceptedResponse>), String> {
     // Parse request
@@ -168,7 +172,13 @@ pub async fn analyze(
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
     let job_id = job.job_id;
-    let invocation_context = invocation_context_from_api_key(api_key_auth);
+    let invocation_context = JobInvocationContext {
+        user_id: Some(auth.user_id.clone()),
+        email: Some(auth.email.clone()),
+        auth_strategy: Some(JobAuthStrategy::Jwt),
+        api_key_id: None,
+        organization_id: None, // TODO: Fetch user's organization when needed
+    };
     let callback_url = request.callback_url.clone();
 
     let snapshot = JobSnapshot {
@@ -183,7 +193,7 @@ pub async fn analyze(
         error: job.error.clone(),
         module_configs: std::collections::HashMap::new(),
         callback_url: callback_url.clone(),
-        invocation_context: invocation_context.clone(),
+        invocation_context: Some(invocation_context.clone()),
         summary: None,
         findings_by_type: None,
     };
@@ -197,7 +207,7 @@ pub async fn analyze(
             job,
             project,
             callback_url: callback_url.clone(),
-            invocation_context,
+            invocation_context: Some(invocation_context),
         })
         .await
         .map_err(|e| format!("Failed to enqueue job: {}", e))?;
@@ -211,18 +221,6 @@ pub async fn analyze(
             message: "Analysis job accepted for asynchronous execution".to_string(),
         }),
     ))
-}
-
-fn invocation_context_from_api_key(
-    api_key_auth: Option<ApiKeyAuth>,
-) -> Option<JobInvocationContext> {
-    api_key_auth.map(|auth| JobInvocationContext {
-        user_id: Some(auth.user_id),
-        email: Some(auth.email),
-        auth_strategy: Some(JobAuthStrategy::ApiKey),
-        api_key_id: Some(auth.api_key_id),
-        organization_id: None, // TODO: Fetch user's organization when needed
-    })
 }
 
 /// Query parameters for dependency analysis endpoint
