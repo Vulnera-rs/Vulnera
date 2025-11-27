@@ -6,6 +6,7 @@ use axum::{
 use tracing::error;
 use uuid::Uuid;
 
+use crate::presentation::auth::extractors::Auth;
 use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::{JobInvocationContextDto, JobStatusResponse};
 
@@ -18,13 +19,19 @@ use crate::presentation::models::{JobInvocationContextDto, JobStatusResponse};
     ),
     responses(
         (status = 200, description = "Job found", body = JobStatusResponse),
+        (status = 401, description = "Unauthorized"),
         (status = 404, description = "Job not found"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "jobs"
+    tag = "jobs",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn get_job(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Path(id): Path<Uuid>,
 ) -> Result<Json<JobStatusResponse>, StatusCode> {
     match state.job_store.get_snapshot(id).await {
