@@ -6,6 +6,9 @@ port = 3000
 workers = 4
 enable_docs = true
 request_timeout_seconds = 30
+# Per-endpoint timeouts (in seconds) - overrides global request_timeout_seconds
+dependencies_analysis_timeout_seconds = 120  # 2 minutes for dependency analysis
+general_analysis_timeout_seconds = 60        # 1 minute for general analysis
 allowed_origins = []
 
 [server.security]
@@ -17,11 +20,46 @@ hsts_include_subdomains = true
 
 [server.rate_limit]
 enabled = true
+storage_backend = "dragonfly"  # Options: "dragonfly", "memory"
+cleanup_interval_seconds = 300
+
+# Tier-based rate limits (token bucket algorithm)
+[server.rate_limit.tiers]
+org_bonus_percent = 20  # Organization members get 20% bonus on limits
+
+[server.rate_limit.tiers.api_key]
+# API key authentication (CLI/Extensions) - highest limits
+requests_per_minute = 100
+requests_per_hour = 2000
+burst_size = 20
+
+[server.rate_limit.tiers.authenticated]
+# Cookie-based authentication (web users) - medium limits
 requests_per_minute = 60
 requests_per_hour = 1000
-unauthenticated_requests_per_day = 10
-strategy = "ip"
-cleanup_interval_seconds = 300
+burst_size = 10
+
+[server.rate_limit.tiers.anonymous]
+# Unauthenticated users - lowest limits
+requests_per_minute = 20
+requests_per_hour = 100
+burst_size = 5
+
+# Request cost weights (token consumption per request type)
+[server.rate_limit.costs]
+get = 1      # Read operations
+post = 2     # Write operations
+analysis = 5 # Dependency scanning, SAST, etc.
+llm = 10     # LLM operations (explanations, code fixes)
+
+# Auth endpoint brute-force protection (sliding window algorithm)
+[server.rate_limit.auth_protection]
+enabled = true
+login_attempts_per_minute = 5
+login_attempts_per_hour = 20
+register_attempts_per_minute = 3
+register_attempts_per_hour = 10
+lockout_duration_minutes = 15
 
 [cache]
 ttl_hours = 24

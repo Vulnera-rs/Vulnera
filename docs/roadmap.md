@@ -4,7 +4,7 @@ This document outlines the development roadmap for Vulnera, including current ca
 
 ---
 
-## Current Status (v0.3.0)
+## Current Status (v0.3.2)
 
 Vulnera currently provides a comprehensive vulnerability analysis platform with the following implemented features:
 
@@ -77,17 +77,9 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
   - Context-aware analysis
   - Data flow analysis for taint tracking
 
-- [ ] **Rule Management:**
-  - Rule marketplace/community rules
-  - Rule versioning and updates
-  - Rule performance metrics
 
 #### Secrets Detection Improvements
 
-- [ ] **Machine Learning Integration:**
-  - ML-based secret detection (replacing regex-only approach)
-  - Reduced false positive rate
-  - Context-aware secret classification
 
 - [ ] **Enhanced Secret Types:**
   - Additional cloud provider credentials
