@@ -57,7 +57,7 @@ pub async fn get_dashboard_stats(
     // Verify user is a member
     let _ = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to verify membership");
@@ -66,7 +66,7 @@ pub async fn get_dashboard_stats(
 
     let overview = state
         .get_dashboard_overview_use_case
-        .execute(org_id.clone())
+        .execute(org_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get dashboard stats");
@@ -130,7 +130,7 @@ pub async fn get_usage(
     // Verify user is a member
     let _ = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to verify membership");
@@ -150,7 +150,7 @@ pub async fn get_usage(
 
     let analytics = state
         .get_monthly_analytics_use_case
-        .execute(org_id.clone(), &start_month, &end_month)
+        .execute(org_id, &start_month, &end_month)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get usage data");
@@ -211,7 +211,7 @@ pub async fn get_quota(
     // Verify user is a member
     let details = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to verify membership");
@@ -220,7 +220,7 @@ pub async fn get_quota(
 
     let quota = state
         .check_quota_use_case
-        .get_quota_status(org_id.clone())
+        .get_quota_status(org_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get quota");
@@ -287,7 +287,7 @@ pub async fn get_personal_dashboard_stats(
     // Get current month stats
     let current_stats = state
         .analytics_service
-        .get_personal_stats_for_range(auth.user_id.clone(), &current_month, &current_month)
+        .get_personal_stats_for_range(auth.user_id, &current_month, &current_month)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get personal dashboard stats");
@@ -297,7 +297,7 @@ pub async fn get_personal_dashboard_stats(
     // Get previous month for trend calculation
     let prev_stats = state
         .analytics_service
-        .get_personal_stats_for_range(auth.user_id.clone(), &prev_month, &prev_month)
+        .get_personal_stats_for_range(auth.user_id, &prev_month, &prev_month)
         .await
         .ok()
         .and_then(|v| v.into_iter().next());
@@ -388,7 +388,7 @@ pub async fn get_personal_usage(
 
     let stats = state
         .analytics_service
-        .get_personal_stats_for_range(auth.user_id.clone(), &start_month, &end_month)
+        .get_personal_stats_for_range(auth.user_id, &start_month, &end_month)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get personal usage data");

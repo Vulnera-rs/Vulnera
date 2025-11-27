@@ -46,7 +46,7 @@ pub async fn create_organization(
     // Execute use case
     let result = state
         .create_organization_use_case
-        .execute(auth.user_id.clone(), request.name)
+        .execute(auth.user_id, request.name)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to create organization");
@@ -100,7 +100,7 @@ pub async fn list_organizations(
 ) -> Result<Json<OrganizationListResponse>, Response> {
     let organizations = state
         .list_user_organizations_use_case
-        .execute(auth.user_id.clone())
+        .execute(auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to list organizations");
@@ -167,7 +167,7 @@ pub async fn get_organization(
 
     let details = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get organization");
@@ -223,7 +223,7 @@ pub async fn update_organization(
 
     let organization = state
         .update_organization_name_use_case
-        .execute(org_id.clone(), auth.user_id.clone(), request.name)
+        .execute(org_id, auth.user_id, request.name)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to update organization");
@@ -280,7 +280,7 @@ pub async fn delete_organization(
 
     state
         .delete_organization_use_case
-        .execute(org_id, auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to delete organization");
@@ -323,7 +323,7 @@ pub async fn list_members(
     // Get organization details (includes members)
     let details = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to list members");
@@ -433,7 +433,7 @@ pub async fn invite_member(
 
     let member = state
         .invite_member_use_case
-        .execute(org_id, auth.user_id.clone(), invitee.user_id.clone())
+        .execute(org_id, auth.user_id, invitee.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to invite member");
@@ -486,7 +486,7 @@ pub async fn remove_member(
 
     state
         .remove_member_use_case
-        .execute(org_id, auth.user_id.clone(), target_user_id)
+        .execute(org_id, auth.user_id, target_user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to remove member");
@@ -528,7 +528,7 @@ pub async fn leave_organization(
 
     state
         .leave_organization_use_case
-        .execute(org_id, auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to leave organization");
@@ -573,7 +573,7 @@ pub async fn transfer_ownership(
 
     let organization = state
         .transfer_ownership_use_case
-        .execute(org_id.clone(), auth.user_id.clone(), new_owner_id)
+        .execute(org_id, auth.user_id, new_owner_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to transfer ownership");
@@ -631,7 +631,7 @@ pub async fn get_organization_stats(
     // First verify user is a member via get_organization
     let details = state
         .get_organization_use_case
-        .execute(org_id.clone(), auth.user_id.clone())
+        .execute(org_id, auth.user_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get organization");
@@ -641,7 +641,7 @@ pub async fn get_organization_stats(
     // Get dashboard overview which includes stats
     let overview = state
         .get_dashboard_overview_use_case
-        .execute(org_id.clone())
+        .execute(org_id)
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to get organization stats");

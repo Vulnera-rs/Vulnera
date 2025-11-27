@@ -46,6 +46,14 @@ uuid = { workspace = true }
 # URL parsing
 url = { workspace = true }
 
+# HTTP client for webhook delivery
+reqwest = { workspace = true, features = ["json"] }
+
+# HMAC signatures for webhook verification
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
 # Directory traversal
 walkdir = { workspace = true }
 git2 = { workspace = true }

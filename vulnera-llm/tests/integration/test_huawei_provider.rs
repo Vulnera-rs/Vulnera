@@ -62,7 +62,7 @@ async fn test_huawei_provider_generate_success() {
     });
 
     Mock::given(method("POST"))
-        .and(header("X-Auth-Token", "test-api-key"))
+        .and(header("Authorization", "Bearer test-api-key"))
         .and(header("Content-Type", "application/json"))
         .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
         .mount(&mock_server)
@@ -78,11 +78,7 @@ async fn test_huawei_provider_generate_success() {
     assert_eq!(response.id, "resp-123");
     assert_eq!(response.choices.len(), 1);
     assert_eq!(
-        response.choices[0]
-            .message
-            .as_ref()
-            .unwrap()
-            .content,
+        response.choices[0].message.as_ref().unwrap().content,
         "Hello! How can I help you?"
     );
 }
@@ -145,10 +141,12 @@ async fn test_huawei_provider_missing_api_key() {
     let result = provider.generate(create_test_request()).await;
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("API key not configured"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("API key not configured")
+    );
 }
 
 /// Test streaming generation with mocked API
@@ -160,7 +158,7 @@ async fn test_huawei_provider_generate_stream() {
     let sse_response = "data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"stream-2\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\" World\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n";
 
     Mock::given(method("POST"))
-        .and(header("X-Auth-Token", "test-api-key"))
+        .and(header("Authorization", "Bearer test-api-key"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(sse_response)
@@ -188,7 +186,10 @@ async fn test_huawei_provider_generate_stream() {
         }
     }
 
-    assert!(!responses.is_empty(), "Should receive at least one response chunk");
+    assert!(
+        !responses.is_empty(),
+        "Should receive at least one response chunk"
+    );
 }
 
 /// Test request body format
@@ -266,9 +267,11 @@ async fn test_huawei_provider_server_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(500).set_body_json(&serde_json::json!({
-            "error": "Internal server error"
-        })))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_json(&serde_json::json!({
+                "error": "Internal server error"
+            })),
+        )
         .mount(&mock_server)
         .await;
 
@@ -287,12 +290,14 @@ async fn test_huawei_provider_unauthorized() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(401).set_body_json(&serde_json::json!({
-            "error": {
-                "message": "Invalid API key",
-                "code": "invalid_api_key"
-            }
-        })))
+        .respond_with(
+            ResponseTemplate::new(401).set_body_json(&serde_json::json!({
+                "error": {
+                    "message": "Invalid API key",
+                    "code": "invalid_api_key"
+                }
+            })),
+        )
         .mount(&mock_server)
         .await;
 
