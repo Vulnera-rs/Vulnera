@@ -11,6 +11,7 @@ use std::convert::Infallible;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
+use crate::presentation::auth::extractors::Auth;
 use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::{
     CodeFixResponse, EnrichFindingsRequest, EnrichFindingsResponse, EnrichedFindingDto,
@@ -26,12 +27,18 @@ use crate::presentation::models::{
     responses(
         (status = 200, description = "Code fix generated", body = CodeFixResponse),
         (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "llm"
+    tag = "llm",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn generate_code_fix(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Json(request): Json<GenerateCodeFixRequest>,
 ) -> Result<Json<CodeFixResponse>, String> {
     // Build vulnerability description from available fields
@@ -71,12 +78,18 @@ pub async fn generate_code_fix(
     responses(
         (status = 200, description = "Explanation stream", body = String, content_type = "text/event-stream"),
         (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "llm"
+    tag = "llm",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn explain_vulnerability(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Json(request): Json<ExplainVulnerabilityRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let stream_result = state
@@ -126,12 +139,18 @@ pub async fn explain_vulnerability(
     responses(
         (status = 200, description = "Query answered", body = NaturalLanguageQueryResponse),
         (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "llm"
+    tag = "llm",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn natural_language_query(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Json(request): Json<NaturalLanguageQueryRequest>,
 ) -> Result<Json<NaturalLanguageQueryResponse>, String> {
     let context_str = request
@@ -169,12 +188,18 @@ pub async fn natural_language_query(
         (status = 200, description = "Findings enriched successfully", body = EnrichFindingsResponse),
         (status = 404, description = "Job not found"),
         (status = 400, description = "Invalid request"),
+        (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "llm"
+    tag = "llm",
+    security(
+        ("cookie_auth" = []),
+        ("api_key" = [])
+    )
 )]
 pub async fn enrich_job_findings(
     State(state): State<OrchestratorState>,
+    _auth: Auth,
     Path(job_id): Path<Uuid>,
     Json(request): Json<EnrichFindingsRequest>,
 ) -> Result<Json<EnrichFindingsResponse>, (axum::http::StatusCode, String)> {
