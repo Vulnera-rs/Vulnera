@@ -157,12 +157,13 @@ impl EnrichFindingsUseCase {
 
         let request = LlmRequest {
             model: model.to_string(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: prompt,
-            }],
+            messages: vec![Message::new("user", prompt)],
             max_tokens: Some(config.max_tokens),
             temperature: Some(config.temperature),
+            top_p: Some(0.95),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
             stream: Some(false),
         };
 
@@ -170,12 +171,12 @@ impl EnrichFindingsUseCase {
 
         let response = provider.generate(request).await?;
 
-        // Parse the response
+        // Parse the response - use content_str() to handle Option<String>
         let content = response
             .choices
             .first()
             .and_then(|c| c.message.as_ref())
-            .map(|m| m.content.as_str())
+            .map(|m| m.content_str())
             .unwrap_or("");
 
         Self::parse_enrichment_response(content)

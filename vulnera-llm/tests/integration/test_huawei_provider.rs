@@ -26,12 +26,13 @@ fn create_test_config(api_url: &str) -> LlmConfig {
 fn create_test_request() -> LlmRequest {
     LlmRequest {
         model: "test-model".to_string(),
-        messages: vec![Message {
-            role: "user".to_string(),
-            content: "Hello, world!".to_string(),
-        }],
+        messages: vec![Message::new("user", "Hello, world!")],
         max_tokens: Some(100),
         temperature: Some(0.7),
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        presence_penalty: None,
         stream: Some(false),
     }
 }
@@ -78,8 +79,13 @@ async fn test_huawei_provider_generate_success() {
     assert_eq!(response.id, "resp-123");
     assert_eq!(response.choices.len(), 1);
     assert_eq!(
-        response.choices[0].message.as_ref().unwrap().content,
-        "Hello! How can I help you?"
+        response.choices[0]
+            .message
+            .as_ref()
+            .unwrap()
+            .content
+            .as_deref(),
+        Some("Hello! How can I help you?")
     );
 }
 
@@ -225,17 +231,15 @@ async fn test_huawei_provider_request_format() {
     let request = LlmRequest {
         model: "custom-model".to_string(),
         messages: vec![
-            Message {
-                role: "system".to_string(),
-                content: "You are helpful.".to_string(),
-            },
-            Message {
-                role: "user".to_string(),
-                content: "Hello".to_string(),
-            },
+            Message::new("system", "You are helpful."),
+            Message::new("user", "Hello"),
         ],
         max_tokens: Some(500),
         temperature: Some(0.8),
+        top_p: None,
+        top_k: None,
+        frequency_penalty: None,
+        presence_penalty: None,
         stream: Some(false),
     };
 

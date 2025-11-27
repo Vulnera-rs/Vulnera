@@ -106,12 +106,12 @@ pub async fn explain_vulnerability(
             .map(|result| -> Result<Event, Infallible> {
                 match result {
                     Ok(response) => {
-                        // Extract content from streaming response
+                        // Extract content from streaming response - use content_str() to handle Option<String>
                         let content = response
                             .choices
                             .first()
                             .and_then(|c| c.delta.as_ref().or(c.message.as_ref()))
-                            .map(|m| m.content.clone())
+                            .map(|m| m.content_str())
                             .unwrap_or_default();
                         Ok(Event::default().data(content))
                     }

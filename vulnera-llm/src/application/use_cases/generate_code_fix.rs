@@ -31,20 +31,21 @@ impl GenerateCodeFixUseCase {
             finding_id, vulnerability_description, code_context
         );
 
+        // Use lower temperature for code generation (more deterministic)
+        let code_temperature = 0.3;
+
         let request = LlmRequest {
             model: model.to_string(),
             messages: vec![
-                Message {
-                    role: "system".to_string(),
-                    content: CODE_FIX_SYSTEM_PROMPT.to_string(),
-                },
-                Message {
-                    role: "user".to_string(),
-                    content: user_prompt,
-                },
+                Message::new("system", CODE_FIX_SYSTEM_PROMPT),
+                Message::new("user", user_prompt),
             ],
             max_tokens: Some(self.config.max_tokens),
-            temperature: Some(self.config.temperature),
+            temperature: Some(code_temperature),
+            top_p: Some(0.9),
+            top_k: Some(40),
+            frequency_penalty: Some(0.0),
+            presence_penalty: Some(0.0),
             stream: Some(false), // Non-streaming for JSON parsing simplicity in MVP
         };
 
@@ -54,7 +55,7 @@ impl GenerateCodeFixUseCase {
             .choices
             .first()
             .and_then(|c| c.message.as_ref())
-            .map(|m| m.content.clone())
+            .map(|m| m.full_response())
             .ok_or_else(|| anyhow::anyhow!("No content in LLM response"))?;
 
         // Parse JSON from content (handling potential markdown code blocks)

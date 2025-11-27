@@ -89,10 +89,7 @@ pub fn create_llm_response(content: &str) -> LlmResponse {
         model: "test-model".to_string(),
         choices: vec![Choice {
             index: 0,
-            message: Some(Message {
-                role: "assistant".to_string(),
-                content: content.to_string(),
-            }),
+            message: Some(Message::new("assistant", content)),
             delta: None,
             finish_reason: Some("stop".to_string()),
         }],
@@ -114,10 +111,7 @@ pub fn create_streaming_response(content: &str) -> LlmResponse {
         choices: vec![Choice {
             index: 0,
             message: None,
-            delta: Some(Message {
-                role: "assistant".to_string(),
-                content: content.to_string(),
-            }),
+            delta: Some(Message::new("assistant", content)),
             finish_reason: None,
         }],
         usage: None,

@@ -20,12 +20,13 @@ impl NaturalLanguageQueryUseCase {
 
         let request = LlmRequest {
             model: model.to_string(),
-            messages: vec![Message {
-                role: "user".to_string(),
-                content: user_prompt,
-            }],
+            messages: vec![Message::new("user", user_prompt)],
             max_tokens: Some(self.config.max_tokens),
             temperature: Some(self.config.temperature),
+            top_p: Some(0.95),
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
             stream: Some(false),
         };
 
@@ -35,7 +36,7 @@ impl NaturalLanguageQueryUseCase {
             .choices
             .first()
             .and_then(|c| c.message.as_ref())
-            .map(|m| m.content.clone())
+            .map(|m| m.full_response())
             .ok_or_else(|| anyhow::anyhow!("No content in LLM response"))
     }
 }
