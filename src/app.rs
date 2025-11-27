@@ -234,6 +234,9 @@ pub async fn create_app(
     let config_arc = Arc::new(config.clone());
     let shutdown_token = CancellationToken::new();
 
+    // Initialize master API key (development/extension use)
+    vulnera_core::infrastructure::auth::initialize_master_key();
+
     // Initialize database pool
     let db_pool = Arc::new(
         PgPoolOptions::new()
