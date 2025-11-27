@@ -44,7 +44,7 @@ impl LlmProvider for HuaweiLlmProvider {
             .client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("X-Auth-Token", api_key) // Or Authorization: Bearer depending on specific endpoint docs
+            .header("Authorization", format!("Bearer {}", api_key))
             .json(&request)
             .send()
             .await?;
@@ -76,7 +76,7 @@ impl LlmProvider for HuaweiLlmProvider {
             .client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("X-Auth-Token", api_key)
+            .header("Authorization", format!("Bearer {}", api_key))
             .json(&request)
             .send()
             .await?;

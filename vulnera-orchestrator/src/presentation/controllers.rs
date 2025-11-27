@@ -152,7 +152,8 @@ pub struct OrchestratorState {
     ),
     tag = "analysis",
     security(
-        ("cookie_auth" = [])
+        ("cookie_auth" = []),
+        ("api_key" = [])
     )
 )]
 pub async fn analyze(
@@ -160,6 +161,8 @@ pub async fn analyze(
     auth: Auth,
     Json(request): Json<AnalysisRequest>,
 ) -> Result<(StatusCode, Json<JobAcceptedResponse>), String> {
+    use crate::presentation::auth::extractors::AuthMethod;
+
     // Parse request
     let source_type = request.parse_source_type()?;
     let analysis_depth = request.parse_analysis_depth()?;
@@ -172,14 +175,22 @@ pub async fn analyze(
         .map_err(|e| format!("Failed to create job: {}", e))?;
 
     let job_id = job.job_id;
+
+    // Set auth strategy based on how the user authenticated
+    let (auth_strategy, api_key_id) = match auth.auth_method {
+        AuthMethod::Cookie => (JobAuthStrategy::Jwt, None),
+        AuthMethod::ApiKey => (JobAuthStrategy::ApiKey, auth.api_key_id),
+    };
+
     let invocation_context = JobInvocationContext {
-        user_id: Some(auth.user_id.clone()),
+        user_id: Some(auth.user_id),
         email: Some(auth.email.clone()),
-        auth_strategy: Some(JobAuthStrategy::Jwt),
-        api_key_id: None,
+        auth_strategy: Some(auth_strategy),
+        api_key_id,
         organization_id: None, // TODO: Fetch user's organization when needed
     };
     let callback_url = request.callback_url.clone();
+    let webhook_secret = request.webhook_secret.clone();
 
     let snapshot = JobSnapshot {
         job_id,
@@ -193,6 +204,7 @@ pub async fn analyze(
         error: job.error.clone(),
         module_configs: std::collections::HashMap::new(),
         callback_url: callback_url.clone(),
+        webhook_secret: None, // Don't persist secret
         invocation_context: Some(invocation_context.clone()),
         summary: None,
         findings_by_type: None,
@@ -207,6 +219,7 @@ pub async fn analyze(
             job,
             project,
             callback_url: callback_url.clone(),
+            webhook_secret,
             invocation_context: Some(invocation_context),
         })
         .await

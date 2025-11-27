@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 use vulnera_core::application::analytics::AnalyticsRecorder;
 use vulnera_core::domain::organization::value_objects::StatsSubject;
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
@@ -22,6 +26,9 @@ pub struct QueuedAnalysisJob {
     pub job: AnalysisJob,
     pub project: Project,
     pub callback_url: Option<String>,
+    /// Secret for webhook signature verification (HMAC-SHA256).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret: Option<String>,
     pub invocation_context: Option<JobInvocationContext>,
 }
 
@@ -73,6 +80,7 @@ mod tests {
             job: job.clone(),
             project: project.clone(),
             callback_url: Some("http://example.com/callback".to_string()),
+            webhook_secret: Some("test_secret".to_string()),
             invocation_context: None,
         };
 
@@ -220,6 +228,7 @@ async fn process_job(
                     error: payload.job.error.clone(),
                     module_configs: HashMap::new(),
                     callback_url: payload.callback_url.clone(),
+                    webhook_secret: None, // Don't persist secret
                     invocation_context: payload.invocation_context.clone(),
                     summary: Some(report.summary.clone()),
                     findings_by_type: Some(report.findings_by_type.clone()),
@@ -249,11 +258,22 @@ async fn process_job(
             }
 
             if let Some(callback_url) = payload.callback_url.as_deref() {
-                info!(
-                    job_id = %job_id,
+                // Deliver webhook with HMAC signature if secret provided
+                let webhook_payload = WebhookPayload {
+                    job_id,
+                    status: format!("{:?}", payload.job.status),
+                    summary: Some(report.summary.clone()),
+                    findings_by_type: Some(report.findings_by_type.clone()),
+                    error: None,
+                    completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
+                };
+                
+                deliver_webhook(
                     callback_url,
-                    "Job completed; callback delivery pending transport implementation"
-                );
+                    payload.webhook_secret.as_deref(),
+                    &webhook_payload,
+                )
+                .await;
             }
 
             info!(job_id = %job_id, "Analysis job finished successfully");
@@ -277,6 +297,7 @@ async fn process_job(
                     error: payload.job.error.clone(),
                     module_configs: HashMap::new(),
                     callback_url: payload.callback_url.clone(),
+                    webhook_secret: None, // Don't persist secret
                     invocation_context: payload.invocation_context.clone(),
                     summary: None,
                     findings_by_type: None,
@@ -298,6 +319,25 @@ async fn process_job(
                 {
                     warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
                 }
+            }
+
+            // Deliver webhook for failed jobs too
+            if let Some(callback_url) = payload.callback_url.as_deref() {
+                let webhook_payload = WebhookPayload {
+                    job_id,
+                    status: format!("{:?}", payload.job.status),
+                    summary: None,
+                    findings_by_type: None,
+                    error: payload.job.error.clone(),
+                    completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
+                };
+                
+                deliver_webhook(
+                    callback_url,
+                    payload.webhook_secret.as_deref(),
+                    &webhook_payload,
+                )
+                .await;
             }
 
             warn!(job_id = %job_id, error = %err, "Analysis job failed");
@@ -326,4 +366,138 @@ async fn persist_snapshot(
 pub enum JobProcessingError {
     #[error("Failed to persist job snapshot: {0}")]
     Snapshot(JobStoreError),
+}
+
+// =============================================================================
+// Webhook Delivery
+// =============================================================================
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Payload sent to webhook callback URLs
+#[derive(serde::Serialize)]
+pub struct WebhookPayload {
+    pub job_id: Uuid,
+    pub status: String,
+    pub summary: Option<crate::domain::entities::Summary>,
+    pub findings_by_type: Option<crate::domain::entities::FindingsByType>,
+    pub error: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+/// Deliver webhook to callback URL with optional HMAC-SHA256 signature.
+/// 
+/// # Headers
+/// - `Content-Type: application/json`
+/// - `X-Vulnera-Event: job.completed`
+/// - `X-Vulnera-Timestamp: <unix_timestamp>` (for replay protection)
+/// - `X-Vulnera-Signature: sha256=<hex_signature>` (if webhook_secret provided)
+/// 
+/// The signature is computed as: HMAC-SHA256(timestamp + "." + payload_json, secret)
+async fn deliver_webhook(callback_url: &str, webhook_secret: Option<&str>, payload: &WebhookPayload) {
+    let job_id = payload.job_id;
+    let timestamp = Utc::now().timestamp();
+    
+    // Serialize payload
+    let payload_json = match serde_json::to_string(payload) {
+        Ok(json) => json,
+        Err(e) => {
+            error!(job_id = %job_id, error = %e, "Failed to serialize webhook payload");
+            return;
+        }
+    };
+
+    // Build HTTP client with timeout
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!(job_id = %job_id, error = %e, "Failed to build HTTP client for webhook");
+            return;
+        }
+    };
+
+    // Build request
+    let mut request = client
+        .post(callback_url)
+        .header("Content-Type", "application/json")
+        .header("X-Vulnera-Event", "job.completed")
+        .header("X-Vulnera-Timestamp", timestamp.to_string());
+
+    // Add HMAC signature if secret is provided
+    if let Some(secret) = webhook_secret {
+        let signature_payload = format!("{}.{}", timestamp, payload_json);
+        match HmacSha256::new_from_slice(secret.as_bytes()) {
+            Ok(mut mac) => {
+                mac.update(signature_payload.as_bytes());
+                let signature = hex::encode(mac.finalize().into_bytes());
+                request = request.header("X-Vulnera-Signature", format!("sha256={}", signature));
+            }
+            Err(e) => {
+                warn!(job_id = %job_id, error = %e, "Failed to create HMAC for webhook signature");
+            }
+        }
+    }
+
+    // Send webhook with retry logic
+    let max_retries = 3;
+    let mut last_error: Option<String> = None;
+
+    for attempt in 1..=max_retries {
+        match request
+            .try_clone()
+            .expect("Request should be cloneable")
+            .body(payload_json.clone())
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    info!(
+                        job_id = %job_id,
+                        callback_url,
+                        status = %status,
+                        "Webhook delivered successfully"
+                    );
+                    return;
+                } else {
+                    let body = response.text().await.unwrap_or_default();
+                    last_error = Some(format!("HTTP {}: {}", status, body));
+                    warn!(
+                        job_id = %job_id,
+                        callback_url,
+                        status = %status,
+                        attempt,
+                        "Webhook delivery failed with non-success status"
+                    );
+                }
+            }
+            Err(e) => {
+                last_error = Some(e.to_string());
+                warn!(
+                    job_id = %job_id,
+                    callback_url,
+                    error = %e,
+                    attempt,
+                    "Webhook delivery request failed"
+                );
+            }
+        }
+
+        // Exponential backoff before retry
+        if attempt < max_retries {
+            tokio::time::sleep(Duration::from_millis(500 * (1 << attempt))).await;
+        }
+    }
+
+    error!(
+        job_id = %job_id,
+        callback_url,
+        error = ?last_error,
+        "Webhook delivery failed after {} attempts",
+        max_retries
+    );
 }
