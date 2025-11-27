@@ -21,6 +21,10 @@ pub struct JobSnapshot {
     pub error: Option<String>,
     pub module_configs: HashMap<String, serde_json::Value>,
     pub callback_url: Option<String>,
+    /// Secret for webhook signature verification (HMAC-SHA256).
+    /// Not persisted to database, only used during job execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret: Option<String>,
     pub invocation_context: Option<JobInvocationContext>,
     pub summary: Option<Summary>,
     pub findings_by_type: Option<FindingsByType>,

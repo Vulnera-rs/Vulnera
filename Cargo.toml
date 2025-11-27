@@ -155,6 +155,7 @@ url = "2.5.2"
 # Hashing for cache keys
 sha2 = "0.10.8"
 hex = "0.4.3"
+hmac = "0.12.1"
 
 # Multi-level caching
 moka = { version = "0.12", features = ["future"] }
@@ -193,7 +194,7 @@ tree-sitter = "0.25.10"
 tree-sitter-python = "0.25.0"
 tree-sitter-javascript = "0.25.0"
 
-# Parser dependencies 
+# Parser dependencies
 tree-sitter-json = "0.21.0"
 tree-sitter-go = "0.25.0"
 tree-sitter-c = "0.24.1"
@@ -234,6 +235,13 @@ serial_test = "3.2.0"
 
 [workspace.lints.clippy]
 type_complexity = "allow"
+
+[profile.release]
+opt-level = "z"   # Optimize for size
+lto = true        # Enable Link Time Optimization
+codegen-units = 1 # Allow for maximum cross-module optimization
+panic = "abort"   # Remove unwinding code for smaller binaries
+strip = true      # Strip debug symbols from the final binary
 
 # Test profiles
 [profile.test]

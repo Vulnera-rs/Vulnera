@@ -10,7 +10,11 @@ use crate::domain::value_objects::{AnalysisDepth, SourceType};
 /// Request model for orchestrator job-based analysis
 #[derive(Deserialize, ToSchema)]
 pub struct AnalysisRequest {
-    /// Source type (git, file_upload, s3_bucket, directory)
+    /// Source type. Allowed values:
+    /// - `git`: Git repository URL
+    /// - `file_upload`: File upload (single dependency file)
+    /// - `s3_bucket`: S3 bucket path
+    /// - `directory`: Local directory path
     #[schema(example = "git")]
     pub source_type: String,
 
@@ -18,13 +22,21 @@ pub struct AnalysisRequest {
     #[schema(example = "https://github.com/my-org/my-project.git")]
     pub source_uri: String,
 
-    /// Analysis depth
+    /// Analysis depth. Allowed values:
+    /// - `full`: Full analysis with all modules
+    /// - `dependencies_only`: Only dependency analysis
+    /// - `fast_scan`: Fast scan (dependencies + basic SAST)
     #[schema(example = "full")]
     pub analysis_depth: String,
 
     /// Optional callback URL for async results
     #[schema(example = "https://my-ci-cd.com/webhook/123")]
     pub callback_url: Option<String>,
+
+    /// Optional secret for webhook signature verification (HMAC-SHA256).
+    /// If provided, webhook payloads will include X-Vulnera-Signature header.
+    #[schema(example = "whsec_abc123...")]
+    pub webhook_secret: Option<String>,
 }
 
 /// Request model for dependency file analysis
