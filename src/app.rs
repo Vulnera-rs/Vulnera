@@ -51,6 +51,7 @@ use vulnera_core::infrastructure::{
     },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
+    rate_limiter::RateLimiterService,
     registries::MultiplexRegistryClient,
     repository_source::github_client::GitHubRepositoryClient,
 };
@@ -565,6 +566,26 @@ pub async fn create_app(
         subscription_limits_repository.clone(),
     ));
 
+    // Initialize rate limiter service if enabled
+    let rate_limiter_service = if config.server.rate_limit.enabled {
+        match RateLimiterService::new(config.server.rate_limit.clone()).await {
+            Ok(service) => {
+                tracing::info!("Rate limiter service initialized");
+                Some(Arc::new(service))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to initialize rate limiter service, rate limiting disabled: {}",
+                    e
+                );
+                None
+            }
+        }
+    } else {
+        tracing::info!("Rate limiting is disabled");
+        None
+    };
+
     // Create orchestrator state
     let orchestrator_state = OrchestratorState {
         create_job_use_case,
@@ -611,6 +632,8 @@ pub async fn create_app(
         get_monthly_analytics_use_case,
         check_quota_use_case,
         analytics_service,
+        // Rate limiting
+        rate_limiter_service,
         // Config and metadata
         config: config_arc.clone(),
         startup_time,

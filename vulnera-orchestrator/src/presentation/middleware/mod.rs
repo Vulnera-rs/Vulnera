@@ -7,22 +7,18 @@ use axum::{
     response::{IntoResponse, Json, Redirect, Response},
 };
 use chrono::Utc;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
-use tokio::sync::RwLock;
+use std::sync::Arc;
+use std::time::Instant;
 use uuid::Uuid;
 
 use vulnera_core::application::errors::ApplicationError;
-use vulnera_core::config::{RateLimitConfig, RateLimitStrategy};
 use vulnera_core::infrastructure::auth::CsrfService;
+use vulnera_core::infrastructure::rate_limiter::{
+    RateLimiterService,
+    types::{AuthEndpoint, RequestCost},
+};
 
 use crate::presentation::models::ErrorResponse;
-
-pub mod llm_rate_limit;
-pub use llm_rate_limit::*;
 
 /// Convert ApplicationError to HTTP response
 pub fn application_error_to_response(error: ApplicationError) -> Response {
@@ -266,250 +262,82 @@ pub async fn ghsa_token_middleware(request: Request<axum::body::Body>, next: Nex
     }
 }
 
-/// Token bucket state for rate limiting
-#[derive(Debug, Clone)]
-struct TokenBucket {
-    /// Number of tokens available
-    tokens: u32,
-    /// Maximum capacity of the bucket
-    capacity: u32,
-    /// Last refill timestamp (Unix timestamp in seconds)
-    last_refill: u64,
-    /// Refill rate per second (tokens per second)
-    refill_rate: f64,
-}
+// ============================================================================
+// Rate Limiter State (wrapper around vulnera-core RateLimiterService)
+// ============================================================================
 
-impl TokenBucket {
-    fn new(capacity: u32, refill_rate: f64) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        Self {
-            tokens: capacity,
-            capacity,
-            last_refill: now,
-            refill_rate,
-        }
-    }
-
-    /// Check if a token can be consumed, and consume it if available
-    fn try_consume(&mut self) -> bool {
-        self.refill();
-
-        if self.tokens > 0 {
-            self.tokens -= 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Get the number of tokens remaining
-    fn remaining(&self) -> u32 {
-        self.tokens
-    }
-
-    /// Get the time until the next token is available (in seconds)
-    fn retry_after(&self) -> u64 {
-        if self.tokens > 0 {
-            0
-        } else {
-            // Calculate time until next token based on refill rate
-            (1.0 / self.refill_rate).ceil() as u64
-        }
-    }
-
-    /// Refill tokens based on elapsed time
-    fn refill(&mut self) {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let elapsed = now.saturating_sub(self.last_refill);
-        if elapsed == 0 {
-            return;
-        }
-
-        // Calculate tokens to add based on elapsed time
-        let tokens_to_add = (elapsed as f64 * self.refill_rate) as u32;
-        if tokens_to_add > 0 {
-            self.tokens = (self.tokens + tokens_to_add).min(self.capacity);
-            self.last_refill = now;
-        }
-    }
-}
-
-/// Rate limiter state (shared across requests)
-#[derive(Debug, Clone)]
+/// Shared state for rate limiting middleware
+#[derive(Clone)]
 pub struct RateLimiterState {
-    /// Per-key token buckets (key depends on strategy: IP, API key, or "global")
-    buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
-    /// Rate limit configuration
-    config: RateLimitConfig,
-    /// Cleanup task handle (for periodic cleanup)
-    _cleanup_handle: Arc<tokio::task::JoinHandle<()>>,
+    /// The rate limiter service from vulnera-core
+    pub service: Arc<RateLimiterService>,
 }
 
 impl RateLimiterState {
     /// Create a new rate limiter state
-    pub fn new(config: RateLimitConfig) -> Self {
-        let buckets = Arc::new(RwLock::new(HashMap::<String, TokenBucket>::new()));
-        let buckets_clone = buckets.clone();
-
-        // Start cleanup task to remove expired entries
-        let cleanup_interval = Duration::from_secs(config.cleanup_interval_seconds);
-        let cleanup_handle = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(cleanup_interval);
-            loop {
-                interval.tick().await;
-                let mut buckets = buckets_clone.write().await;
-
-                // Remove buckets that haven't been accessed recently (older than 24 hours to support daily limits)
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let expire_time = 86400; // 24 hours
-
-                buckets.retain(|_, bucket| {
-                    let elapsed = now.saturating_sub(bucket.last_refill);
-                    elapsed < expire_time
-                });
-
-                if !buckets.is_empty() {
-                    tracing::debug!(
-                        buckets_count = buckets.len(),
-                        "Rate limiter cleanup: retained buckets"
-                    );
-                }
-            }
-        });
-
-        Self {
-            buckets,
-            config,
-            _cleanup_handle: Arc::new(cleanup_handle),
-        }
-    }
-
-    /// Check if a request should be rate limited
-    async fn check_rate_limit(
-        &self,
-        key: &str,
-        is_authenticated: bool,
-    ) -> Result<(), (u64, u32, u32)> {
-        // Determine capacity and refill rate based on authentication status
-        let (capacity, refill_rate) = if is_authenticated {
-            (
-                self.config.requests_per_minute,
-                self.config.requests_per_minute as f64 / 60.0,
-            )
-        } else {
-            (
-                self.config.unauthenticated_requests_per_day,
-                self.config.unauthenticated_requests_per_day as f64 / 86400.0,
-            )
-        };
-
-        let mut buckets = self.buckets.write().await;
-
-        let bucket = buckets
-            .entry(key.to_string())
-            .or_insert_with(|| TokenBucket::new(capacity, refill_rate));
-
-        if bucket.try_consume() {
-            Ok(())
-        } else {
-            let retry_after = bucket.retry_after();
-            let limit = capacity;
-            let remaining = bucket.remaining();
-            Err((retry_after, limit, remaining))
-        }
-    }
-
-    /// Extract IP address from request
-    fn extract_ip(&self, request: &Request) -> String {
-        request
-            .headers()
-            .get("x-forwarded-for")
-            .and_then(|h| h.to_str().ok())
-            .and_then(|s| s.split(',').next())
-            .map(|s| s.trim().to_string())
-            .or_else(|| {
-                request
-                    .headers()
-                    .get("x-real-ip")
-                    .and_then(|h| h.to_str().ok())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "unknown-ip".to_string())
-    }
-
-    /// Get the rate limit key and auth status based on strategy
-    fn get_key_and_auth(&self, request: &Request) -> (String, bool) {
-        // Check for API key first
-        let api_key = request
-            .headers()
-            .get("x-api-key")
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                request
-                    .headers()
-                    .get(axum::http::header::AUTHORIZATION)
-                    .and_then(|h| h.to_str().ok())
-                    .and_then(|s| {
-                        s.strip_prefix("Bearer ")
-                            .or_else(|| s.strip_prefix("token "))
-                            .map(|s| s.to_string())
-                    })
-            });
-
-        let is_authenticated = api_key.is_some();
-
-        let key = match self.config.strategy {
-            RateLimitStrategy::Ip => {
-                let ip = self.extract_ip(request);
-                if is_authenticated {
-                    format!("auth_ip:{}", ip)
-                } else {
-                    format!("unauth_ip:{}", ip)
-                }
-            }
-            RateLimitStrategy::ApiKey => {
-                if let Some(k) = api_key {
-                    format!("apikey:{}", k)
-                } else {
-                    // Fallback to IP for unauthenticated users
-                    let ip = self.extract_ip(request);
-                    format!("unauth_ip:{}", ip)
-                }
-            }
-            RateLimitStrategy::Global => {
-                if is_authenticated {
-                    "global_auth".to_string()
-                } else {
-                    "global_unauth".to_string()
-                }
-            }
-        };
-
-        (key, is_authenticated)
+    pub fn new(service: Arc<RateLimiterService>) -> Self {
+        Self { service }
     }
 }
 
+impl std::fmt::Debug for RateLimiterState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RateLimiterState")
+            .field("enabled", &self.service.is_enabled())
+            .finish()
+    }
+}
+
+/// Extract IP address from request
+pub fn extract_ip(request: &Request) -> String {
+    request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            request
+                .headers()
+                .get("x-real-ip")
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "unknown-ip".to_string())
+}
+
+/// Determine request cost based on method and path
+pub fn determine_request_cost(method: &Method, path: &str) -> RequestCost {
+    // LLM endpoints have highest cost
+    if path.contains("/llm") || path.contains("/explain") || path.contains("/fix") {
+        return RequestCost::Llm;
+    }
+
+    // Analysis endpoints have high cost
+    if path.contains("/analyze") || path.contains("/scan") || path.contains("/check") {
+        return RequestCost::Analysis;
+    }
+
+    // Write operations have medium cost
+    if matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        return RequestCost::Post;
+    }
+
+    // Read operations have lowest cost
+    RequestCost::Get
+}
+
 /// Routes that should be excluded from rate limiting
-const RATE_LIMIT_EXCLUDED_PATHS: &[&str] = &[
-    "/docs",
-    "/api-docs",
-    "/health",
-    "/metrics",
-    "/favicon.ico",
-    "/api/v1/auth/register",
-    "/api/v1/auth/login",
+const RATE_LIMIT_EXCLUDED_PATHS: &[&str] =
+    &["/docs", "/api-docs", "/health", "/metrics", "/favicon.ico"];
+
+/// Auth routes that have special brute-force protection
+const AUTH_RATE_LIMIT_PATHS: &[(&str, AuthEndpoint)] = &[
+    ("/api/v1/auth/login", AuthEndpoint::Login),
+    ("/api/v1/auth/register", AuthEndpoint::Register),
 ];
 
 /// Check if a path should be excluded from rate limiting
@@ -519,99 +347,254 @@ fn should_skip_rate_limit(path: &str) -> bool {
         .any(|excluded| path.starts_with(excluded))
 }
 
+/// Check if a path is an auth endpoint (for brute-force protection)
+fn get_auth_endpoint(path: &str) -> Option<AuthEndpoint> {
+    AUTH_RATE_LIMIT_PATHS
+        .iter()
+        .find(|(p, _)| path.starts_with(p))
+        .map(|(_, endpoint)| *endpoint)
+}
+
+/// Add IETF standard rate limit headers to response
+fn add_rate_limit_headers(response: &mut Response, limit: u32, remaining: u32, reset_at: u64) {
+    let headers = response.headers_mut();
+
+    // IETF draft standard headers
+    // https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-ratelimit-headers
+    headers.insert("ratelimit-limit", HeaderValue::from(limit));
+    headers.insert("ratelimit-remaining", HeaderValue::from(remaining));
+
+    if let Ok(val) = HeaderValue::from_str(&reset_at.to_string()) {
+        headers.insert("ratelimit-reset", val);
+    }
+}
+
 /// Rate limiting middleware
+///
+/// Uses the unified rate limiter from vulnera-core with:
+/// - Token bucket algorithm for general API rate limiting
+/// - Tiered limits based on authentication (API Key > Cookie Auth > Anonymous)
+/// - IETF standard rate limit headers
 pub async fn rate_limit_middleware(
     State(state): State<Arc<RateLimiterState>>,
     request: Request,
     next: Next,
 ) -> Response {
-    // Skip rate limiting for excluded paths (docs, health checks, static assets)
-    let path = request.uri().path();
-    if should_skip_rate_limit(path) {
+    // Skip rate limiting if disabled
+    if !state.service.is_enabled() {
         return next.run(request).await;
     }
 
-    // Check rate limit
-    let (key, is_authenticated) = state.get_key_and_auth(&request);
-    match state.check_rate_limit(&key, is_authenticated).await {
-        Ok(()) => {
-            // Rate limit passed, continue with request
-            let mut response = next.run(request).await;
+    let path = request.uri().path().to_string();
+    let method = request.method().clone();
 
-            // Add rate limit headers to successful responses
-            let limit = if is_authenticated {
-                state.config.requests_per_minute
-            } else {
-                state.config.unauthenticated_requests_per_day
-            };
-
-            let headers = response.headers_mut();
-            headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
-
-            // Get current remaining tokens (approximate)
-            let buckets = state.buckets.read().await;
-            let remaining = buckets.get(&key).map(|b| b.remaining()).unwrap_or(limit);
-
-            headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
-
-            // Reset time is current time + 1 minute (or 1 day for unauth)
-            let reset_duration = if is_authenticated { 60 } else { 86400 };
-            let reset_time = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + reset_duration;
-
-            let reset_time_val = reset_time.to_string();
-            if let Ok(val) = HeaderValue::from_str(&reset_time_val) {
-                headers.insert("x-ratelimit-reset", val);
-            } else {
-                headers.insert("x-ratelimit-reset", HeaderValue::from_static("0"));
-            }
-
-            response
-        }
-        Err((retry_after, limit, remaining)) => {
-            // Rate limit exceeded
-            tracing::warn!(
-                key = %key,
-                retry_after = retry_after,
-                "Rate limit exceeded"
-            );
-
-            let mut response = (
-                StatusCode::TOO_MANY_REQUESTS,
-                axum::Json(ErrorResponse {
-                    code: "RATE_LIMIT_EXCEEDED".to_string(),
-                    message: format!(
-                        "Rate limit exceeded. Please retry after {} seconds.",
-                        retry_after
-                    ),
-                    details: Some(serde_json::json!({
-                        "retry_after": retry_after,
-                        "limit": limit,
-                        "remaining": remaining,
-                    })),
-                    request_id: Uuid::new_v4(),
-                    timestamp: Utc::now(),
-                }),
-            )
-                .into_response();
-
-            // Add rate limit headers to error response
-            let headers = response.headers_mut();
-            headers.insert("x-ratelimit-limit", HeaderValue::from(limit));
-            headers.insert("x-ratelimit-remaining", HeaderValue::from(remaining));
-            let retry_after_val = retry_after.to_string();
-            if let Ok(val) = HeaderValue::from_str(&retry_after_val) {
-                headers.insert("retry-after", val);
-            } else {
-                headers.insert("retry-after", HeaderValue::from_static("60"));
-            }
-
-            response
-        }
+    // Skip rate limiting for excluded paths (docs, health checks, static assets)
+    if should_skip_rate_limit(&path) {
+        return next.run(request).await;
     }
+
+    // Extract request metadata
+    let ip = extract_ip(&request);
+
+    // Get authentication info from request extensions (set by auth extractors)
+    // For now, we check headers directly since extensions might not be set yet
+    let (user_id, api_key_id, is_org_member) = extract_auth_info(&request);
+
+    // Determine request cost
+    let cost = determine_request_cost(&method, &path);
+
+    // Check rate limit
+    let result = state
+        .service
+        .check_api_limit(&ip, user_id, api_key_id, is_org_member, cost)
+        .await;
+
+    if result.allowed {
+        // Rate limit passed, continue with request
+        let mut response = next.run(request).await;
+
+        // Add rate limit headers
+        add_rate_limit_headers(
+            &mut response,
+            result.limit,
+            result.remaining,
+            result.reset_at,
+        );
+
+        response
+    } else {
+        // Rate limit exceeded
+        let retry_after = result.retry_after.unwrap_or(60);
+
+        tracing::warn!(
+            ip = %ip,
+            tier = %result.tier,
+            retry_after = retry_after,
+            "Rate limit exceeded"
+        );
+
+        let mut response = (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse {
+                code: "RATE_LIMIT_EXCEEDED".to_string(),
+                message: format!(
+                    "Rate limit exceeded. Please retry after {} seconds.",
+                    retry_after
+                ),
+                details: Some(serde_json::json!({
+                    "retry_after": retry_after,
+                    "limit": result.limit,
+                    "remaining": result.remaining,
+                    "tier": result.tier.as_str(),
+                })),
+                request_id: Uuid::new_v4(),
+                timestamp: Utc::now(),
+            }),
+        )
+            .into_response();
+
+        // Add rate limit headers
+        add_rate_limit_headers(&mut response, result.limit, 0, result.reset_at);
+
+        // Add Retry-After header
+        if let Ok(val) = HeaderValue::from_str(&retry_after.to_string()) {
+            response.headers_mut().insert("retry-after", val);
+        }
+
+        response
+    }
+}
+
+/// Auth rate limiting middleware for brute-force protection
+///
+/// Uses sliding window counter algorithm for stricter rate limiting
+/// on authentication endpoints (login/register).
+pub async fn auth_rate_limit_middleware(
+    State(state): State<Arc<RateLimiterState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    // Skip if rate limiting is disabled
+    if !state.service.is_enabled() {
+        return next.run(request).await;
+    }
+
+    let path = request.uri().path();
+
+    // Check if this is an auth endpoint
+    let endpoint = match get_auth_endpoint(path) {
+        Some(e) => e,
+        None => return next.run(request).await,
+    };
+
+    let ip = extract_ip(&request);
+
+    // Check auth rate limit
+    let result = state.service.check_auth_limit(&ip, endpoint).await;
+
+    if result.allowed {
+        // Rate limit passed, continue with request
+        next.run(request).await
+    } else {
+        // Rate limit exceeded (brute-force protection triggered)
+        let lockout_until = result.lockout_until.unwrap_or(0);
+        let retry_after = lockout_until.saturating_sub(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        );
+
+        tracing::warn!(
+            ip = %ip,
+            endpoint = %endpoint.as_str(),
+            lockout_until = lockout_until,
+            "Auth rate limit exceeded (brute-force protection)"
+        );
+
+        let mut response = (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(ErrorResponse {
+                code: "AUTH_RATE_LIMIT_EXCEEDED".to_string(),
+                message: format!(
+                    "Too many {} attempts. Please try again later.",
+                    endpoint.as_str()
+                ),
+                details: Some(serde_json::json!({
+                    "retry_after": retry_after,
+                    "lockout_until": lockout_until,
+                    "endpoint": endpoint.as_str(),
+                })),
+                request_id: Uuid::new_v4(),
+                timestamp: Utc::now(),
+            }),
+        )
+            .into_response();
+
+        // Add Retry-After header
+        if let Ok(val) = HeaderValue::from_str(&retry_after.to_string()) {
+            response.headers_mut().insert("retry-after", val);
+        }
+
+        response
+    }
+}
+
+/// Extract authentication info from request headers and extensions
+/// Returns (user_id, api_key_id, is_org_member)
+fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
+    use crate::presentation::auth::extractors::{ApiKeyAuth, Auth, AuthUser};
+
+    // First check for the unified Auth extractor (has most info)
+    if let Some(auth) = request.extensions().get::<Auth>() {
+        return (
+            Some(auth.user_id.into()),
+            auth.api_key_id.map(|id| id.into()),
+            false, // TODO: Add org membership check when organization field is added to Auth
+        );
+    }
+
+    // Check for API key auth in extensions
+    if let Some(api_key_auth) = request.extensions().get::<ApiKeyAuth>() {
+        return (
+            Some(api_key_auth.user_id.into()),
+            Some(api_key_auth.api_key_id.into()),
+            false, // API key users have individual limits, org bonus handled separately
+        );
+    }
+
+    // Check for cookie-based auth in extensions
+    if let Some(auth_user) = request.extensions().get::<AuthUser>() {
+        return (
+            Some(auth_user.user_id.into()),
+            None,  // Cookie auth doesn't use API keys
+            false, // TODO: Add org membership check
+        );
+    }
+
+    // Check for API key in headers (for early rate limit decisions before full extraction)
+    let has_api_key = request.headers().contains_key("x-api-key");
+    if has_api_key {
+        // API key present but not yet extracted - will be handled with anonymous tier for now
+        // The actual tier will be properly determined once auth extractors run
+        return (None, None, false);
+    }
+
+    // Check for cookie-based auth (access_token cookie)
+    let has_auth_cookie = request
+        .headers()
+        .get(axum::http::header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .map(|cookies| cookies.contains("access_token="))
+        .unwrap_or(false);
+
+    if has_auth_cookie {
+        // Cookie auth present, but user not yet extracted
+        return (None, None, false);
+    }
+
+    // Anonymous user
+    (None, None, false)
 }
 
 /// State for CSRF validation middleware
