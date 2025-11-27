@@ -5,7 +5,11 @@ workers = 0
 enable_docs = false
 request_timeout_seconds = 30
 allowed_origins = ["${ALLOWED_ORIGIN}"]
-rate_limit.enabled = true
+
+# Rate limiting configuration for production
+[server.rate_limit]
+enabled = true
+storage_backend = "dragonfly"  # Must use Dragonfly in production for distributed rate limiting
 
 [server.security]
 enforce_https = true

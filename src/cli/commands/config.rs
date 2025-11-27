@@ -112,9 +112,29 @@ async fn show_config(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             // Rate limit settings
             ctx.output.print("\n[Rate Limits]");
+            ctx.output.print(&format!("  enabled: {}", ctx.config.server.rate_limit.enabled));
             ctx.output.print(&format!(
-                "  unauthenticated_requests_per_day: {}",
-                ctx.config.server.rate_limit.unauthenticated_requests_per_day
+                "  storage_backend: {:?}",
+                ctx.config.server.rate_limit.storage_backend
+            ));
+            ctx.output.print("\n  API Key tier:");
+            ctx.output.print(&format!(
+                "    requests_per_minute: {}",
+                ctx.config.server.rate_limit.tiers.api_key.requests_per_minute
+            ));
+            ctx.output.print(&format!(
+                "    requests_per_hour: {}",
+                ctx.config.server.rate_limit.tiers.api_key.requests_per_hour
+            ));
+            ctx.output.print("\n  Authenticated tier:");
+            ctx.output.print(&format!(
+                "    requests_per_minute: {}",
+                ctx.config.server.rate_limit.tiers.authenticated.requests_per_minute
+            ));
+            ctx.output.print("\n  Anonymous tier:");
+            ctx.output.print(&format!(
+                "    requests_per_minute: {}",
+                ctx.config.server.rate_limit.tiers.anonymous.requests_per_minute
             ));
         }
     }
@@ -236,8 +256,20 @@ host = "127.0.0.1"
 port = 8080
 
 [server.rate_limit]
-# Daily request limits
-unauthenticated_requests_per_day = 10
+enabled = true
+storage_backend = "dragonfly"
+
+[server.rate_limit.tiers.api_key]
+requests_per_minute = 100
+requests_per_hour = 2000
+
+[server.rate_limit.tiers.authenticated]
+requests_per_minute = 60
+requests_per_hour = 1000
+
+[server.rate_limit.tiers.anonymous]
+requests_per_minute = 20
+requests_per_hour = 100
 
 [analysis]
 # Maximum number of packages to analyze concurrently
