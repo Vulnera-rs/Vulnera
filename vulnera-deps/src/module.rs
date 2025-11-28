@@ -69,24 +69,60 @@ impl AnalysisModule for DependencyAnalyzerModule {
     async fn execute(&self, config: &ModuleConfig) -> Result<ModuleResult, ModuleExecutionError> {
         let start_time = std::time::Instant::now();
 
-        // For now, we need to extract file content and ecosystem from config
-        // In a real implementation, we'd read the file from source_uri
-        // For now, return an error if file_content is not in config
-        let file_content = config
-            .config
-            .get("file_content")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ModuleExecutionError::InvalidConfig("file_content not found in config".to_string())
-            })?;
+        // Extract file content and ecosystem from config
+        // If no dependency file was provided, return an empty result (not an error)
+        // This can happen when the project detection didn't find any dependency files
+        let file_content = match config.config.get("file_content").and_then(|v| v.as_str()) {
+            Some(content) => content,
+            None => {
+                // No dependency file found - return empty result instead of failing
+                let duration = start_time.elapsed();
+                return Ok(ModuleResult {
+                    job_id: config.job_id,
+                    module_type: ModuleType::DependencyAnalyzer,
+                    findings: Vec::new(),
+                    metadata: ModuleResultMetadata {
+                        files_scanned: 0,
+                        duration_ms: duration.as_millis() as u64,
+                        additional_info: {
+                            let mut info = std::collections::HashMap::new();
+                            info.insert(
+                                "skip_reason".to_string(),
+                                "No dependency manifest files found in project".to_string(),
+                            );
+                            info
+                        },
+                    },
+                    error: None,
+                });
+            }
+        };
 
-        let ecosystem_str = config
-            .config
-            .get("ecosystem")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ModuleExecutionError::InvalidConfig("ecosystem not found in config".to_string())
-            })?;
+        let ecosystem_str = match config.config.get("ecosystem").and_then(|v| v.as_str()) {
+            Some(eco) => eco,
+            None => {
+                // No ecosystem detected - return empty result instead of failing
+                let duration = start_time.elapsed();
+                return Ok(ModuleResult {
+                    job_id: config.job_id,
+                    module_type: ModuleType::DependencyAnalyzer,
+                    findings: Vec::new(),
+                    metadata: ModuleResultMetadata {
+                        files_scanned: 0,
+                        duration_ms: duration.as_millis() as u64,
+                        additional_info: {
+                            let mut info = std::collections::HashMap::new();
+                            info.insert(
+                                "skip_reason".to_string(),
+                                "Could not determine ecosystem for dependency file".to_string(),
+                            );
+                            info
+                        },
+                    },
+                    error: None,
+                });
+            }
+        };
 
         let ecosystem = match ecosystem_str.to_lowercase().as_str() {
             "npm" => vulnera_core::domain::vulnerability::value_objects::Ecosystem::Npm,
@@ -111,12 +147,45 @@ impl AnalysisModule for DependencyAnalyzerModule {
 
         let filename = config.config.get("filename").and_then(|v| v.as_str());
 
-        // Execute analysis
-        let (analysis_report, _dependency_graph) = self
+        // Execute analysis - catch errors and return partial result instead of failing
+        let analysis_result = self
             .use_case
             .execute(file_content, ecosystem, filename)
-            .await
-            .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
+            .await;
+
+        let (analysis_report, _dependency_graph) = match analysis_result {
+            Ok(result) => result,
+            Err(e) => {
+                // Analysis failed but we return a result with a warning instead of failing the module
+                let duration = start_time.elapsed();
+                let error_message = e.to_string();
+                tracing::warn!(
+                    error = %error_message,
+                    ecosystem = %ecosystem_str,
+                    "Dependency analysis failed, returning partial result"
+                );
+                return Ok(ModuleResult {
+                    job_id: config.job_id,
+                    module_type: ModuleType::DependencyAnalyzer,
+                    findings: Vec::new(),
+                    metadata: ModuleResultMetadata {
+                        files_scanned: 0,
+                        duration_ms: duration.as_millis() as u64,
+                        additional_info: {
+                            let mut info = std::collections::HashMap::new();
+                            info.insert(
+                                "skip_reason".to_string(),
+                                "Dependency manifest could not be parsed".to_string(),
+                            );
+                            info.insert("analysis_error".to_string(), error_message.clone());
+                            info.insert("ecosystem".to_string(), ecosystem_str.to_string());
+                            info
+                        },
+                    },
+                    error: None,
+                });
+            }
+        };
 
         // Convert vulnerabilities to findings
         let mut findings = Vec::new();

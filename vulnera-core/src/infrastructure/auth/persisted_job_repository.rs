@@ -90,7 +90,10 @@ impl IPersistedJobResultRepository for SqlxPersistedJobResultRepository {
         Ok(())
     }
 
-    async fn find_by_id(&self, job_id: Uuid) -> Result<Option<PersistedJobResult>, OrganizationError> {
+    async fn find_by_id(
+        &self,
+        job_id: Uuid,
+    ) -> Result<Option<PersistedJobResult>, OrganizationError> {
         let row = sqlx::query!(
             r#"
             SELECT job_id, organization_id, user_id, project_id, source_type, source_uri, status,

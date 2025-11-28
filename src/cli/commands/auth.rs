@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::{self, OutputFormat};
-use crate::cli::Cli;
 
 /// Arguments for the auth command
 #[derive(Args, Debug)]
@@ -68,12 +68,14 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
     } else if cli.ci {
         // In CI mode, must be provided via env or args
         ctx.output.error("API key required in CI mode");
-        ctx.output.info("Set VULNERA_API_KEY environment variable or use --api-key");
+        ctx.output
+            .info("Set VULNERA_API_KEY environment variable or use --api-key");
         return Ok(exit_codes::AUTH_REQUIRED);
     } else {
         // Interactive prompt
         ctx.output.info("Enter your Vulnera API key");
-        ctx.output.info("Get one at: https://vulnera.dev/account/api-keys");
+        ctx.output
+            .info("Get one at: https://vulnera.dev/account/api-keys");
 
         match output::password("API Key", false) {
             Ok(key) if !key.is_empty() => key,
@@ -99,7 +101,10 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
 
     if let Err(e) = ctx.credentials.store_api_key(&api_key) {
         ctx.output.error(&format!("Failed to store API key: {}", e));
-        ctx.output.info(&format!("Storage method: {}", ctx.credentials.storage_method()));
+        ctx.output.info(&format!(
+            "Storage method: {}",
+            ctx.credentials.storage_method()
+        ));
         return Ok(exit_codes::INTERNAL_ERROR);
     }
 
@@ -138,7 +143,8 @@ async fn logout(ctx: &CliContext, cli: &Cli) -> Result<i32> {
     }
 
     if let Err(e) = ctx.credentials.delete_api_key() {
-        ctx.output.error(&format!("Failed to remove credentials: {}", e));
+        ctx.output
+            .error(&format!("Failed to remove credentials: {}", e));
         return Ok(exit_codes::INTERNAL_ERROR);
     }
 
@@ -168,14 +174,17 @@ async fn status(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             if authenticated {
                 ctx.output.success("Authenticated");
-                ctx.output.print(&format!("Daily limit: {} requests", status.quota_limit));
+                ctx.output
+                    .print(&format!("Daily limit: {} requests", status.quota_limit));
             } else {
                 ctx.output.warn("Not authenticated");
-                ctx.output.print(&format!("Daily limit: {} requests", status.quota_limit));
+                ctx.output
+                    .print(&format!("Daily limit: {} requests", status.quota_limit));
                 ctx.output.info("Run 'vulnera auth login' to authenticate");
             }
 
-            ctx.output.print(&format!("Storage: {}", status.storage_method));
+            ctx.output
+                .print(&format!("Storage: {}", status.storage_method));
 
             if ctx.is_online() {
                 ctx.output.success("Server connection: OK");
@@ -192,7 +201,8 @@ async fn status(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 async fn info(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
     ctx.output.header("Credential Storage Info");
 
-    ctx.output.print(&format!("Method: {}", ctx.credentials.storage_method()));
+    ctx.output
+        .print(&format!("Method: {}", ctx.credentials.storage_method()));
 
     match ctx.credentials.storage_method() {
         "OS Keyring" => {
@@ -202,7 +212,8 @@ async fn info(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
             #[cfg(target_os = "windows")]
             ctx.output.print("  Windows: Credential Manager");
             #[cfg(target_os = "linux")]
-            ctx.output.print("  Linux: Secret Service (e.g., GNOME Keyring)");
+            ctx.output
+                .print("  Linux: Secret Service (e.g., GNOME Keyring)");
         }
         "Encrypted File" => {
             let dirs = directories::ProjectDirs::from("dev", "vulnera", "vulnera-cli");
@@ -215,7 +226,8 @@ async fn info(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
     }
 
     ctx.output.print("");
-    ctx.output.info("Credentials are never sent over the network unencrypted");
+    ctx.output
+        .info("Credentials are never sent over the network unencrypted");
 
     Ok(exit_codes::SUCCESS)
 }

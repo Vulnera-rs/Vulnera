@@ -427,7 +427,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         );
 
         // Store results in cache if analysis context is available
-        if let (Some(_ctx), Some(path)) = (&self.analysis_context, &file_path) {
+        if let (Some(ctx), Some(path)) = (&self.analysis_context, &file_path) {
             use std::collections::hash_map::DefaultHasher;
             use std::hash::{Hash, Hasher};
             let mut hasher = DefaultHasher::new();

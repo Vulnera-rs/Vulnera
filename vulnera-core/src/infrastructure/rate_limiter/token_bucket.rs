@@ -7,7 +7,9 @@
 //! This allows for bursty traffic while maintaining an average rate limit.
 
 use super::storage::RateLimitStorage;
-use super::types::{current_time_millis, AuthTier, RateLimitKey, RateLimitResult, TokenBucketState};
+use super::types::{
+    AuthTier, RateLimitKey, RateLimitResult, TokenBucketState, current_time_millis,
+};
 use crate::config::TierLimitConfig;
 use std::sync::Arc;
 use tracing::{debug, warn};

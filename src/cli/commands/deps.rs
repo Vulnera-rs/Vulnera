@@ -8,10 +8,10 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
-use crate::cli::Cli;
 
 /// Arguments for the deps command
 #[derive(Args, Debug)]
@@ -122,7 +122,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &DepsArgs) -> Result<i32> {
     };
 
     if !path.exists() {
-        ctx.output.error(&format!("Path does not exist: {:?}", path));
+        ctx.output
+            .error(&format!("Path does not exist: {:?}", path));
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
@@ -132,9 +133,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &DepsArgs) -> Result<i32> {
         ctx.output.info(&format!("Scanning: {:?}", path));
 
         if ctx.offline_mode {
-            ctx.output.warn(
-                "Running in offline mode - vulnerability data may be stale or incomplete",
-            );
+            ctx.output
+                .warn("Running in offline mode - vulnerability data may be stale or incomplete");
         }
     }
 
@@ -178,7 +178,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &DepsArgs) -> Result<i32> {
             p.finish_and_clear();
         }
         ctx.output.warn("No supported package manifest found");
-        ctx.output.info("Supported: package.json, Cargo.toml, requirements.txt, pom.xml, go.mod");
+        ctx.output
+            .info("Supported: package.json, Cargo.toml, requirements.txt, pom.xml, go.mod");
         return Ok(exit_codes::SUCCESS);
     }
 
@@ -266,12 +267,7 @@ fn detect_package_manager(path: &PathBuf) -> (Option<String>, Option<String>) {
 }
 
 /// Output dependency analysis results
-fn output_results(
-    ctx: &CliContext,
-    cli: &Cli,
-    result: &DepsResult,
-    args: &DepsArgs,
-) -> Result<()> {
+fn output_results(ctx: &CliContext, cli: &Cli, result: &DepsResult, args: &DepsArgs) -> Result<()> {
     match ctx.output.format() {
         OutputFormat::Json => {
             ctx.output.json(result)?;

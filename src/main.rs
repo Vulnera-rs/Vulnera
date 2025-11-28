@@ -20,16 +20,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Server mode is started via `vulnera-rust serve` or when no args provided
         // and VULNERA_SERVER_MODE env is set
         let args: Vec<String> = std::env::args().collect();
-        
+
         // If VULNERA_SERVER_MODE is set, run as server
         if std::env::var("VULNERA_SERVER_MODE").is_ok() {
             return run_server().await;
         }
-        
+
         // If no arguments or just help flags, run CLI (clap will handle --help)
         // If "serve" subcommand is provided, run server
         let is_server_mode = args.len() > 1 && args[1] == "serve";
-        
+
         if !is_server_mode {
             return run_cli().await;
         }

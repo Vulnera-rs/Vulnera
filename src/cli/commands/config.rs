@@ -8,10 +8,10 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::OutputFormat;
-use crate::cli::Cli;
 
 /// Arguments for the config command
 #[derive(Args, Debug)]
@@ -93,8 +93,10 @@ async fn show_config(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             // Server settings
             ctx.output.print("\n[Server]");
-            ctx.output.print(&format!("  host: {}", ctx.config.server.host));
-            ctx.output.print(&format!("  port: {}", ctx.config.server.port));
+            ctx.output
+                .print(&format!("  host: {}", ctx.config.server.host));
+            ctx.output
+                .print(&format!("  port: {}", ctx.config.server.port));
 
             // Analysis settings
             ctx.output.print("\n[Analysis]");
@@ -112,7 +114,10 @@ async fn show_config(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             // Rate limit settings
             ctx.output.print("\n[Rate Limits]");
-            ctx.output.print(&format!("  enabled: {}", ctx.config.server.rate_limit.enabled));
+            ctx.output.print(&format!(
+                "  enabled: {}",
+                ctx.config.server.rate_limit.enabled
+            ));
             ctx.output.print(&format!(
                 "  storage_backend: {:?}",
                 ctx.config.server.rate_limit.storage_backend
@@ -120,7 +125,12 @@ async fn show_config(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
             ctx.output.print("\n  API Key tier:");
             ctx.output.print(&format!(
                 "    requests_per_minute: {}",
-                ctx.config.server.rate_limit.tiers.api_key.requests_per_minute
+                ctx.config
+                    .server
+                    .rate_limit
+                    .tiers
+                    .api_key
+                    .requests_per_minute
             ));
             ctx.output.print(&format!(
                 "    requests_per_hour: {}",
@@ -129,12 +139,22 @@ async fn show_config(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
             ctx.output.print("\n  Authenticated tier:");
             ctx.output.print(&format!(
                 "    requests_per_minute: {}",
-                ctx.config.server.rate_limit.tiers.authenticated.requests_per_minute
+                ctx.config
+                    .server
+                    .rate_limit
+                    .tiers
+                    .authenticated
+                    .requests_per_minute
             ));
             ctx.output.print("\n  Anonymous tier:");
             ctx.output.print(&format!(
                 "    requests_per_minute: {}",
-                ctx.config.server.rate_limit.tiers.anonymous.requests_per_minute
+                ctx.config
+                    .server
+                    .rate_limit
+                    .tiers
+                    .anonymous
+                    .requests_per_minute
             ));
         }
     }
@@ -152,7 +172,8 @@ async fn show_path(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
     for (i, path) in config_paths.iter().enumerate() {
         let exists = path.exists();
         let marker = if exists { "✓" } else { " " };
-        ctx.output.print(&format!("  {} {}. {:?}", marker, i + 1, path));
+        ctx.output
+            .print(&format!("  {} {}. {:?}", marker, i + 1, path));
     }
 
     ctx.output.print("\nEnvironment variables:");
@@ -165,7 +186,8 @@ async fn show_path(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 /// Set a configuration value
 async fn set_config(ctx: &CliContext, _cli: &Cli, args: &SetArgs) -> Result<i32> {
     ctx.output.warn("Config modification not yet implemented");
-    ctx.output.info(&format!("Would set {} = {}", args.key, args.value));
+    ctx.output
+        .info(&format!("Would set {} = {}", args.key, args.value));
 
     // TODO: Implement config modification
     // 1. Load config file (or create new one)
@@ -188,7 +210,8 @@ async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32>
         match current.get(part) {
             Some(v) => current = v,
             None => {
-                ctx.output.error(&format!("Configuration key not found: {}", args.key));
+                ctx.output
+                    .error(&format!("Configuration key not found: {}", args.key));
                 return Ok(exit_codes::CONFIG_ERROR);
             }
         }
@@ -209,11 +232,8 @@ async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32>
 /// Reset configuration to defaults
 async fn reset_config(ctx: &CliContext, cli: &Cli) -> Result<i32> {
     if !cli.ci {
-        let confirm = crate::cli::output::confirm(
-            "Reset configuration to defaults?",
-            false,
-            cli.ci,
-        )?;
+        let confirm =
+            crate::cli::output::confirm("Reset configuration to defaults?", false, cli.ci)?;
         if !confirm {
             ctx.output.info("Reset cancelled");
             return Ok(exit_codes::SUCCESS);
@@ -287,7 +307,8 @@ dragonfly_url = "redis://127.0.0.1:6379"
 
     std::fs::write(&config_path, default_config)?;
 
-    ctx.output.success(&format!("Created configuration file: {:?}", config_path));
+    ctx.output
+        .success(&format!("Created configuration file: {:?}", config_path));
     ctx.output.info("Edit this file to customize your settings");
 
     Ok(exit_codes::SUCCESS)

@@ -9,10 +9,10 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
-use crate::cli::Cli;
 
 /// Arguments for the api command
 #[derive(Args, Debug)]
@@ -105,7 +105,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &ApiArgs) -> Result<i32> {
     };
 
     if !path.exists() {
-        ctx.output.error(&format!("Path does not exist: {:?}", path));
+        ctx.output
+            .error(&format!("Path does not exist: {:?}", path));
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
@@ -124,7 +125,10 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &ApiArgs) -> Result<i32> {
 
     // Detect or use specified spec file
     let spec_file = args.spec.clone().or_else(|| find_openapi_spec(&path));
-    let framework = args.framework.clone().or_else(|| detect_api_framework(&path));
+    let framework = args
+        .framework
+        .clone()
+        .or_else(|| detect_api_framework(&path));
 
     let mut result = ApiResult {
         path: path.clone(),
@@ -153,8 +157,10 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &ApiArgs) -> Result<i32> {
         if let Some(p) = progress {
             p.finish_and_clear();
         }
-        ctx.output.warn("No API specification or supported framework detected");
-        ctx.output.info("Supported: OpenAPI/Swagger, Express, Flask, FastAPI, Axum, Django REST");
+        ctx.output
+            .warn("No API specification or supported framework detected");
+        ctx.output
+            .info("Supported: OpenAPI/Swagger, Express, Flask, FastAPI, Axum, Django REST");
         return Ok(exit_codes::SUCCESS);
     }
 
@@ -301,10 +307,8 @@ fn output_results(ctx: &CliContext, cli: &Cli, result: &ApiResult) -> Result<()>
             if let Some(s) = &result.spec_file {
                 ctx.output.info(&format!("Spec file: {}", s));
             }
-            ctx.output.print(&format!(
-                "Endpoints analyzed: {}",
-                result.endpoints_found
-            ));
+            ctx.output
+                .print(&format!("Endpoints analyzed: {}", result.endpoints_found));
 
             if result.findings.is_empty() {
                 ctx.output.success("No API security issues found!");

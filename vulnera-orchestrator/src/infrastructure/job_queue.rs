@@ -175,17 +175,18 @@ async fn process_job(
     info!(job_id = %job_id, "Processing analysis job");
 
     // Determine analytics subject from invocation context
-    let analytics_subject = payload
-        .invocation_context
-        .as_ref()
-        .and_then(|ctx| {
-            // Prefer organization_id if present, otherwise use user_id for personal stats
-            if let Some(org_id) = ctx.organization_id {
-                Some(StatsSubject::Organization(org_id))
-            } else {
-                ctx.user_id.map(StatsSubject::User)
-            }
-        });
+    let analytics_subject = payload.invocation_context.as_ref().and_then(|ctx| {
+        // Skip analytics for master key authentication
+        if ctx.is_master_key {
+            return None;
+        }
+        // Prefer organization_id if present, otherwise use user_id for personal stats
+        if let Some(org_id) = ctx.organization_id {
+            Some(StatsSubject::Organization(org_id))
+        } else {
+            ctx.user_id.map(StatsSubject::User)
+        }
+    });
 
     let user_id = payload
         .invocation_context
@@ -267,7 +268,7 @@ async fn process_job(
                     error: None,
                     completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
                 };
-                
+
                 deliver_webhook(
                     callback_url,
                     payload.webhook_secret.as_deref(),
@@ -313,7 +314,11 @@ async fn process_job(
                         subject.clone(),
                         user_id,
                         job_id,
-                        0, 0, 0, 0, 0, // No findings on failure
+                        0,
+                        0,
+                        0,
+                        0,
+                        0, // No findings on failure
                     )
                     .await
                 {
@@ -331,7 +336,7 @@ async fn process_job(
                     error: payload.job.error.clone(),
                     completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
                 };
-                
+
                 deliver_webhook(
                     callback_url,
                     payload.webhook_secret.as_deref(),
@@ -386,18 +391,22 @@ pub struct WebhookPayload {
 }
 
 /// Deliver webhook to callback URL with optional HMAC-SHA256 signature.
-/// 
+///
 /// # Headers
 /// - `Content-Type: application/json`
 /// - `X-Vulnera-Event: job.completed`
 /// - `X-Vulnera-Timestamp: <unix_timestamp>` (for replay protection)
 /// - `X-Vulnera-Signature: sha256=<hex_signature>` (if webhook_secret provided)
-/// 
+///
 /// The signature is computed as: HMAC-SHA256(timestamp + "." + payload_json, secret)
-async fn deliver_webhook(callback_url: &str, webhook_secret: Option<&str>, payload: &WebhookPayload) {
+async fn deliver_webhook(
+    callback_url: &str,
+    webhook_secret: Option<&str>,
+    payload: &WebhookPayload,
+) {
     let job_id = payload.job_id;
     let timestamp = Utc::now().timestamp();
-    
+
     // Serialize payload
     let payload_json = match serde_json::to_string(payload) {
         Ok(json) => json,
