@@ -85,7 +85,7 @@ cache_extension_results = true     # Cache results for faster repeated analysis
 [sync]
 # Background vulnerability data synchronization
 enabled = true
-interval_hours = 6            # Re-sync every 6 hours
+interval_hours = 8            # Re-sync every 8 hours (GHSA, OSV, NVD)
 on_startup = true             # Sync immediately on server start
 shutdown_timeout_seconds = 30 # Max wait time for sync task on shutdown
 

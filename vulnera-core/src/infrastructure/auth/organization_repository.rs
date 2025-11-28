@@ -32,7 +32,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, owner_id, name, description, created_at, updated_at
+            SELECT id, owner_id, parent_id, name, description, created_at, updated_at
             FROM organizations
             WHERE id = $1
             "#,
@@ -51,6 +51,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
             Some(row) => Ok(Some(Organization::with_id(
                 OrganizationId::from(row.id),
                 UserId::from(row.owner_id),
+                row.parent_id.map(OrganizationId::from),
                 row.name,
                 row.description,
                 row.created_at,
@@ -69,7 +70,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, owner_id, name, description, created_at, updated_at
+            SELECT id, owner_id, parent_id, name, description, created_at, updated_at
             FROM organizations
             WHERE owner_id = $1 AND name = $2
             "#,
@@ -92,6 +93,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
             Some(row) => Ok(Some(Organization::with_id(
                 OrganizationId::from(row.id),
                 UserId::from(row.owner_id),
+                row.parent_id.map(OrganizationId::from),
                 row.name,
                 row.description,
                 row.created_at,
@@ -109,7 +111,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
 
         let rows = sqlx::query!(
             r#"
-            SELECT id, owner_id, name, description, created_at, updated_at
+            SELECT id, owner_id, parent_id, name, description, created_at, updated_at
             FROM organizations
             WHERE owner_id = $1
             ORDER BY created_at DESC
@@ -131,6 +133,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
                 Organization::with_id(
                     OrganizationId::from(row.id),
                     UserId::from(row.owner_id),
+                    row.parent_id.map(OrganizationId::from),
                     row.name,
                     row.description,
                     row.created_at,
@@ -143,14 +146,16 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
     async fn create(&self, org: &Organization) -> Result<(), OrganizationError> {
         let org_uuid = org.id.as_uuid();
         let owner_uuid = org.owner_id.as_uuid();
+        let parent_uuid = org.parent_id.map(|p| p.as_uuid());
 
         sqlx::query!(
             r#"
-            INSERT INTO organizations (id, owner_id, name, description, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO organizations (id, owner_id, parent_id, name, description, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
             org_uuid,
             owner_uuid,
+            parent_uuid,
             org.name,
             org.description,
             org.created_at,
@@ -178,16 +183,18 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
     async fn update(&self, org: &Organization) -> Result<(), OrganizationError> {
         let org_uuid = org.id.as_uuid();
         let owner_uuid = org.owner_id.as_uuid();
+        let parent_uuid = org.parent_id.map(|p| p.as_uuid());
         let updated_at = chrono::Utc::now();
 
         let result = sqlx::query!(
             r#"
             UPDATE organizations
-            SET owner_id = $2, name = $3, description = $4, updated_at = $5
+            SET owner_id = $2, parent_id = $3, name = $4, description = $5, updated_at = $6
             WHERE id = $1
             "#,
             org_uuid,
             owner_uuid,
+            parent_uuid,
             org.name,
             org.description,
             updated_at
@@ -252,7 +259,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
     ) -> Result<Vec<Organization>, OrganizationError> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, owner_id, name, description, created_at, updated_at
+            SELECT id, owner_id, parent_id, name, description, created_at, updated_at
             FROM organizations
             ORDER BY created_at DESC
             OFFSET $1
@@ -276,6 +283,7 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
                 Organization::with_id(
                     OrganizationId::from(row.id),
                     UserId::from(row.owner_id),
+                    row.parent_id.map(OrganizationId::from),
                     row.name,
                     row.description,
                     row.created_at,

@@ -77,13 +77,32 @@ pub async fn get_dashboard_stats(
     let now = Utc::now();
     let current_month = format!("{:04}-{:02}", now.year(), now.month());
 
-    // Extract stats from current month data
+    // Extract stats from current and previous month data
     let stats = overview.current_month_stats.clone().unwrap_or_default();
+    let prev_stats = overview.previous_month_stats.as_ref();
 
-    // TODO: Calculate trends from previous month
-    // For now, return None for trends
-    let scans_trend_percent = None;
-    let findings_trend_percent = None;
+    // Calculate trends from previous month (MoM percentage change)
+    // Formula: ((current - previous) / previous) * 100
+    // Returns None if previous month has 0 (avoid division by zero)
+    let scans_trend_percent = prev_stats.and_then(|prev| {
+        if prev.scans_completed > 0 {
+            let current = stats.scans_completed as f64;
+            let previous = prev.scans_completed as f64;
+            Some(((current - previous) / previous) * 100.0)
+        } else {
+            None
+        }
+    });
+
+    let findings_trend_percent = prev_stats.and_then(|prev| {
+        if prev.findings_count > 0 {
+            let current = stats.findings_count as f64;
+            let previous = prev.findings_count as f64;
+            Some(((current - previous) / previous) * 100.0)
+        } else {
+            None
+        }
+    });
 
     Ok(Json(DashboardStatsResponse {
         organization_id: id,
