@@ -15,12 +15,15 @@ use super::value_objects::{
 ///
 /// Represents a team organization for grouping users and tracking usage/analytics.
 /// Each organization has exactly one owner (who has full control) and zero or more members.
+/// Organizations can be hierarchical - a child org can inherit settings from its parent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
     /// Unique organization identifier
     pub id: OrganizationId,
     /// User who owns this organization (has full control)
     pub owner_id: UserId,
+    /// Parent organization for hierarchical inheritance (None for root orgs)
+    pub parent_id: Option<OrganizationId>,
     /// Organization display name
     pub name: String,
     /// Optional description
@@ -41,6 +44,22 @@ impl Organization {
         Self {
             id: OrganizationId::generate(),
             owner_id,
+            parent_id: None,
+            name: name.into_string(),
+            description: None,
+            members: Vec::new(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a new child organization under a parent
+    pub fn new_child(owner_id: UserId, name: OrganizationName, parent_id: OrganizationId) -> Self {
+        let now = Utc::now();
+        Self {
+            id: OrganizationId::generate(),
+            owner_id,
+            parent_id: Some(parent_id),
             name: name.into_string(),
             description: None,
             members: Vec::new(),
@@ -53,6 +72,7 @@ impl Organization {
     pub fn with_id(
         id: OrganizationId,
         owner_id: UserId,
+        parent_id: Option<OrganizationId>,
         name: String,
         description: Option<String>,
         created_at: DateTime<Utc>,
@@ -61,6 +81,7 @@ impl Organization {
         Self {
             id,
             owner_id,
+            parent_id,
             name,
             description,
             members: Vec::new(),

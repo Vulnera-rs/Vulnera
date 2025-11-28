@@ -32,6 +32,11 @@ pub fn application_error_to_response(error: ApplicationError) -> Response {
             "DOMAIN_ERROR",
             "Invalid input provided",
         ),
+        ApplicationError::Authentication(_) => (
+            StatusCode::UNAUTHORIZED,
+            "AUTHENTICATION_ERROR",
+            "Authentication failed",
+        ),
         ApplicationError::RateLimited { .. } => (
             StatusCode::TOO_MANY_REQUESTS,
             "RATE_LIMITED",
@@ -550,7 +555,7 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
         return (
             Some(auth.user_id.into()),
             auth.api_key_id.map(|id| id.into()),
-            false, // TODO: Add org membership check when organization field is added to Auth
+            auth.organization_id.is_some(), // Use actual org membership
         );
     }
 
@@ -568,7 +573,7 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
         return (
             Some(auth_user.user_id.into()),
             None,  // Cookie auth doesn't use API keys
-            false, // TODO: Add org membership check
+            false, // Cookie auth doesn't carry org info currently
         );
     }
 
