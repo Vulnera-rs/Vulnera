@@ -153,6 +153,7 @@ impl AnalyticsAggregationService {
     }
 
     /// Internal helper to add findings based on subject type
+    /// Note: When subject is Organization, we also track personal stats for the user if available
     async fn add_findings_for_subject(
         &self,
         subject: &StatsSubject,
@@ -165,6 +166,7 @@ impl AnalyticsAggregationService {
     ) -> Result<(), OrganizationError> {
         match subject {
             StatsSubject::Organization(org_id) => {
+                // Always track at organization level
                 self.org_stats_repository
                     .add_findings(org_id, year_month, critical, high, medium, low, info)
                     .await
@@ -197,6 +199,7 @@ impl AnalyticsAggregationService {
     }
 
     /// Records scan completion with findings breakdown
+    /// When subject is Organization, also tracks personal stats if user_id is available
     #[instrument(skip(self), fields(subject = %subject, job_id = %job_id))]
     pub async fn record_scan_completed(
         &self,
@@ -221,7 +224,7 @@ impl AnalyticsAggregationService {
         // Record the event
         self.record_analysis_event(
             subject.clone(),
-            user_id,
+            user_id.clone(),
             job_id,
             AnalysisEventType::JobCompleted,
             metadata,
@@ -240,6 +243,32 @@ impl AnalyticsAggregationService {
             findings_info,
         )
         .await?;
+
+        // Also track personal stats when subject is organization and user_id is available
+        if let (StatsSubject::Organization(_), Some(user)) = (&subject, &user_id) {
+            if self.enable_user_level_tracking {
+                if let Err(e) = self
+                    .add_findings_for_subject(
+                        &StatsSubject::User(user.clone()),
+                        &year_month,
+                        findings_critical,
+                        findings_high,
+                        findings_medium,
+                        findings_low,
+                        findings_info,
+                    )
+                    .await
+                {
+                    // Log but don't fail - personal stats are secondary
+                    tracing::warn!(
+                        job_id = %job_id,
+                        user_id = %user,
+                        error = %e,
+                        "Failed to record personal stats (non-fatal)"
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
