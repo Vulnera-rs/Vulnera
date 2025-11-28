@@ -182,12 +182,24 @@ pub async fn analyze(
         AuthMethod::ApiKey => (JobAuthStrategy::ApiKey, auth.api_key_id),
     };
 
+    // Fetch user's organization for analytics tracking
+    let organization_id = if !auth.is_master_key {
+        state
+            .list_user_organizations_use_case
+            .execute(auth.user_id.clone())
+            .await
+            .ok()
+            .and_then(|orgs| orgs.first().map(|org| org.id.clone()))
+    } else {
+        None
+    };
+
     let invocation_context = JobInvocationContext {
         user_id: Some(auth.user_id),
         email: Some(auth.email.clone()),
         auth_strategy: Some(auth_strategy),
         api_key_id,
-        organization_id: None, // TODO: Fetch user's organization when needed
+        organization_id,
         is_master_key: auth.is_master_key,
     };
     let callback_url = request.callback_url.clone();
