@@ -9,6 +9,28 @@ use crate::domain::vulnerability::{
 use async_trait::async_trait;
 use serde_json::Value;
 
+/// Check if a version string is a URL-based or non-semver dependency that cannot be scanned.
+fn is_non_semver_version(version_str: &str) -> bool {
+    let v = version_str.trim();
+    v.starts_with("git+")
+        || v.starts_with("git://")
+        || v.starts_with("http://")
+        || v.starts_with("https://")
+        || v.starts_with("file:")
+        || v.starts_with("link:")
+        || v.starts_with("workspace:")
+        || v.starts_with("npm:")
+        || v.starts_with("github:")
+        || v.starts_with("gitlab:")
+        || v.starts_with("bitbucket:")
+        || v.contains("://") // catch-all for URLs
+        || (v.contains('/') && v.contains('#')) // github shorthand: user/repo#ref
+        || v == "."
+        || v == ".."
+        || v.starts_with("./")
+        || v.starts_with("../")
+}
+
 /// Parser for package.json files
 pub struct NpmParser;
 
@@ -40,6 +62,12 @@ impl NpmParser {
                         .ok_or_else(|| ParseError::MissingField {
                             field: format!("version for package {}", name),
                         })?;
+
+                // Skip non-semver dependencies (git, tarball, path, file URLs, workspace refs, etc.)
+                // These are valid npm specifiers but not scannable for vulnerabilities
+                if is_non_semver_version(version_str) {
+                    continue;
+                }
 
                 // Clean version string (remove npm-specific prefixes like ^, ~, >=, etc.)
                 let clean_version = self.clean_version_string(version_str)?;
@@ -185,6 +213,12 @@ impl PackageLockParser {
         if let Some(deps_obj) = deps.as_object() {
             for (key, dep_info) in deps_obj {
                 if let Some(version_str) = dep_info.get("version").and_then(|v| v.as_str()) {
+                    // Skip non-semver dependencies (git, tarball, path, file URLs, workspace refs, etc.)
+                    // These are valid npm specifiers but not scannable for vulnerabilities
+                    if is_non_semver_version(version_str) {
+                        continue;
+                    }
+
                     let version = Version::parse(version_str).map_err(|_| ParseError::Version {
                         version: version_str.to_string(),
                     })?;
@@ -522,6 +556,167 @@ impl PackageFileParser for YarnLockParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_non_semver_version() {
+        // URL-based versions should be detected
+        assert!(is_non_semver_version(
+            "https://github.com/user/repo/tarball/master"
+        ));
+        assert!(is_non_semver_version("http://example.com/package.tgz"));
+        assert!(is_non_semver_version(
+            "git+https://github.com/user/repo.git"
+        ));
+        assert!(is_non_semver_version("git://github.com/user/repo.git"));
+        assert!(is_non_semver_version(
+            "git+ssh://git@github.com/user/repo.git"
+        ));
+
+        // File/path references should be detected
+        assert!(is_non_semver_version("file:../local-package"));
+        assert!(is_non_semver_version("file:./local-package"));
+        assert!(is_non_semver_version("./local-package"));
+        assert!(is_non_semver_version("../local-package"));
+        assert!(is_non_semver_version("."));
+        assert!(is_non_semver_version(".."));
+
+        // Workspace/link references should be detected
+        assert!(is_non_semver_version("workspace:*"));
+        assert!(is_non_semver_version("workspace:^"));
+        assert!(is_non_semver_version("link:./packages/pkg"));
+
+        // npm aliases should be detected
+        assert!(is_non_semver_version("npm:actual-package@1.0.0"));
+
+        // GitHub/GitLab/Bitbucket shorthand should be detected
+        assert!(is_non_semver_version("github:user/repo"));
+        assert!(is_non_semver_version("gitlab:user/repo"));
+        assert!(is_non_semver_version("bitbucket:user/repo"));
+        assert!(is_non_semver_version("user/repo#branch")); // GitHub shorthand with ref
+
+        // Valid semver versions should NOT be detected as non-semver
+        assert!(!is_non_semver_version("1.0.0"));
+        assert!(!is_non_semver_version("^1.0.0"));
+        assert!(!is_non_semver_version("~1.0.0"));
+        assert!(!is_non_semver_version(">=1.0.0"));
+        assert!(!is_non_semver_version("1.0.0-alpha.1"));
+        assert!(!is_non_semver_version("*"));
+        assert!(!is_non_semver_version("latest"));
+    }
+
+    #[tokio::test]
+    async fn test_npm_parser_skips_url_dependencies() {
+        let parser = NpmParser::new();
+        let content = r#"
+        {
+            "name": "test-package",
+            "version": "1.0.0",
+            "dependencies": {
+                "express": "^4.17.1",
+                "tarball-pkg": "https://github.com/user/repo/tarball/master",
+                "git-pkg": "git+https://github.com/user/repo.git",
+                "file-pkg": "file:../local-package",
+                "path-pkg": "./local-package",
+                "lodash": "~4.17.21"
+            }
+        }
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+        // Should only have express and lodash, URL-based deps should be skipped
+        assert_eq!(result.packages.len(), 2);
+
+        let names: Vec<&str> = result.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"express"));
+        assert!(names.contains(&"lodash"));
+        assert!(!names.contains(&"tarball-pkg"));
+        assert!(!names.contains(&"git-pkg"));
+        assert!(!names.contains(&"file-pkg"));
+        assert!(!names.contains(&"path-pkg"));
+    }
+
+    #[tokio::test]
+    async fn test_package_lock_parser_skips_url_versions() {
+        let parser = PackageLockParser::new();
+        let content = r#"
+        {
+            "name": "test-package",
+            "version": "1.0.0",
+            "lockfileVersion": 3,
+            "packages": {
+                "": {
+                    "name": "test-package",
+                    "version": "1.0.0"
+                },
+                "node_modules/express": {
+                    "version": "4.17.1",
+                    "resolved": "https://registry.npmjs.org/express/-/express-4.17.1.tgz"
+                },
+                "node_modules/tarball-pkg": {
+                    "version": "https://github.com/user/repo/tarball/master"
+                },
+                "node_modules/git-pkg": {
+                    "version": "git+https://github.com/user/repo.git#v1.0.0"
+                },
+                "node_modules/workspace-pkg": {
+                    "version": "workspace:*"
+                },
+                "node_modules/lodash": {
+                    "version": "4.17.21",
+                    "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"
+                }
+            }
+        }
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+        // Should only have test-package, express, and lodash - URL-based versions should be skipped
+        assert_eq!(result.packages.len(), 3);
+
+        let names: Vec<&str> = result.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"test-package"));
+        assert!(names.contains(&"express"));
+        assert!(names.contains(&"lodash"));
+        assert!(!names.contains(&"tarball-pkg"));
+        assert!(!names.contains(&"git-pkg"));
+        assert!(!names.contains(&"workspace-pkg"));
+    }
+
+    #[tokio::test]
+    async fn test_package_lock_v1_skips_url_versions() {
+        // Test lockfileVersion 1 format where URL is directly in the "version" field
+        let parser = PackageLockParser::new();
+        let content = r#"
+        {
+            "name": "test-package",
+            "version": "1.0.0",
+            "lockfileVersion": 1,
+            "dependencies": {
+                "express": {
+                    "version": "4.17.1",
+                    "resolved": "https://registry.npmjs.org/express/-/express-4.17.1.tgz"
+                },
+                "grunt-if": {
+                    "version": "https://github.com/binarymist/grunt-if/tarball/master",
+                    "from": "grunt-if@https://github.com/binarymist/grunt-if/tarball/master"
+                },
+                "lodash": {
+                    "version": "4.17.21",
+                    "resolved": "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz"
+                }
+            }
+        }
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+        // Should only have express and lodash - grunt-if with URL version should be skipped
+        assert_eq!(result.packages.len(), 2);
+
+        let names: Vec<&str> = result.packages.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"express"));
+        assert!(names.contains(&"lodash"));
+        assert!(!names.contains(&"grunt-if"));
+    }
 
     #[tokio::test]
     async fn test_npm_parser_package_json() {

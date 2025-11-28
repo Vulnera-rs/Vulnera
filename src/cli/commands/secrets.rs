@@ -9,10 +9,10 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
-use crate::cli::Cli;
 
 /// Arguments for the secrets command
 #[derive(Args, Debug)]
@@ -113,7 +113,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
     };
 
     if !path.exists() {
-        ctx.output.error(&format!("Path does not exist: {:?}", path));
+        ctx.output
+            .error(&format!("Path does not exist: {:?}", path));
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
@@ -204,10 +205,8 @@ fn output_results(ctx: &CliContext, cli: &Cli, result: &SecretsResult) -> Result
             ctx.output.vulnerabilities(&result.findings)?;
         }
         OutputFormat::Table | OutputFormat::Plain => {
-            ctx.output.print(&format!(
-                "Files scanned: {}",
-                result.summary.files_scanned
-            ));
+            ctx.output
+                .print(&format!("Files scanned: {}", result.summary.files_scanned));
 
             if result.findings.is_empty() {
                 ctx.output.success("No secrets detected!");

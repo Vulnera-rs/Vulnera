@@ -37,6 +37,9 @@ pub struct JobInvocationContext {
     pub api_key_id: Option<ApiKeyId>,
     /// Organization context for the job (if user is part of an organization)
     pub organization_id: Option<OrganizationId>,
+    /// Whether this job was triggered via master key (skip analytics)
+    #[serde(default)]
+    pub is_master_key: bool,
 }
 
 /// Project metadata

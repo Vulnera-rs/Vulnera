@@ -698,11 +698,9 @@ fn map_organization_error(
             "NAME_EXISTS",
             format!("Organization name '{}' already exists", name),
         ),
-        OrganizationError::InvalidName { reason } => (
-            StatusCode::BAD_REQUEST,
-            "INVALID_NAME",
-            reason.clone(),
-        ),
+        OrganizationError::InvalidName { reason } => {
+            (StatusCode::BAD_REQUEST, "INVALID_NAME", reason.clone())
+        }
         OrganizationError::NotAMember { user_id, .. } => (
             StatusCode::FORBIDDEN,
             "NOT_A_MEMBER",
@@ -731,17 +729,26 @@ fn map_organization_error(
         OrganizationError::MemberLimitExceeded { limit } => (
             StatusCode::PAYMENT_REQUIRED,
             "MEMBER_LIMIT_EXCEEDED",
-            format!("Member limit exceeded. Current tier allows {} members.", limit),
+            format!(
+                "Member limit exceeded. Current tier allows {} members.",
+                limit
+            ),
         ),
         OrganizationError::ScanLimitExceeded { used, limit } => (
             StatusCode::PAYMENT_REQUIRED,
             "SCAN_LIMIT_EXCEEDED",
-            format!("Monthly scan limit exceeded. Used {}/{} scans.", used, limit),
+            format!(
+                "Monthly scan limit exceeded. Used {}/{} scans.",
+                used, limit
+            ),
         ),
         OrganizationError::ApiCallLimitExceeded { used, limit } => (
             StatusCode::PAYMENT_REQUIRED,
             "API_CALL_LIMIT_EXCEEDED",
-            format!("Monthly API call limit exceeded. Used {}/{} calls.", used, limit),
+            format!(
+                "Monthly API call limit exceeded. Used {}/{} calls.",
+                used, limit
+            ),
         ),
         OrganizationError::DatabaseError { message } => (
             StatusCode::INTERNAL_SERVER_ERROR,

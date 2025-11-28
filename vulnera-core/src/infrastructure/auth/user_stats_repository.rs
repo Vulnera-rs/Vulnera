@@ -6,10 +6,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::domain::organization::{
-    entities::UserStatsMonthly,
-    errors::OrganizationError,
-    repositories::IUserStatsMonthlyRepository,
-    value_objects::OrganizationId,
+    entities::UserStatsMonthly, errors::OrganizationError,
+    repositories::IUserStatsMonthlyRepository, value_objects::OrganizationId,
 };
 
 /// SQLx implementation of User Stats Monthly repository

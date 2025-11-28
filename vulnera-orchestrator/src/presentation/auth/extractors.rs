@@ -44,6 +44,7 @@ pub struct Auth {
     pub roles: Vec<UserRole>,
     pub auth_method: AuthMethod,
     pub api_key_id: Option<ApiKeyId>,
+    pub is_master_key: bool,
 }
 
 /// State for authentication extractors
@@ -237,6 +238,7 @@ where
                         roles,
                         auth_method: AuthMethod::Cookie,
                         api_key_id: None,
+                        is_master_key: false,
                     });
                 }
                 Err(_) => {
@@ -247,6 +249,32 @@ where
 
         // Try X-API-Key header (for programmatic access)
         if let Some(api_key) = parts.headers.get("X-API-Key").and_then(|h| h.to_str().ok()) {
+            // Check if this is the master API key (dev/extension use)
+            if vulnera_core::infrastructure::auth::is_master_key(api_key) {
+                // Create a synthetic master user with admin privileges
+                let master_user_id = vulnera_core::domain::auth::value_objects::UserId::generate();
+                let master_email = vulnera_core::domain::auth::value_objects::Email::new(
+                    "master@vulnera.local".to_string(),
+                )
+                .unwrap_or_else(|_| {
+                    vulnera_core::domain::auth::value_objects::Email::new(
+                        "master@local".to_string(),
+                    )
+                    .unwrap()
+                });
+
+                tracing::info!("Master API key authenticated from {:?}", parts.uri);
+
+                return Ok(Auth {
+                    user_id: master_user_id,
+                    email: master_email,
+                    roles: vec![vulnera_core::domain::auth::value_objects::UserRole::Admin],
+                    auth_method: AuthMethod::ApiKey,
+                    api_key_id: None,
+                    is_master_key: true,
+                });
+            }
+
             match auth_state.validate_api_key.execute(api_key).await {
                 Ok(validation) => {
                     let user_id = validation.user_id;
@@ -273,6 +301,7 @@ where
                         roles: user.roles,
                         auth_method: AuthMethod::ApiKey,
                         api_key_id: Some(validation.api_key_id),
+                        is_master_key: false,
                     });
                 }
                 Err(e) => {

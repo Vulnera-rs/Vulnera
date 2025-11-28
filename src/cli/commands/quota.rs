@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::OutputFormat;
-use crate::cli::Cli;
 
 /// Arguments for the quota command
 #[derive(Args, Debug)]
@@ -86,7 +86,8 @@ async fn show_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
             );
 
             ctx.output.print(&format!("Usage: {}", bar));
-            ctx.output.print(&format!("Remaining: {} requests", status.remaining));
+            ctx.output
+                .print(&format!("Remaining: {} requests", status.remaining));
             ctx.output.print(&format!(
                 "Resets in: {}h {}m (UTC midnight)",
                 info.reset_hours, info.reset_minutes
@@ -95,8 +96,10 @@ async fn show_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
             if status.is_authenticated {
                 ctx.output.print("Account: Authenticated (40 requests/day)");
             } else {
-                ctx.output.print("Account: Unauthenticated (10 requests/day)");
-                ctx.output.info("Tip: Run 'vulnera auth login' for 40 requests/day");
+                ctx.output
+                    .print("Account: Unauthenticated (10 requests/day)");
+                ctx.output
+                    .info("Tip: Run 'vulnera auth login' for 40 requests/day");
             }
 
             if let Some(sync_time) = &status.last_sync {
@@ -126,7 +129,8 @@ async fn sync_quota(ctx: &CliContext, cli: &Cli) -> Result<i32> {
 
     if ctx.cache.is_none() {
         ctx.output.error("No connection to Vulnera server");
-        ctx.output.info("Check your network connection and server configuration");
+        ctx.output
+            .info("Check your network connection and server configuration");
         return Ok(exit_codes::NETWORK_ERROR);
     }
 
