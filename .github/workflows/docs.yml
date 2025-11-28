@@ -33,16 +33,8 @@ jobs:
               with:
                   mdbook-version: "latest"
 
-            - name: Install mdBook plugins
-              run: |
-                  cargo install mdbook-mermaid --locked
-                  cargo install mdbook-toc --locked
-
             - name: Build documentation
-              run: |
-                  cd docs
-                  mdbook-mermaid install .
-                  mdbook build
+              run: mdbook build docs
 
             - name: Upload artifact
               uses: actions/upload-pages-artifact@v3
