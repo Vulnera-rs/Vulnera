@@ -1,0 +1,44 @@
+[book]
+title = "Vulnera Documentation"
+authors = [
+    "Khaled Mahmoud",
+    "Abd El-Rahman Mossad",
+    "Amr Medhat",
+    "Gasser Mohammed",
+]
+description = "Documentation for Vulnera - High-Performance Vulnerability Analysis Platform"
+src = "src"
+language = "en"
+
+[rust]
+edition = "2021"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+smart-punctuation = true
+git-repository-url = "https://github.com/k5602/Vulnera"
+git-repository-icon = "fa-github"
+edit-url-template = "https://github.com/k5602/Vulnera/edit/main/docs/{path}"
+site-url = "/Vulnera/"
+no-section-label = false
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-hierarchical-structure = true
+teaser-word-count = 30
+copy-js = true
+
+[output.html.playground]
+editable = false
+copyable = true
+copy-js = true
