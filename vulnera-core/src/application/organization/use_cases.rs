@@ -79,9 +79,16 @@ impl CreateOrganizationUseCase {
             .add_member(&organization.id, &owner_id)
             .await?;
 
-        // Create default subscription limits (free tier)
-        let limits = SubscriptionLimits::new_free(organization.id);
-        self.limits_repository.create(&limits).await?;
+        // Fetch default subscription limits created by database trigger
+        let limits = self
+            .limits_repository
+            .find_by_org(&organization.id)
+            .await?
+            .ok_or_else(|| OrganizationError::DatabaseError {
+                message:
+                    "Failed to fetch auto-created subscription limits (trigger may have failed)"
+                        .to_string(),
+            })?;
 
         Ok(CreateOrganizationResult {
             organization,
@@ -91,8 +98,6 @@ impl CreateOrganizationUseCase {
 }
 
 /// Use case for inviting a member to an organization
-///
-/// Only the organization owner can invite members.
 pub struct InviteMemberUseCase {
     org_repository: Arc<dyn IOrganizationRepository>,
     member_repository: Arc<dyn IOrganizationMemberRepository>,
