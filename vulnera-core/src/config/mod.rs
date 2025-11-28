@@ -585,7 +585,7 @@ impl Default for SyncConfig {
     fn default() -> Self {
         Self {
             enabled: false,    // Opt-in by default
-            interval_hours: 6, // Sync every 6 hours
+            interval_hours: 8, // Sync every 8 hours
             on_startup: true,  // Run initial sync immediately
             shutdown_timeout_seconds: 30,
         }

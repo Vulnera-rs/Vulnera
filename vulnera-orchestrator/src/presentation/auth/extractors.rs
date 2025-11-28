@@ -10,6 +10,7 @@ use std::sync::Arc;
 use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
+use vulnera_core::domain::organization::value_objects::OrganizationId;
 
 use crate::presentation::middleware::application_error_to_response;
 
@@ -45,6 +46,9 @@ pub struct Auth {
     pub auth_method: AuthMethod,
     pub api_key_id: Option<ApiKeyId>,
     pub is_master_key: bool,
+    /// Organization ID if user is a member of an organization
+    /// Used for org-based rate limiting and analytics
+    pub organization_id: Option<OrganizationId>,
 }
 
 /// State for authentication extractors
@@ -239,6 +243,7 @@ where
                         auth_method: AuthMethod::Cookie,
                         api_key_id: None,
                         is_master_key: false,
+                        organization_id: None, // TODO: Query org membership or include in JWT claims
                     });
                 }
                 Err(_) => {
@@ -272,6 +277,7 @@ where
                     auth_method: AuthMethod::ApiKey,
                     api_key_id: None,
                     is_master_key: true,
+                    organization_id: None, // Master key doesn't belong to orgs
                 });
             }
 
@@ -302,6 +308,7 @@ where
                         auth_method: AuthMethod::ApiKey,
                         api_key_id: Some(validation.api_key_id),
                         is_master_key: false,
+                        organization_id: None, // TODO: Query org membership from api_key or user
                     });
                 }
                 Err(e) => {

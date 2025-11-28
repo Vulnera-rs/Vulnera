@@ -157,3 +157,4 @@ criterion/
 # Cache directories
 /.vulnera_data
 curls.txt
+/.sqlx

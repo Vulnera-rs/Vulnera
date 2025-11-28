@@ -23,6 +23,7 @@ use crate::domain::organization::{
 pub struct DashboardOverview {
     pub organization: Organization,
     pub current_month_stats: Option<UserStatsMonthly>,
+    pub previous_month_stats: Option<UserStatsMonthly>,
     pub subscription_limits: Option<SubscriptionLimits>,
     pub recent_jobs: Vec<PersistedJobResult>,
     pub quota_usage: QuotaUsage,
@@ -105,6 +106,20 @@ impl GetDashboardOverviewUseCase {
             .find_by_org_and_month(&org_id, &current_month)
             .await?;
 
+        // Get previous month stats for trend calculation
+        let prev_month_date = now
+            .checked_sub_months(chrono::Months::new(1))
+            .unwrap_or(now);
+        let previous_month = format!(
+            "{:04}-{:02}",
+            prev_month_date.year(),
+            prev_month_date.month()
+        );
+        let previous_month_stats = self
+            .stats_repository
+            .find_by_org_and_month(&org_id, &previous_month)
+            .await?;
+
         // Get subscription limits
         let subscription_limits = self.limits_repository.find_by_org(&org_id).await?;
 
@@ -117,6 +132,7 @@ impl GetDashboardOverviewUseCase {
         Ok(DashboardOverview {
             organization,
             current_month_stats,
+            previous_month_stats,
             subscription_limits,
             recent_jobs,
             quota_usage,
