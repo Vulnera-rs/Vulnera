@@ -71,10 +71,7 @@ impl RateLimiterService {
     }
 
     /// Create with a custom storage backend (for testing)
-    pub fn with_storage(
-        storage: Arc<dyn RateLimitStorage>,
-        config: TieredRateLimitConfig,
-    ) -> Self {
+    pub fn with_storage(storage: Arc<dyn RateLimitStorage>, config: TieredRateLimitConfig) -> Self {
         let token_bucket = TokenBucket::new(Arc::clone(&storage), "ratelimit:api");
         let auth_limiter = SlidingWindowLimiter::new(Arc::clone(&storage), "ratelimit:auth");
 
@@ -158,11 +155,7 @@ impl RateLimiterService {
     ///
     /// # Returns
     /// An `AuthRateLimitResult` indicating if the request is allowed
-    pub async fn check_auth_limit(
-        &self,
-        ip: &str,
-        endpoint: AuthEndpoint,
-    ) -> AuthRateLimitResult {
+    pub async fn check_auth_limit(&self, ip: &str, endpoint: AuthEndpoint) -> AuthRateLimitResult {
         if !self.config.enabled || !self.config.auth_protection.enabled {
             return AuthRateLimitResult::allowed(u32::MAX, endpoint);
         }
@@ -343,7 +336,13 @@ mod tests {
 
         let api_key_id = Uuid::new_v4();
         let result = service
-            .check_api_limit("192.168.1.1", None, Some(api_key_id), false, RequestCost::Get)
+            .check_api_limit(
+                "192.168.1.1",
+                None,
+                Some(api_key_id),
+                false,
+                RequestCost::Get,
+            )
             .await;
 
         assert!(result.allowed);

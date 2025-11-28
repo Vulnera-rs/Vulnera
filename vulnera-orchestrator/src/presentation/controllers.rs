@@ -188,6 +188,7 @@ pub async fn analyze(
         auth_strategy: Some(auth_strategy),
         api_key_id,
         organization_id: None, // TODO: Fetch user's organization when needed
+        is_master_key: auth.is_master_key,
     };
     let callback_url = request.callback_url.clone();
     let webhook_secret = request.webhook_secret.clone();

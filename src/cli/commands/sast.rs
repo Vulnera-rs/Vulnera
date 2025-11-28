@@ -9,10 +9,10 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 
+use crate::cli::Cli;
 use crate::cli::context::CliContext;
 use crate::cli::exit_codes;
 use crate::cli::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
-use crate::cli::Cli;
 
 /// Arguments for the sast command
 #[derive(Args, Debug)]
@@ -120,7 +120,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SastArgs) -> Result<i32> {
     };
 
     if !path.exists() {
-        ctx.output.error(&format!("Path does not exist: {:?}", path));
+        ctx.output
+            .error(&format!("Path does not exist: {:?}", path));
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
@@ -165,7 +166,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SastArgs) -> Result<i32> {
             p.finish_and_clear();
         }
         ctx.output.warn("No supported source files found");
-        ctx.output.info("Supported: Python, JavaScript, TypeScript, Go, Rust, C/C++");
+        ctx.output
+            .info("Supported: Python, JavaScript, TypeScript, Go, Rust, C/C++");
         return Ok(exit_codes::SUCCESS);
     }
 
@@ -266,10 +268,8 @@ fn output_results(ctx: &CliContext, cli: &Cli, result: &SastResult) -> Result<()
                 "Languages: {}",
                 result.languages_detected.join(", ")
             ));
-            ctx.output.print(&format!(
-                "Files scanned: {}",
-                result.summary.files_scanned
-            ));
+            ctx.output
+                .print(&format!("Files scanned: {}", result.summary.files_scanned));
 
             println!();
             ctx.output.vulnerabilities(&result.findings)?;

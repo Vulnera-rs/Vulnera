@@ -8,8 +8,7 @@ use uuid::Uuid;
 use crate::domain::{
     auth::value_objects::UserId,
     organization::{
-        entities::PersonalStatsMonthly,
-        errors::OrganizationError,
+        entities::PersonalStatsMonthly, errors::OrganizationError,
         repositories::IPersonalStatsMonthlyRepository,
     },
 };

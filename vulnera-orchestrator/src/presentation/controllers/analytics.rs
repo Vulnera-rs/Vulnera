@@ -282,7 +282,11 @@ pub async fn get_personal_dashboard_stats(
     let now = Utc::now();
     let current_month = format!("{:04}-{:02}", now.year(), now.month());
     let prev_month_date = now - chrono::Months::new(1);
-    let prev_month = format!("{:04}-{:02}", prev_month_date.year(), prev_month_date.month());
+    let prev_month = format!(
+        "{:04}-{:02}",
+        prev_month_date.year(),
+        prev_month_date.month()
+    );
 
     // Get current month stats
     let current_stats = state
@@ -321,7 +325,11 @@ pub async fn get_personal_dashboard_stats(
     // Calculate trends
     let scans_trend_percent = prev_stats.as_ref().and_then(|prev| {
         if prev.scans_completed > 0 {
-            Some(((scans_this_month - prev.scans_completed as i64) as f64 / prev.scans_completed as f64) * 100.0)
+            Some(
+                ((scans_this_month - prev.scans_completed as i64) as f64
+                    / prev.scans_completed as f64)
+                    * 100.0,
+            )
         } else if scans_this_month > 0 {
             Some(100.0)
         } else {
@@ -331,7 +339,11 @@ pub async fn get_personal_dashboard_stats(
 
     let findings_trend_percent = prev_stats.as_ref().and_then(|prev| {
         if prev.findings_count > 0 {
-            Some(((findings_this_month - prev.findings_count as i64) as f64 / prev.findings_count as f64) * 100.0)
+            Some(
+                ((findings_this_month - prev.findings_count as i64) as f64
+                    / prev.findings_count as f64)
+                    * 100.0,
+            )
         } else if findings_this_month > 0 {
             Some(100.0)
         } else {
