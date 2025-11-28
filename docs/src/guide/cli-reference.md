@@ -2,6 +2,8 @@
 
 A comprehensive guide to using the Vulnera command-line interface for vulnerability analysis.
 
+The Vulnera CLI is a standalone, distributable tool with offline-first architecture. It provides local vulnerability scanning (SAST, secrets, API analysis) and integrates with the Vulnera server for dependency analysis.
+
 ## Installation
 
 ### Building from Source
@@ -11,18 +13,34 @@ A comprehensive guide to using the Vulnera command-line interface for vulnerabil
 git clone https://github.com/k5602/Vulnera.git
 cd Vulnera
 
-# Build with CLI feature enabled
-cargo build --release --features cli
+# Build the CLI binary
+cargo build -p vulnera-cli --release
 
-# The binary will be at ./target/release/vulnera-rust
-alias vulnera='./target/release/vulnera-rust'
+# The binary will be at ./target/release/vulnera
+alias vulnera='./target/release/vulnera'
+```
+
+### Download Pre-built Binary
+
+Pre-built binaries available at: [GitHub Releases](https://github.com/k5602/Vulnera/releases)
+
+```bash
+# Linux
+curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+chmod +x vulnera
+
+# macOS
+curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-macos-x86_64 -o vulnera
+chmod +x vulnera
+
+# Windows: Download from releases page
 ```
 
 ### Verify Installation
 
 ```bash
-vulnera-rust --version
-vulnera-rust --help
+vulnera --version
+vulnera --help
 ```
 
 ## Quick Start
@@ -30,12 +48,12 @@ vulnera-rust --help
 ### 1. Check Your Quota
 
 ```bash
-vulnera-rust quota
+vulnera quota
 ```
 
 Output:
 
-```
+```text
 Quota Status
 Usage: [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0/10
 Remaining: 10 requests
@@ -46,19 +64,19 @@ Account: Unauthenticated (10 requests/day)
 ### 2. Run Your First Scan
 
 ```bash
-# Full analysis (dependencies + SAST + secrets + API)
-vulnera-rust analyze /path/to/project
+# Full analysis (SAST + secrets + API + optional dependencies)
+vulnera analyze /path/to/project
 
 # Or use the short alias
-vulnera-rust a /path/to/project
+vulnera a /path/to/project
 ```
 
-### 3. Scan Dependencies Only
+### 3. Scan Dependencies Only (Requires Server)
 
 ```bash
-vulnera-rust deps .
-vulnera-rust deps --file package.json
-vulnera-rust deps . --severity high
+vulnera deps .
+vulnera deps --file package.json
+vulnera deps . --severity high
 ```
 
 ## Authentication
@@ -68,27 +86,28 @@ vulnera-rust deps . --severity high
 | Feature | Unauthenticated | Authenticated |
 |---------|-----------------|---------------|
 | Daily requests | 10 | 40 |
-| Vulnerability data | Cached only | Live + cached |
-| Priority support | ❌ | ✅ |
+| Dependency analysis | Server required | ✅ |
+| Local analysis (SAST/secrets) | ✅ | ✅ |
+| Offline mode | ✅ | ✅ |
 
 ### Login
 
 ```bash
 # Interactive login
-vulnera-rust auth login
+vulnera auth login
 
 # Login with API key directly
-vulnera-rust auth login --api-key YOUR_API_KEY
+vulnera auth login --api-key YOUR_API_KEY
 
 # In CI/CD, use environment variable
 export VULNERA_API_KEY=your_api_key
-vulnera-rust --ci auth login
+vulnera auth login
 ```
 
 ### Check Status
 
 ```bash
-vulnera-rust auth status
+vulnera auth status
 ```
 
 ### Credential Storage
@@ -107,15 +126,12 @@ Vulnera stores credentials securely:
 ### `analyze` — Full Vulnerability Analysis
 
 ```bash
-vulnera-rust analyze [OPTIONS] [PATH]
+vulnera analyze [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust analyze .                    # Current directory
-vulnera-rust analyze /path/to/project     # Specific path
-vulnera-rust a . --severity critical      # Only critical issues
-vulnera-rust a . --skip-deps              # Skip dependency analysis
-vulnera-rust a . --skip-sast              # Skip SAST
-vulnera-rust a . --skip-secrets           # Skip secret detection
+vulnera analyze .                    # Current directory
+vulnera analyze /path/to/project     # Specific path
+vulnera a . --severity critical      # Only critical issues
 ```
 
 **Options:**
@@ -123,22 +139,25 @@ vulnera-rust a . --skip-secrets           # Skip secret detection
 | Option | Description |
 |--------|-------------|
 | `--severity <LEVEL>` | Filter by minimum severity (low, medium, high, critical) |
-| `--skip-deps` | Skip dependency vulnerability scanning |
-| `--skip-sast` | Skip static analysis |
-| `--skip-secrets` | Skip secret detection |
-| `--skip-api` | Skip API security analysis |
+| `-f, --format <FORMAT>` | Output format (table, json, plain, sarif) |
+
+**Behavior:**
+
+- Runs SAST, secret detection, and API analysis locally (always works offline)
+- Attempts dependency analysis if server is available; skips with warning if offline
 
 ### `deps` — Dependency Analysis
 
 ```bash
-vulnera-rust deps [OPTIONS] [PATH]
+vulnera deps [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust deps .                       # Scan current directory
-vulnera-rust deps --file Cargo.toml       # Specific manifest
-vulnera-rust deps . --ecosystem npm       # Force ecosystem detection
-vulnera-rust d . --severity high          # High+ severity only
+vulnera deps .                       # Scan current directory
+vulnera deps --file Cargo.toml       # Specific manifest
+vulnera deps . --severity high       # High+ severity only
 ```
+
+**Requires:** Vulnera server running or API key configured
 
 **Supported ecosystems:**
 
@@ -151,59 +170,68 @@ vulnera-rust d . --severity high          # High+ severity only
 - **RubyGems**: `Gemfile`, `Gemfile.lock`
 - **NuGet**: `*.csproj`, `packages.config`
 
-### `sast` — Static Analysis
+### `sast` — Static Analysis (Offline)
 
 ```bash
-vulnera-rust sast [OPTIONS] [PATH]
+vulnera sast [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust sast .                       # Current directory
-vulnera-rust sast src/                    # Specific folder
-vulnera-rust s . --severity medium        # Medium+ severity
+vulnera sast .                       # Current directory
+vulnera sast src/                    # Specific folder
+vulnera s . --severity medium        # Medium+ severity
 ```
 
 **Detects:** SQL injection, XSS, path traversal, command injection, insecure deserialization, and more.
 
-### `secrets` — Secret Detection
+### `secrets` — Secret Detection (Offline)
 
 ```bash
-vulnera-rust secrets [OPTIONS] [PATH]
+vulnera secrets [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust secrets .                    # Current directory
-vulnera-rust secrets --include-tests      # Include test files
-vulnera-rust sec . --severity high        # High+ severity only
+vulnera secrets .                    # Current directory
+vulnera secrets --include-tests      # Include test files
+vulnera sec . --severity high        # High+ severity only
 ```
 
 **Detects:** API keys (AWS, GCP, Azure, GitHub), database credentials, private keys, OAuth tokens, JWT secrets, generic passwords.
 
-### `api` — API Security Analysis
+### `api` — API Security Analysis (Offline)
 
 ```bash
-vulnera-rust api [OPTIONS] [PATH]
+vulnera api [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust api .                        # Scan for API definitions
-vulnera-rust api --file openapi.yaml      # Specific OpenAPI spec
+vulnera api .                        # Scan for API definitions
+vulnera api --file openapi.yaml      # Specific OpenAPI spec
 ```
 
 ### `quota` — Quota Management
 
 ```bash
-vulnera-rust quota              # Show quota status
-vulnera-rust quota show         # Show quota status
-vulnera-rust quota sync         # Sync with server
+vulnera quota              # Show quota status
+vulnera quota show         # Show quota status
+vulnera quota sync         # Sync with server
+```
+
+### `auth` — Authentication
+
+```bash
+vulnera auth login         # Login interactively
+vulnera auth logout        # Logout
+vulnera auth status        # Check authentication status
+vulnera auth info          # Show API key info
 ```
 
 ### `config` — Configuration Management
 
 ```bash
-vulnera-rust config show        # Show current configuration
-vulnera-rust config path        # Show config file locations
-vulnera-rust config get server.port       # Get specific value
-vulnera-rust config set server.port 8080  # Set value
-vulnera-rust config init        # Create default config file
-vulnera-rust config reset       # Reset to defaults
+vulnera config show        # Show current configuration
+vulnera config path        # Show config file locations
+vulnera config get server.port       # Get specific value
+vulnera config set server.port 8080  # Set value
+vulnera config init        # Create default config file
+vulnera config reset       # Reset to defaults
 ```
 
 ## Output Formats
@@ -211,10 +239,12 @@ vulnera-rust config reset       # Reset to defaults
 ### Table (Default)
 
 ```bash
-vulnera-rust deps .
+vulnera deps .
 ```
 
-```
+Output:
+
+```text
 ┌──────────────────┬──────────┬──────────┬────────────────────┐
 │ Package          │ Version  │ Severity │ Vulnerability      │
 ├──────────────────┼──────────┼──────────┼────────────────────┤
@@ -226,19 +256,19 @@ vulnera-rust deps .
 ### JSON
 
 ```bash
-vulnera-rust --format json deps .
+vulnera --format json deps .
 ```
 
 ### Plain
 
 ```bash
-vulnera-rust --format plain deps .
+vulnera --format plain deps .
 ```
 
 ### SARIF
 
 ```bash
-vulnera-rust --format sarif deps . > results.sarif
+vulnera --format sarif deps . > results.sarif
 ```
 
 Compatible with VS Code (SARIF Viewer), GitHub Code Scanning, Azure DevOps, SonarQube.
@@ -258,15 +288,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Vulnera CLI
+      - name: Download Vulnera CLI
         run: |
-          curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-amd64 -o vulnera
+          curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
           chmod +x vulnera
       
       - name: Run vulnerability scan
         env:
           VULNERA_API_KEY: ${{ secrets.VULNERA_API_KEY }}
-          VULNERA_CI: "true"
         run: |
           ./vulnera analyze . --format sarif > results.sarif
         continue-on-error: true
@@ -284,11 +313,11 @@ security-scan:
   stage: test
   image: rust:latest
   variables:
-    VULNERA_CI: "true"
     VULNERA_API_KEY: $VULNERA_API_KEY
   script:
-    - cargo install --git https://github.com/k5602/Vulnera --features cli
-    - vulnera-rust analyze . --format json > vulnera-report.json
+    - curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+    - chmod +x vulnera
+    - ./vulnera analyze . --format json > vulnera-report.json
   artifacts:
     reports:
       security: vulnera-report.json
@@ -301,7 +330,7 @@ security-scan:
 | 0 | Success — no issues found |
 | 1 | Vulnerabilities found (at or above threshold) |
 | 2 | Configuration or input error |
-| 3 | Network error (when online mode required) |
+| 3 | Network error (when server required) |
 | 4 | Quota exceeded |
 | 5 | Authentication required |
 | 99 | Internal error |
@@ -320,24 +349,19 @@ Vulnera looks for configuration in this order:
 ### Environment Variables
 
 ```bash
-# Override server port
+# Set server host/port for dependency analysis
+export VULNERA__SERVER__HOST=localhost
 export VULNERA__SERVER__PORT=9000
 
-# Override cache URL
-export VULNERA__CACHE__DRAGONFLY_URL=redis://localhost:6380
-
-# Enable CI mode
-export VULNERA_CI=true
-
-# Set API key
+# Set API key for authentication
 export VULNERA_API_KEY=your_api_key
 ```
 
 ### Offline Mode
 
 ```bash
-# Force offline mode
-vulnera-rust --offline analyze .
+# Force offline mode (skips dependency analysis)
+vulnera --offline analyze .
 
 # Or set environment variable
 export VULNERA_OFFLINE=true
@@ -348,7 +372,7 @@ In offline mode:
 - ✅ SAST analysis works fully
 - ✅ Secret detection works fully
 - ✅ API analysis works fully
-- ⚠️ Dependency analysis uses cached vulnerability data only
+- ⚠️ Dependency analysis is skipped with warning
 
 ## Troubleshooting
 
@@ -357,34 +381,40 @@ In offline mode:
 **Solutions:**
 
 1. Wait for quota reset at UTC midnight
-2. Authenticate for 40 requests/day: `vulnera-rust auth login`
-3. Use `--offline` mode for SAST/secrets (doesn't consume quota)
+2. Authenticate for 40 requests/day: `vulnera auth login`
+3. Use offline analysis (SAST/secrets) which doesn't consume quota
 
-### "Failed to connect to cache"
+### "Failed to connect to server"
 
-This is normal if you don't have Dragonfly/Redis running locally. The CLI will work in offline mode.
+This is normal if the Vulnera server isn't running. The CLI will work in offline mode.
+
+**Solutions:**
+
+1. Start the server: `cargo run -p vulnera-orchestrator`
+2. Use offline modules: `vulnera analyze .` (runs SAST/secrets/API locally)
+3. Set server address: `export VULNERA__SERVER__HOST=your-server`
 
 ### "Credentials not found"
 
 **Solutions:**
 
-1. Login: `vulnera-rust auth login`
+1. Login: `vulnera auth login`
 2. Set environment variable: `export VULNERA_API_KEY=your_key`
-3. Check storage: `vulnera-rust auth info`
+3. Check storage: `vulnera auth info`
 
 ### Verbose Output
 
 ```bash
-vulnera-rust -v analyze .      # Verbose
-vulnera-rust -vv analyze .     # Very verbose
+vulnera -v analyze .      # Verbose
+vulnera -vv analyze .     # Very verbose
 ```
 
 ## Getting Help
 
 ```bash
-vulnera-rust --help
-vulnera-rust analyze --help
-vulnera-rust deps --help
+vulnera --help
+vulnera analyze --help
+vulnera deps --help
 ```
 
-Report issues at: <https://github.com/k5602/Vulnera/issues>
+Report issues at: [GitHub Issues](https://github.com/k5602/Vulnera/issues)

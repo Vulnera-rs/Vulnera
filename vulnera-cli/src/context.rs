@@ -8,12 +8,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use vulnera_core::config::Config;
-use vulnera_core::infrastructure::cache::DragonflyCache;
 
-use crate::cli::Cli;
-use crate::cli::credentials::CredentialManager;
-use crate::cli::output::OutputWriter;
-use crate::cli::quota_tracker::QuotaTracker;
+use crate::Cli;
+use crate::api_client::VulneraClient;
+use crate::credentials::CredentialManager;
+use crate::executor::AnalysisExecutor;
+use crate::output::OutputWriter;
+use crate::quota_tracker::QuotaTracker;
+
+/// Default server URL for API calls
+pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.dev";
 
 /// Lightweight context for CLI operations
 ///
@@ -29,11 +33,14 @@ pub struct CliContext {
     /// Quota tracker with local persistence and remote sync
     pub quota: QuotaTracker,
 
-    /// Cache service for vulnerability data (optional, may be offline)
-    pub cache: Option<Arc<DragonflyCache>>,
+    /// Analysis executor for running scans
+    pub executor: AnalysisExecutor,
 
     /// Output writer configured based on CLI flags
     pub output: OutputWriter,
+
+    /// Server URL for API calls
+    pub server_url: String,
 
     /// Whether we're running in CI mode
     pub ci_mode: bool,
@@ -43,6 +50,9 @@ pub struct CliContext {
 
     /// Working directory for analysis
     pub working_dir: PathBuf,
+
+    /// API client for server communication (None if offline)
+    api_client: Option<VulneraClient>,
 }
 
 impl CliContext {
@@ -61,15 +71,29 @@ impl CliContext {
         // Initialize quota tracker
         let quota = QuotaTracker::new(api_key.is_some())?;
 
-        // Try to connect to cache if not offline
-        let cache = if !cli.offline {
-            Self::try_connect_cache(&config).await.ok()
+        // Determine server URL
+        let server_url = cli
+            .server
+            .clone()
+            .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
+
+        // Create API client if not offline
+        let api_client = if !cli.offline {
+            let mut client =
+                VulneraClient::new(config.server.host.clone(), config.server.port, None)?;
+            if let Some(key) = &api_key {
+                client = client.with_api_key(key.clone());
+            }
+            Some(client)
         } else {
             None
         };
 
-        // Determine offline mode based on flag or cache availability
-        let offline_mode = cli.offline || cache.is_none();
+        // Determine offline mode
+        let offline_mode = cli.offline;
+
+        // Create analysis executor
+        let executor = AnalysisExecutor::new(&config, api_client.clone(), offline_mode);
 
         // Create output writer
         let output = OutputWriter::new(cli.format, cli.quiet, cli.verbose);
@@ -82,22 +106,32 @@ impl CliContext {
             config,
             credentials,
             quota,
-            cache,
+            executor,
             output,
+            server_url,
             ci_mode: cli.ci,
             offline_mode,
             working_dir,
+            api_client,
         })
     }
 
     /// Load configuration from file or defaults
-    fn load_config(_config_path: Option<&PathBuf>) -> Result<Config> {
-        // TODO: Support loading from specific path when Config::load_from is available
-        // For now, always use default config loading
-        Config::load().or_else(|_| {
-            tracing::debug!("No config file found, using defaults");
-            Ok(Config::default())
-        })
+    fn load_config(config_path: Option<&PathBuf>) -> Result<Config> {
+        if let Some(path) = config_path {
+            // Load from specified path
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read configuration from {:?}", path))?;
+            let config: Config = toml::from_str(&content)
+                .with_context(|| format!("Failed to parse configuration from {:?}", path))?;
+            Ok(config)
+        } else {
+            // Try default loading, fall back to defaults
+            Config::load().or_else(|_| {
+                tracing::debug!("No config file found, using defaults");
+                Ok(Config::default())
+            })
+        }
     }
 
     /// Resolve API key from CLI args, environment, or stored credentials
@@ -115,25 +149,14 @@ impl CliContext {
             }
 
             // Try stored credential
-            if let Ok(Some(key)) = credentials.get_api_key() {
-                return Ok(Some(key));
+            if let Ok(key_opt) = credentials.get_api_key() {
+                if let Some(key) = key_opt {
+                    return Ok(Some(key));
+                }
             }
         }
 
         Ok(None)
-    }
-
-    /// Try to connect to Dragonfly cache
-    async fn try_connect_cache(config: &Config) -> Result<Arc<DragonflyCache>> {
-        let cache = DragonflyCache::new(
-            &config.cache.dragonfly_url,
-            config.cache.enable_cache_compression,
-            config.cache.compression_threshold_bytes,
-        )
-        .await
-        .context("Failed to connect to cache")?;
-
-        Ok(Arc::new(cache))
     }
 
     /// Check if we have a valid API key
@@ -152,31 +175,19 @@ impl CliContext {
         self.credentials.get_api_key()
     }
 
-    /// Check if we're online (cache is available)
+    /// Check if we're online (not in offline mode)
     pub fn is_online(&self) -> bool {
-        self.cache.is_some()
+        !self.offline_mode
     }
 
-    /// Sync quota with remote if online
-    pub async fn sync_quota(&mut self) -> Result<()> {
-        if let Some(cache) = &self.cache {
-            self.quota.sync_with_remote(cache).await?;
-        }
-        Ok(())
+    /// Get the API client (returns None if offline)
+    pub fn api_client(&self) -> Option<&VulneraClient> {
+        self.api_client.as_ref()
     }
 
     /// Consume a quota request
     pub async fn consume_quota(&mut self) -> Result<bool> {
-        let allowed = self.quota.try_consume().await?;
-
-        // Sync to remote if online
-        if let Some(cache) = &self.cache {
-            if let Err(e) = self.quota.sync_with_remote(cache).await {
-                tracing::warn!("Failed to sync quota with remote: {}", e);
-            }
-        }
-
-        Ok(allowed)
+        self.quota.try_consume().await
     }
 
     /// Get remaining quota
@@ -194,8 +205,8 @@ impl CliContext {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_config_load_defaults() {
+    #[test]
+    fn test_config_load_defaults() {
         let config = CliContext::load_config(None);
         assert!(config.is_ok());
     }

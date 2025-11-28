@@ -1,6 +1,8 @@
 //! CLI Commands Module
 //!
 //! This module contains all CLI subcommand implementations.
+//! Offline modules (SAST, Secrets, API) run locally via embedded analyzers.
+//! Dependency analysis requires server connection.
 
 pub mod analyze;
 pub mod api;

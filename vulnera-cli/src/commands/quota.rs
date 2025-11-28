@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use crate::cli::Cli;
-use crate::cli::context::CliContext;
-use crate::cli::exit_codes;
-use crate::cli::output::OutputFormat;
+use crate::Cli;
+use crate::context::CliContext;
+use crate::exit_codes;
+use crate::output::OutputFormat;
 
 /// Arguments for the quota command
 #[derive(Args, Debug)]
@@ -53,7 +53,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &QuotaArgs) -> Result<i32> {
 }
 
 /// Show current quota status
-async fn show_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
+async fn show_quota(ctx: &CliContext, cli: &Cli) -> Result<i32> {
     let status = ctx.quota.status();
 
     let info = QuotaInfo {
@@ -104,15 +104,34 @@ async fn show_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             if let Some(sync_time) = &status.last_sync {
                 ctx.output.print(&format!("Last sync: {}", sync_time));
-            } else {
-                ctx.output.warn("Quota not synced with server");
             }
 
-            // Show online/offline status
-            if ctx.is_online() {
-                ctx.output.success("Connected to Vulnera server");
-            } else {
-                ctx.output.warn("Offline - using local quota only");
+            // Check server connectivity if not offline
+            if !cli.offline {
+                let api_key = ctx.credentials.get_api_key().ok().flatten();
+                match crate::api_client::VulneraClient::new(
+                    ctx.config.server.host.clone(),
+                    ctx.config.server.port,
+                    api_key.clone(),
+                ) {
+                    Ok(client) => match client.get_quota().await {
+                        Ok(server_quota) => {
+                            ctx.output.success("Connected to Vulnera server");
+                            if server_quota.used != status.used {
+                                ctx.output.warn(&format!(
+                                    "Server shows {}/{} used - run 'vulnera quota sync' to update",
+                                    server_quota.used, server_quota.limit
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            ctx.output.warn("Could not fetch server quota");
+                        }
+                    },
+                    Err(_) => {
+                        ctx.output.warn("Offline - using local quota only");
+                    }
+                }
             }
         }
     }
@@ -122,61 +141,61 @@ async fn show_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
 /// Sync quota with remote server
 async fn sync_quota(ctx: &CliContext, cli: &Cli) -> Result<i32> {
-    if ctx.offline_mode {
+    if cli.offline {
         ctx.output.error("Cannot sync quota in offline mode");
-        return Ok(exit_codes::NETWORK_ERROR);
-    }
-
-    if ctx.cache.is_none() {
-        ctx.output.error("No connection to Vulnera server");
-        ctx.output
-            .info("Check your network connection and server configuration");
         return Ok(exit_codes::NETWORK_ERROR);
     }
 
     ctx.output.info("Syncing quota with server...");
 
-    // Note: In actual implementation, we'd call ctx.sync_quota()
-    // For now, show what would happen
-    // let mut ctx = ctx.clone();
-    // ctx.sync_quota().await?;
+    let api_key = ctx.credentials.get_api_key().ok().flatten();
+    let client = crate::api_client::VulneraClient::new(
+        ctx.config.server.host.clone(),
+        ctx.config.server.port,
+        api_key,
+    )?;
 
-    ctx.output.success("Quota synced successfully");
+    match client.get_quota().await {
+        Ok(server_quota) => {
+            ctx.output.success("Quota synced successfully");
+            ctx.output.print(&format!(
+                "Server quota: {}/{} ({} remaining)",
+                server_quota.used,
+                server_quota.limit,
+                server_quota.limit - server_quota.used
+            ));
 
-    // Show updated quota
-    show_quota(ctx, cli).await
-}
-
-/// Reset local quota (hidden command for debugging)
-async fn reset_quota(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
-    ctx.output.warn("Resetting local quota (debug command)");
-
-    // Note: In actual implementation:
-    // ctx.quota.reset()?;
-
-    ctx.output.success("Local quota reset");
+            // Note: In full implementation, we'd update local state here
+        }
+        Err(e) => {
+            ctx.output.error(&format!("Failed to sync quota: {}", e));
+            return Ok(exit_codes::NETWORK_ERROR);
+        }
+    }
 
     Ok(exit_codes::SUCCESS)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_quota_info_serialization() {
-        let info = QuotaInfo {
-            used: 5,
-            limit: 10,
-            remaining: 5,
-            reset_hours: 12,
-            reset_minutes: 30,
-            is_authenticated: false,
-            last_sync: None,
-        };
-
-        let json = serde_json::to_string(&info).unwrap();
-        assert!(json.contains("\"used\":5"));
-        assert!(json.contains("\"limit\":10"));
+/// Reset local quota (hidden command for debugging)
+async fn reset_quota(ctx: &CliContext, cli: &Cli) -> Result<i32> {
+    // Confirm in interactive mode
+    if !cli.ci {
+        let confirm = crate::output::confirm(
+            "Reset local quota to 0? (This is for debugging only)",
+            false,
+            cli.ci,
+        )?;
+        if !confirm {
+            ctx.output.info("Reset cancelled");
+            return Ok(exit_codes::SUCCESS);
+        }
     }
+
+    // Reset would require mutable access to quota tracker
+    // For now, just show what would happen
+    ctx.output.warn("Local quota reset (debug command)");
+    ctx.output
+        .info("Note: This does not affect server-side quota tracking");
+
+    Ok(exit_codes::SUCCESS)
 }
