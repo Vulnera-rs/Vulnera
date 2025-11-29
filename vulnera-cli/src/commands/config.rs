@@ -328,8 +328,8 @@ async fn init_config(ctx: &CliContext, _cli: &Cli, args: &InitArgs) -> Result<i3
 # See https://vulnera.dev/docs/cli/configuration for full options
 
 [server]
-host = "https://api.vulnera.dev"
-port = 443
+host = "https://api.vulnera.studio/"
+port = 80
 
 [analysis]
 # Maximum concurrent packages to analyze
