@@ -67,11 +67,12 @@ impl CreateAnalysisJobUseCase {
         source_type: SourceType,
         source_uri: String,
         analysis_depth: AnalysisDepth,
+        aws_credentials: Option<&crate::domain::value_objects::AwsCredentials>,
     ) -> Result<(AnalysisJob, Project), ProjectDetectionError> {
         // Detect project characteristics
         let project = self
             .project_detector
-            .detect_project(&source_type, &source_uri)
+            .detect_project(&source_type, &source_uri, aws_credentials)
             .await?;
 
         // Select modules to run

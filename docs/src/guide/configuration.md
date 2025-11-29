@@ -122,6 +122,7 @@ VULNERA__APIS__NVD__TIMEOUT_SECONDS=30
 ### GitHub Security Advisories (GHSA)
 
 ```bash
+# GitHub Personal Access Token (ghp_*) - used for both GHSA queries and GitHub API
 VULNERA__APIS__GHSA__TOKEN=your_github_token
 VULNERA__APIS__GHSA__GRAPHQL_URL="https://api.github.com/graphql"
 VULNERA__APIS__GHSA__TIMEOUT_SECONDS=30
@@ -130,8 +131,7 @@ VULNERA__APIS__GHSA__TIMEOUT_SECONDS=30
 ### GitHub API
 
 ```bash
-VULNERA__APIS__GITHUB__TOKEN=your_github_token
-VULNERA__APIS__GITHUB__REUSE_GHSA_TOKEN=true
+# Token reuse is automatic: uses VULNERA__APIS__GHSA__TOKEN for GitHub API calls
 VULNERA__APIS__GITHUB__BASE_URL="https://api.github.com"
 VULNERA__APIS__GITHUB__MAX_CONCURRENT_FILE_FETCHES=8
 VULNERA__APIS__GITHUB__MAX_FILES_SCANNED=200

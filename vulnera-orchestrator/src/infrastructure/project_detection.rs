@@ -8,17 +8,22 @@ use walkdir::WalkDir;
 
 use crate::domain::entities::{Project, ProjectMetadata};
 use crate::domain::services::{ProjectDetectionError, ProjectDetector};
-use crate::domain::value_objects::SourceType;
+use crate::domain::value_objects::{AwsCredentials, SourceType};
 use crate::infrastructure::git::GitService;
+use crate::infrastructure::s3::S3Service;
 
 /// File system-based project detector
 pub struct FileSystemProjectDetector {
     git_service: Arc<GitService>,
+    s3_service: Arc<S3Service>,
 }
 
 impl FileSystemProjectDetector {
-    pub fn new(git_service: Arc<GitService>) -> Self {
-        Self { git_service }
+    pub fn new(git_service: Arc<GitService>, s3_service: Arc<S3Service>) -> Self {
+        Self {
+            git_service,
+            s3_service,
+        }
     }
 
     fn collect_metadata(&self, root: &Path) -> Result<ProjectMetadata, ProjectDetectionError> {
@@ -174,6 +179,33 @@ impl FileSystemProjectDetector {
             metadata,
         })
     }
+
+    async fn detect_s3_project(
+        &self,
+        source_uri: &str,
+        credentials: &AwsCredentials,
+    ) -> Result<Project, ProjectDetectionError> {
+        let project_id = format!("project_{}", uuid::Uuid::new_v4());
+
+        // Download S3 bucket contents to persistent temp directory
+        let download_result = self
+            .s3_service
+            .download_bucket(source_uri, credentials)
+            .await?;
+
+        let path = download_result.root_path.clone();
+        let mut metadata = self.collect_metadata(&path)?;
+
+        // Store S3 source info in metadata
+        metadata.root_path = Some(path.to_string_lossy().to_string());
+
+        Ok(Project {
+            id: project_id,
+            source_type: SourceType::S3Bucket,
+            source_uri: source_uri.to_string(),
+            metadata,
+        })
+    }
 }
 
 #[async_trait]
@@ -182,6 +214,7 @@ impl ProjectDetector for FileSystemProjectDetector {
         &self,
         source_type: &SourceType,
         source_uri: &str,
+        aws_credentials: Option<&AwsCredentials>,
     ) -> Result<Project, ProjectDetectionError> {
         match source_type {
             SourceType::Directory => {
@@ -196,6 +229,11 @@ impl ProjectDetector for FileSystemProjectDetector {
                 })
             }
             SourceType::Git => self.detect_git_project(source_uri).await,
+            SourceType::S3Bucket => {
+                let credentials =
+                    aws_credentials.ok_or(ProjectDetectionError::MissingAwsCredentials)?;
+                self.detect_s3_project(source_uri, credentials).await
+            }
             _ => Err(ProjectDetectionError::InvalidUri(
                 "Unsupported source type for file system detector".to_string(),
             )),
@@ -235,14 +273,19 @@ mod tests {
         writeln!(file, "dummy content").unwrap();
     }
 
+    fn create_test_detector() -> FileSystemProjectDetector {
+        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
+        let s3_service = Arc::new(S3Service::new());
+        FileSystemProjectDetector::new(git_service, s3_service)
+    }
+
     #[test]
     fn test_detect_rust_project() {
         let temp_dir = TempDir::new().unwrap();
         create_dummy_file(temp_dir.path(), "Cargo.toml");
         create_dummy_file(temp_dir.path(), "src/main.rs");
 
-        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
-        let detector = FileSystemProjectDetector::new(git_service);
+        let detector = create_test_detector();
         let metadata = detector.collect_metadata(temp_dir.path()).unwrap();
 
         assert!(metadata.languages.contains(&"rust".to_string()));
@@ -261,8 +304,7 @@ mod tests {
         create_dummy_file(temp_dir.path(), "manage.py");
         create_dummy_file(temp_dir.path(), "app/views.py");
 
-        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
-        let detector = FileSystemProjectDetector::new(git_service);
+        let detector = create_test_detector();
         let metadata = detector.collect_metadata(temp_dir.path()).unwrap();
 
         assert!(metadata.languages.contains(&"python".to_string()));
@@ -281,8 +323,7 @@ mod tests {
         create_dummy_file(temp_dir.path(), "package.json");
         create_dummy_file(temp_dir.path(), "src/App.tsx");
 
-        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
-        let detector = FileSystemProjectDetector::new(git_service);
+        let detector = create_test_detector();
         let metadata = detector.collect_metadata(temp_dir.path()).unwrap();
 
         assert!(metadata.languages.contains(&"typescript".to_string()));
@@ -297,8 +338,7 @@ mod tests {
         create_dummy_file(temp_dir.path(), "Dockerfile");
         create_dummy_file(temp_dir.path(), "docker-compose.yml");
 
-        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
-        let detector = FileSystemProjectDetector::new(git_service);
+        let detector = create_test_detector();
         let metadata = detector.collect_metadata(temp_dir.path()).unwrap();
 
         assert!(metadata.frameworks.contains(&"docker".to_string()));
@@ -317,8 +357,7 @@ mod tests {
         create_dummy_file(temp_dir.path(), "target/debug/app");
         create_dummy_file(temp_dir.path(), "src/main.rs");
 
-        let git_service = Arc::new(GitService::new(Default::default()).unwrap());
-        let detector = FileSystemProjectDetector::new(git_service);
+        let detector = create_test_detector();
         let metadata = detector.collect_metadata(temp_dir.path()).unwrap();
 
         assert!(metadata.languages.contains(&"rust".to_string()));

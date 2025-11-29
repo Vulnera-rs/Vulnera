@@ -5,6 +5,7 @@ Vulnera can be configured via TOML files in the `config/` directory and environm
 ## Configuration Profiles
 
 Configuration profiles are selected via the `ENV` environment variable:
+
 - `development` - Development settings (default)
 - `production` - Production settings
 
@@ -159,11 +160,12 @@ VULNERA__APIS__GHSA__TIMEOUT_SECONDS=30
 ### GitHub API
 
 ```bash
-# GitHub token (for repository analysis)
-VULNERA__APIS__GITHUB__TOKEN=your_github_token
+# GitHub token is unified: VULNERA__APIS__GHSA__TOKEN is used for both
+# GHSA vulnerability queries and GitHub repository analysis operations
+# No separate VULNERA__APIS__GITHUB__TOKEN needed
 
-# Reuse GHSA token (default: true)
-VULNERA__APIS__GITHUB__REUSE_GHSA_TOKEN=true
+# Base URL
+VULNERA__APIS__GITHUB__BASE_URL="https://api.github.com"
 
 # Base URL
 VULNERA__APIS__GITHUB__BASE_URL="https://api.github.com"
@@ -286,9 +288,8 @@ VULNERA__CACHE__TTL_HOURS=24
 
 # External APIs
 VULNERA__APIS__NVD__API_KEY=your_nvd_api_key
+# GitHub Personal Access Token (ghp_*) - used for both GHSA and GitHub API
 VULNERA__APIS__GHSA__TOKEN=your_github_token
-VULNERA__APIS__GITHUB__TOKEN=your_github_token
-VULNERA__APIS__GITHUB__REUSE_GHSA_TOKEN=true
 
 # Analysis
 VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=3
@@ -303,4 +304,3 @@ Configuration can also be set in TOML files in the `config/` directory:
 - `config/production.toml` - Production overrides
 
 Environment variables take precedence over TOML files.
-

@@ -80,13 +80,30 @@ pub fn application_error_to_response(error: ApplicationError) -> Response {
         ),
     };
 
-    // Log the concrete error with selected status and code
-    tracing::error!(
-        error = %error,
-        http_status = %status,
-        error_code = code,
-        "Application error mapped to HTTP response"
-    );
+    // Log at appropriate level based on status code
+    // 4xx = client errors (warn level), 5xx = server errors (error level)
+    if status.is_server_error() {
+        tracing::error!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Server error mapped to HTTP response"
+        );
+    } else if status.is_client_error() {
+        tracing::warn!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Client error mapped to HTTP response"
+        );
+    } else {
+        tracing::debug!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Application error mapped to HTTP response"
+        );
+    }
 
     let error_response = ErrorResponse {
         code: code.to_string(),
