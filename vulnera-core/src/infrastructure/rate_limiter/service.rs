@@ -14,7 +14,7 @@ use crate::config::{RateLimitStorageBackend, TieredRateLimitConfig};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{debug, error, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Main rate limiter service
@@ -45,7 +45,7 @@ impl RateLimiterService {
                         Arc::new(storage)
                     }
                     Err(e) => {
-                        error!(
+                        warn!(
                             "Failed to connect to Dragonfly for rate limiting, falling back to in-memory: {}",
                             e
                         );

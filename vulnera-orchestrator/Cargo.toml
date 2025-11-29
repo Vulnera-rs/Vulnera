@@ -61,6 +61,12 @@ tempfile = { workspace = true }
 futures = { workspace = true }
 tokio-stream = { workspace = true }
 
+# AWS SDK for S3 bucket analysis
+aws-config = { workspace = true }
+aws-sdk-s3 = { workspace = true }
+aws-credential-types = { workspace = true }
+base64 = { workspace = true }
+
 [dev-dependencies]
 tokio-test = { workspace = true }
 axum-test = { workspace = true }

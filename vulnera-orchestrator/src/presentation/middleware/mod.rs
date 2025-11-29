@@ -32,6 +32,11 @@ pub fn application_error_to_response(error: ApplicationError) -> Response {
             "DOMAIN_ERROR",
             "Invalid input provided",
         ),
+        ApplicationError::Authentication(_) => (
+            StatusCode::UNAUTHORIZED,
+            "AUTHENTICATION_ERROR",
+            "Authentication failed",
+        ),
         ApplicationError::RateLimited { .. } => (
             StatusCode::TOO_MANY_REQUESTS,
             "RATE_LIMITED",
@@ -75,13 +80,30 @@ pub fn application_error_to_response(error: ApplicationError) -> Response {
         ),
     };
 
-    // Log the concrete error with selected status and code
-    tracing::error!(
-        error = %error,
-        http_status = %status,
-        error_code = code,
-        "Application error mapped to HTTP response"
-    );
+    // Log at appropriate level based on status code
+    // 4xx = client errors (warn level), 5xx = server errors (error level)
+    if status.is_server_error() {
+        tracing::error!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Server error mapped to HTTP response"
+        );
+    } else if status.is_client_error() {
+        tracing::warn!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Client error mapped to HTTP response"
+        );
+    } else {
+        tracing::debug!(
+            error = %error,
+            http_status = %status,
+            error_code = code,
+            "Application error mapped to HTTP response"
+        );
+    }
 
     let error_response = ErrorResponse {
         code: code.to_string(),
@@ -550,7 +572,7 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
         return (
             Some(auth.user_id.into()),
             auth.api_key_id.map(|id| id.into()),
-            false, // TODO: Add org membership check when organization field is added to Auth
+            auth.organization_id.is_some(), // Use actual org membership
         );
     }
 
@@ -568,7 +590,7 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
         return (
             Some(auth_user.user_id.into()),
             None,  // Cookie auth doesn't use API keys
-            false, // TODO: Add org membership check
+            false, // Cookie auth doesn't carry org info currently
         );
     }
 

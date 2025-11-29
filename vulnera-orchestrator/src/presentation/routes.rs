@@ -1,5 +1,6 @@
 //! Route definitions and server setup
 
+use axum::http::StatusCode;
 use axum::{
     Router, middleware,
     response::{IntoResponse, Response},
@@ -246,9 +247,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     // Applied with extended timeout for dependency analysis operations
     let dependencies_routes = Router::new()
         .route("/dependencies/analyze", post(analyze_dependencies))
-        .layer(TimeoutLayer::new(Duration::from_secs(
-            config.server.dependencies_analysis_timeout_seconds,
-        )));
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(config.server.dependencies_analysis_timeout_seconds),
+        ));
 
     // Organization routes (protected by CSRF for POST/PUT/DELETE)
     let organization_routes = Router::new()
@@ -291,9 +293,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         .merge(llm_routes)
         .merge(organization_routes)
         .merge(protected_auth_routes)
-        .layer(TimeoutLayer::new(Duration::from_secs(
-            config.server.general_analysis_timeout_seconds,
-        )))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(config.server.general_analysis_timeout_seconds),
+        ))
         .layer(middleware::from_fn_with_state(
             csrf_middleware_state,
             csrf_validation_middleware,
@@ -425,9 +428,10 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         // CORS handling
         .layer(cors_layer)
         // Request timeout (30 seconds)
-        .layer(TimeoutLayer::new(Duration::from_secs(
-            config.server.request_timeout_seconds,
-        )))
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::REQUEST_TIMEOUT,
+            Duration::from_secs(config.server.request_timeout_seconds),
+        ))
         // Per-request GHSA token middleware (must run before handlers)
         .layer(middleware::from_fn(ghsa_token_middleware))
         // Inject auth state into request extensions

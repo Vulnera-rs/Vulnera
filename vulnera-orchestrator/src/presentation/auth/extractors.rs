@@ -10,6 +10,7 @@ use std::sync::Arc;
 use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
+use vulnera_core::domain::organization::value_objects::OrganizationId;
 
 use crate::presentation::middleware::application_error_to_response;
 
@@ -45,6 +46,9 @@ pub struct Auth {
     pub auth_method: AuthMethod,
     pub api_key_id: Option<ApiKeyId>,
     pub is_master_key: bool,
+    /// Organization ID if user is a member of an organization
+    /// Used for org-based rate limiting and analytics
+    pub organization_id: Option<OrganizationId>,
 }
 
 /// State for authentication extractors
@@ -239,6 +243,7 @@ where
                         auth_method: AuthMethod::Cookie,
                         api_key_id: None,
                         is_master_key: false,
+                        organization_id: None, // TODO: Query org membership or include in JWT claims
                     });
                 }
                 Err(_) => {
@@ -272,6 +277,7 @@ where
                     auth_method: AuthMethod::ApiKey,
                     api_key_id: None,
                     is_master_key: true,
+                    organization_id: None, // Master key doesn't belong to orgs
                 });
             }
 
@@ -302,6 +308,7 @@ where
                         auth_method: AuthMethod::ApiKey,
                         api_key_id: Some(validation.api_key_id),
                         is_master_key: false,
+                        organization_id: None, // TODO: Query org membership from api_key or user
                     });
                 }
                 Err(e) => {
@@ -492,5 +499,90 @@ where
             Ok(auth) => Ok(OptionalAuth(Some(auth))),
             Err(_) => Ok(OptionalAuth(None)),
         }
+    }
+}
+
+/// Optional AWS credentials extractor from `X-AWS-Credentials` header
+///
+/// Expects Base64-encoded JSON in the format:
+/// ```json
+/// {
+///   "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+///   "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+///   "session_token": "optional-sts-token",
+///   "region": "us-east-1"
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct OptionalAwsCredentials(pub Option<crate::domain::value_objects::AwsCredentials>);
+
+/// Error response for AWS credentials parsing failures
+#[derive(Debug)]
+pub struct AwsCredentialsError {
+    pub status: StatusCode,
+    pub message: String,
+}
+
+impl IntoResponse for AwsCredentialsError {
+    fn into_response(self) -> Response {
+        let body = serde_json::json!({
+            "error": "INVALID_AWS_CREDENTIALS",
+            "message": self.message
+        });
+        (self.status, axum::Json(body)).into_response()
+    }
+}
+
+impl<S> FromRequestParts<S> for OptionalAwsCredentials
+where
+    S: Send + Sync,
+{
+    type Rejection = AwsCredentialsError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // Try to get X-AWS-Credentials header
+        let header_value = match parts.headers.get("X-AWS-Credentials") {
+            Some(value) => value,
+            None => return Ok(OptionalAwsCredentials(None)),
+        };
+
+        // Parse header value to string
+        let header_str = header_value.to_str().map_err(|_| AwsCredentialsError {
+            status: StatusCode::BAD_REQUEST,
+            message: "X-AWS-Credentials header contains invalid characters".to_string(),
+        })?;
+
+        // Decode Base64
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(header_str)
+            .map_err(|e| AwsCredentialsError {
+                status: StatusCode::BAD_REQUEST,
+                message: format!("Invalid Base64 encoding in X-AWS-Credentials: {}", e),
+            })?;
+
+        // Parse JSON
+        let credentials: crate::domain::value_objects::AwsCredentials =
+            serde_json::from_slice(&decoded).map_err(|e| AwsCredentialsError {
+                status: StatusCode::BAD_REQUEST,
+                message: format!("Invalid JSON in X-AWS-Credentials: {}", e),
+            })?;
+
+        // Validate required fields
+        if credentials.access_key_id.is_empty() {
+            return Err(AwsCredentialsError {
+                status: StatusCode::BAD_REQUEST,
+                message: "access_key_id is required in AWS credentials".to_string(),
+            });
+        }
+
+        if credentials.secret_access_key.is_empty() {
+            return Err(AwsCredentialsError {
+                status: StatusCode::BAD_REQUEST,
+                message: "secret_access_key is required in AWS credentials".to_string(),
+            });
+        }
+
+        Ok(OptionalAwsCredentials(Some(credentials)))
     }
 }
