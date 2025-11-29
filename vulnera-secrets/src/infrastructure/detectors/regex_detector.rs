@@ -1,8 +1,10 @@
 //! Regex-based secret detector
 
 use crate::domain::value_objects::SecretRule;
+use once_cell::sync::OnceCell;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::debug;
 
 /// Regex detector for known secret patterns
@@ -14,8 +16,35 @@ pub struct RegexDetector {
 /// Compiled regex rule with metadata
 #[derive(Clone)]
 struct CompiledRule {
-    regex: Regex,
+    // original regex pattern string - kept for lazy compilation
+    pattern: String,
+    // lazy, thread-safe storage for compiled regex (Arc<Regex> stored in OnceCell)
+    regex_cell: OnceCell<Arc<Regex>>,
     rule: SecretRule,
+}
+
+impl CompiledRule {
+    // Initialize CompiledRule from a SecretRule (if it holds a regex pattern)
+    pub fn new_from_rule(rule: &SecretRule) -> Option<Self> {
+        if let crate::domain::value_objects::RulePattern::Regex(ref pattern) = rule.pattern {
+            Some(Self {
+                pattern: pattern.clone(),
+                regex_cell: OnceCell::new(),
+                rule: rule.clone(),
+            })
+        } else {
+            None
+        }
+    }
+
+    // Get compiled Arc<Regex> for this rule - compile once lazily
+    pub fn get_regex(&self) -> Arc<Regex> {
+        self.regex_cell
+            .get_or_init(|| {
+                Arc::new(Regex::new(&self.pattern).expect("Failed to compile regex pattern"))
+            })
+            .clone()
+    }
 }
 
 impl RegexDetector {
@@ -25,13 +54,12 @@ impl RegexDetector {
         for rule in rules {
             if let crate::domain::value_objects::RulePattern::Regex(ref pattern) = rule.pattern {
                 if let Ok(regex) = Regex::new(pattern) {
-                    compiled_rules.insert(
-                        rule.id.clone(),
-                        CompiledRule {
-                            regex,
-                            rule: rule.clone(),
-                        },
-                    );
+                    if let Some(compiled) = CompiledRule::new_from_rule(&rule) {
+                        compiled.regex_cell.set(Arc::new(regex)).ok();
+                        compiled_rules.insert(rule.id.clone(), compiled);
+                    } else {
+                        tracing::warn!(rule_id = %rule.id, "Rule pattern expected to be Regex but was not; skipping compiled rule setup");
+                    }
                 } else {
                     tracing::warn!(rule_id = %rule.id, "Failed to compile regex pattern");
                 }
@@ -62,7 +90,7 @@ impl RegexDetector {
             }
 
             // Apply regex
-            for cap in compiled_rule.regex.captures_iter(content) {
+            for cap in compiled_rule.get_regex().captures_iter(content) {
                 if let Some(matched) = cap.get(0) {
                     let matched_text = matched.as_str().to_string();
                     let start_pos = matched.start();

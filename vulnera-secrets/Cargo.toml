@@ -29,6 +29,7 @@ tracing = { workspace = true }
 # Secret detection dependencies
 walkdir = { workspace = true }
 regex = { workspace = true }
+globset = { workspace = true }
 once_cell = { workspace = true }
 base64 = { workspace = true }
 hex = { workspace = true }

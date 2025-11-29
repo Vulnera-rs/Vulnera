@@ -5,7 +5,8 @@ use crate::domain::value_objects::{Confidence, SecretRule};
 use crate::infrastructure::detectors::{EntropyDetector, RegexDetector, RegexMatch};
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::verification::{VerificationResult, VerificationService};
-use regex::Regex;
+use globset::{Glob, GlobMatcher};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::debug;
@@ -18,6 +19,8 @@ pub struct DetectorEngine {
     #[allow(dead_code)]
     rule_repository: RuleRepository,
     verification_service: Option<Arc<VerificationService>>,
+    /// Precompiled path matchers per rule for efficient path matching
+    path_matchers: HashMap<String, Vec<GlobMatcher>>,
 }
 
 impl DetectorEngine {
@@ -44,7 +47,8 @@ impl DetectorEngine {
         verification_service: Option<Arc<VerificationService>>,
     ) -> Self {
         let rules = rule_repository.get_all_rules().to_vec();
-        let regex_detector = RegexDetector::new(rules);
+        // Clone rules for detector initialization; we keep a copy to build path matchers
+        let regex_detector = RegexDetector::new(rules.clone());
 
         let entropy_detector = if enable_entropy {
             Some(EntropyDetector::new(base64_threshold, hex_threshold))
@@ -52,11 +56,32 @@ impl DetectorEngine {
             None
         };
 
+        // Pre-compile glob matchers for rule.path_patterns into a HashMap keyed by rule id
+        let mut path_matchers: HashMap<String, Vec<GlobMatcher>> = HashMap::new();
+        for rule in &rules {
+            if rule.path_patterns.is_empty() {
+                continue;
+            }
+            let mut matchers: Vec<GlobMatcher> = Vec::new();
+            for pattern in &rule.path_patterns {
+                match Glob::new(pattern) {
+                    Ok(g) => matchers.push(g.compile_matcher()),
+                    Err(e) => {
+                        tracing::warn!(rule_id = %rule.id, pattern = %pattern, error = %e, "Failed to compile glob pattern");
+                    }
+                }
+            }
+            if !matchers.is_empty() {
+                path_matchers.insert(rule.id.clone(), matchers);
+            }
+        }
+
         Self {
             regex_detector,
             entropy_detector,
             rule_repository,
             verification_service,
+            path_matchers,
         }
     }
 
@@ -369,49 +394,26 @@ impl DetectorEngine {
     }
 
     /// Check whether a rule applies to the supplied file path.
-    /// If a rule defines `path_patterns` the rule only applies when at least one pattern matches the file path.
+    /// Precompiled matchers (from `path_matchers`) are used for efficient matching.
+    /// If a rule defines `path_patterns`, the rule only applies when at least one compiled pattern matches the file path.
     fn rule_applies_to_file(&self, rule: &SecretRule, file_path: &str) -> bool {
         if rule.path_patterns.is_empty() {
             return true;
         }
 
-        for pattern in &rule.path_patterns {
-            if Self::path_matches(pattern, file_path) {
-                return true;
+        // Normalize path separators for matching (Windows -> '/')
+        let path_norm = file_path.replace('\\', "/");
+
+        if let Some(matchers) = self.path_matchers.get(&rule.id) {
+            for matcher in matchers {
+                if matcher.is_match(&path_norm) {
+                    return true;
+                }
             }
         }
 
         false
     }
 
-    /// Test whether a single pattern matches a file path.
-    /// Supports simple glob-like patterns:
-    /// - `**` matches any number of path segments
-    /// - `*` matches any sequence of characters excluding path separators
-    /// - `?` matches a single character
-    fn path_matches(pattern: &str, file_path: &str) -> bool {
-        // Normalize path separators for matching (Windows -> '/')
-        let path_norm = file_path.replace('\\', "/");
-        if let Some(re) = Self::pattern_to_regex(pattern) {
-            return re.is_match(&path_norm);
-        }
-        false
-    }
 
-    /// Convert a glob-style pattern into a Regex. This supports:
-    /// - `**` => match any path segments (including '/')
-    /// - `*` => match any sequence except '/'
-    /// - `?` => match any single char
-    fn pattern_to_regex(pattern: &str) -> Option<Regex> {
-        // Escape pattern so we can safely replace glob tokens
-        let mut escaped = regex::escape(pattern);
-        // `**` => `.*` (across directories)
-        escaped = escaped.replace("\\*\\*", ".*");
-        // `*` => `[^/]*` (within a path segment)
-        escaped = escaped.replace("\\*", "[^/]*");
-        // `?` => `.`
-        escaped = escaped.replace("\\?", ".");
-        let regex_str = format!("^{}$", escaped);
-        Regex::new(&regex_str).ok()
-    }
 }
