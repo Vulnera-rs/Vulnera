@@ -6,19 +6,19 @@ CREATE TABLE IF NOT EXISTS sast_semgrep_rules (
     languages TEXT[] NOT NULL DEFAULT '{}',
     severity VARCHAR(50) NOT NULL DEFAULT 'warning',
     mode VARCHAR(20) NOT NULL DEFAULT 'search',
-    
+
     -- Search mode fields
     pattern TEXT,
     patterns JSONB,
     pattern_either JSONB,
     pattern_regex TEXT,
-    
+
     -- Taint mode fields
     taint_sources JSONB,
     taint_sinks JSONB,
     taint_sanitizers JSONB,
     taint_propagators JSONB,
-    
+
     -- Metadata
     cwe_ids TEXT[] NOT NULL DEFAULT '{}',
     owasp_categories TEXT[] NOT NULL DEFAULT '{}',
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS sast_semgrep_rules (
     fix TEXT,
     fix_regex JSONB,
     metadata JSONB NOT NULL DEFAULT '{}',
-    
+
     -- Status
     enabled BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_sast_semgrep_rules_updated_at ON sast_semgrep_rul
 CREATE TRIGGER sast_semgrep_rules_updated_at
     BEFORE UPDATE ON sast_semgrep_rules
     FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- Add comments for documentation
 COMMENT ON TABLE sast_semgrep_rules IS 'Semgrep YAML rules for taint analysis and complex pattern matching';

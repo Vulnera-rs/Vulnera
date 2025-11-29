@@ -27,7 +27,7 @@ CREATE INDEX IF NOT EXISTS idx_sast_rules_updated_at ON sast_rules(updated_at);
 CREATE TRIGGER sast_rules_updated_at
     BEFORE UPDATE ON sast_rules
     FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at();
+    EXECUTE FUNCTION update_updated_at_column();
 
 -- Add comments for documentation
 COMMENT ON TABLE sast_rules IS 'Tree-sitter pattern-based SAST rules';
