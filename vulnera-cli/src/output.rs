@@ -163,7 +163,7 @@ impl OutputWriter {
     ) -> io::Result<()> {
         match self.format {
             OutputFormat::Json => self.json(vulnerabilities),
-            OutputFormat::Sarif => self.sarif(vulnerabilities),
+            OutputFormat::Sarif => self.sarif_internal(vulnerabilities),
             OutputFormat::Table => {
                 self.vulnerability_table(vulnerabilities);
                 Ok(())
@@ -238,8 +238,71 @@ impl OutputWriter {
         println!("\nTotal: {} vulnerabilities", vulnerabilities.len());
     }
 
-    /// Print vulnerabilities in SARIF format
-    fn sarif<T: Serialize>(&self, vulnerabilities: &[T]) -> io::Result<()> {
+    /// Print findings as a table (public method for commands)
+    pub fn print_findings_table<T: VulnerabilityDisplay>(&self, findings: &[T]) {
+        self.vulnerability_table(findings);
+    }
+
+    /// Print findings in SARIF format (public method for commands)
+    pub fn sarif<T: VulnerabilityDisplay + Serialize>(
+        &self,
+        findings: &[T],
+        tool_name: &str,
+        tool_version: &str,
+    ) -> io::Result<()> {
+        // Convert findings to SARIF results
+        let results: Vec<serde_json::Value> = findings
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                serde_json::json!({
+                    "ruleId": f.id(),
+                    "level": match f.severity().to_lowercase().as_str() {
+                        "critical" | "high" => "error",
+                        "medium" => "warning",
+                        _ => "note"
+                    },
+                    "message": {
+                        "text": f.description()
+                    },
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": f.package()
+                            },
+                            "region": {
+                                "startLine": f.version().trim_start_matches('L').parse::<u32>().unwrap_or(1)
+                            }
+                        }
+                    }],
+                    "partialFingerprints": {
+                        "primaryLocationLineHash": format!("{}_{}", f.id(), i)
+                    }
+                })
+            })
+            .collect();
+
+        let sarif = serde_json::json!({
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": tool_name,
+                        "version": tool_version,
+                        "informationUri": "https://github.com/k5602/vulnera"
+                    }
+                },
+                "results": results
+            }]
+        });
+
+        println!("{}", serde_json::to_string_pretty(&sarif)?);
+        Ok(())
+    }
+
+    /// Print vulnerabilities in SARIF format (internal method)
+    fn sarif_internal<T: Serialize>(&self, vulnerabilities: &[T]) -> io::Result<()> {
         // Basic SARIF structure
         let sarif = serde_json::json!({
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
