@@ -28,18 +28,7 @@ path = "src/main.rs"
 
 [features]
 default = []
-cli = [
-    "dep:clap",
-    "dep:dialoguer",
-    "dep:comfy-table",
-    "dep:keyring",
-    "dep:aes-gcm",
-    "dep:indicatif",
-    "dep:directories",
-    "dep:console",
-    "dep:hostname",
-    "dep:dirs",
-]
+
 
 [dependencies]
 vulnera-core = { path = "vulnera-core" }
@@ -87,6 +76,9 @@ walkdir = { workspace = true }
 
 # Base64 encoding (for encrypted credentials)
 base64 = { workspace = true }
+
+# TLS/Crypto
+rustls = { workspace = true }
 
 # CLI dependencies (optional, enabled by 'cli' feature)
 clap = { workspace = true, optional = true }

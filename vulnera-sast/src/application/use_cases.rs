@@ -5,7 +5,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::SastConfig;
 
-use crate::domain::entities::{Finding as SastFinding, RulePattern, FileSuppressions};
+use crate::domain::entities::{FileSuppressions, Finding as SastFinding, RulePattern};
 use crate::domain::value_objects::Confidence;
 use crate::infrastructure::parsers::{ParserFactory, find_call_node, node_has_literal_argument};
 use crate::infrastructure::rules::{RuleEngine, RuleRepository};
@@ -101,7 +101,14 @@ impl ScanProjectUseCase {
             debug!(rule_count = rules.len(), "Applying rules to file");
 
             // Traverse AST and match rules with suppression and test context
-            self.traverse_and_match(&ast, &rules, &file.path, &suppressions, is_test_context, &mut all_findings);
+            self.traverse_and_match(
+                &ast,
+                &rules,
+                &file.path,
+                &suppressions,
+                is_test_context,
+                &mut all_findings,
+            );
         }
 
         info!(
@@ -204,7 +211,14 @@ impl ScanProjectUseCase {
 
         // Recursively check children
         for child in &node.children {
-            self.traverse_and_match(child, rules, file_path, suppressions, is_test_context, findings);
+            self.traverse_and_match(
+                child,
+                rules,
+                file_path,
+                suppressions,
+                is_test_context,
+                findings,
+            );
         }
     }
 }
