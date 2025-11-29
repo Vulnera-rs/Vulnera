@@ -583,7 +583,12 @@ pub async fn create_app(
 
     // Initialize rate limiter service if enabled
     let rate_limiter_service = if config.server.rate_limit.enabled {
-        match RateLimiterService::new(config.server.rate_limit.clone()).await {
+        match RateLimiterService::new_with_url(
+            config.server.rate_limit.clone(),
+            &config.cache.dragonfly_url,
+        )
+        .await
+        {
             Ok(service) => {
                 tracing::info!("Rate limiter service initialized");
                 Some(Arc::new(service))
