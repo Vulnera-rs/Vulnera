@@ -1,6 +1,6 @@
 //! Default hardcoded security rules
 
-use crate::domain::entities::{Rule, RulePattern, Severity};
+use crate::domain::entities::{MethodCallPattern, Rule, RuleOptions, RulePattern, Severity};
 use crate::domain::value_objects::Language;
 
 /// SQL injection rule
@@ -12,6 +12,7 @@ pub fn sql_injection_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
         pattern: RulePattern::FunctionCall("execute".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -24,6 +25,7 @@ pub fn command_injection_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
         pattern: RulePattern::FunctionCall("exec".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -36,6 +38,7 @@ pub fn unsafe_deserialization_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
         pattern: RulePattern::FunctionCall("pickle.loads".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -48,18 +51,43 @@ pub fn unsafe_function_call_rule() -> Rule {
         severity: Severity::Medium,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
         pattern: RulePattern::FunctionCall("eval".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
-/// Null pointer rule
+/// Null pointer rule - unwrap() can panic on None/Err
 pub fn null_pointer_rule() -> Rule {
     Rule {
         id: "null-pointer".to_string(),
         name: "Potential Null Pointer".to_string(),
-        description: "Potential null pointer dereference".to_string(),
+        description: "Potential panic from unwrap() on None or Err value".to_string(),
         severity: Severity::Medium,
-        languages: vec![Language::Rust], // More relevant for Rust
-        pattern: RulePattern::FunctionCall("unwrap".to_string()),
+        languages: vec![Language::Rust],
+        pattern: RulePattern::MethodCall(MethodCallPattern::new("unwrap")),
+        options: RuleOptions {
+            suppress_in_tests: true,
+            suppress_in_examples: false,
+            suppress_in_benches: false,
+            related_rules: vec!["expect-panic".to_string()],
+        },
+    }
+}
+
+/// Expect panic rule - expect() can panic with a message
+pub fn expect_panic_rule() -> Rule {
+    Rule {
+        id: "expect-panic".to_string(),
+        name: "Potential Panic from expect()".to_string(),
+        description: "Potential panic from expect() on None or Err value".to_string(),
+        severity: Severity::Low, // Lower than unwrap since it provides context
+        languages: vec![Language::Rust],
+        pattern: RulePattern::MethodCall(MethodCallPattern::new("expect")),
+        options: RuleOptions {
+            suppress_in_tests: true,
+            suppress_in_examples: false,
+            suppress_in_benches: false,
+            related_rules: vec!["null-pointer".to_string()],
+        },
     }
 }
 
@@ -71,6 +99,7 @@ pub fn get_default_rules() -> Vec<Rule> {
         unsafe_deserialization_rule(),
         unsafe_function_call_rule(),
         null_pointer_rule(),
+        expect_panic_rule(),
         go_command_injection_rule(),
         c_buffer_overflow_rule(),
         c_command_injection_rule(),
@@ -104,6 +133,7 @@ pub fn go_command_injection_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Go],
         pattern: RulePattern::FunctionCall("exec.Command".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -116,6 +146,7 @@ pub fn c_buffer_overflow_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
         pattern: RulePattern::FunctionCall("strcpy".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -128,6 +159,7 @@ pub fn c_command_injection_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
         pattern: RulePattern::FunctionCall("system".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -140,7 +172,8 @@ pub fn python_subprocess_rule() -> Rule {
         description: "Potential command injection using subprocess".to_string(),
         severity: Severity::High,
         languages: vec![Language::Python],
-        pattern: RulePattern::FunctionCall("subprocess.call".to_string()), // Also matches subprocess.Popen
+        pattern: RulePattern::FunctionCall("subprocess.call".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -152,6 +185,7 @@ pub fn python_yaml_load_rule() -> Rule {
         severity: Severity::Critical,
         languages: vec![Language::Python],
         pattern: RulePattern::FunctionCall("yaml.load".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -163,6 +197,7 @@ pub fn python_ssti_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Python],
         pattern: RulePattern::FunctionCall("render_template_string".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -176,6 +211,7 @@ pub fn js_child_process_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::JavaScript],
         pattern: RulePattern::FunctionCall("child_process.exec".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -186,7 +222,8 @@ pub fn js_xss_rule() -> Rule {
         description: "Potential XSS using dangerouslySetInnerHTML".to_string(),
         severity: Severity::High,
         languages: vec![Language::JavaScript],
-        pattern: RulePattern::FunctionCall("dangerouslySetInnerHTML".to_string()), // React specific but common
+        pattern: RulePattern::FunctionCall("dangerouslySetInnerHTML".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -197,7 +234,8 @@ pub fn js_eval_rule() -> Rule {
         description: "Potential indirect eval using setTimeout/setInterval".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::JavaScript],
-        pattern: RulePattern::FunctionCall("setTimeout".to_string()), // Simplified, ideally checks arg type
+        pattern: RulePattern::FunctionCall("setTimeout".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -211,6 +249,7 @@ pub fn rust_command_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Rust],
         pattern: RulePattern::FunctionCall("Command::new".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -222,6 +261,7 @@ pub fn rust_unsafe_rule() -> Rule {
         severity: Severity::Medium,
         languages: vec![Language::Rust],
         pattern: RulePattern::AstNodeType("unsafe_block".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -235,6 +275,7 @@ pub fn go_sql_injection_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::Go],
         pattern: RulePattern::FunctionCall("sql.Query".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -246,6 +287,7 @@ pub fn go_unsafe_rule() -> Rule {
         severity: Severity::Medium,
         languages: vec![Language::Go],
         pattern: RulePattern::FunctionCall("unsafe.Pointer".to_string()), // Matches call-like usage
+        options: RuleOptions::default(),
     }
 }
 
@@ -259,6 +301,7 @@ pub fn c_gets_rule() -> Rule {
         severity: Severity::Critical,
         languages: vec![Language::C, Language::Cpp],
         pattern: RulePattern::FunctionCall("gets".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -270,6 +313,7 @@ pub fn c_sprintf_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
         pattern: RulePattern::FunctionCall("sprintf".to_string()),
+        options: RuleOptions::default(),
     }
 }
 
@@ -281,5 +325,6 @@ pub fn c_exec_rule() -> Rule {
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
         pattern: RulePattern::FunctionCall("execl".to_string()),
+        options: RuleOptions::default(),
     }
 }

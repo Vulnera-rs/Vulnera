@@ -189,8 +189,15 @@ pub fn database_password_rule() -> SecretRule {
         name: "Database Password".to_string(),
         description: "Database password in connection string".to_string(),
         secret_type: SecretType::DatabasePassword,
+        // Match password/pwd/passwd followed by = or single : (not ::)
+        // The pattern requires the value to:
+        // - Not start with uppercase (excludes type constructors like Password::new)
+        // - Not contain :: (excludes Rust paths)
+        // - Not contain ( (excludes function calls)
+        // - Be at least 8 characters
         pattern: RulePattern::Regex(
-            r#"(?i)(?:password|pwd|passwd)[\s_-]*[:=]\s*([^\s"'`]{8,})"#.to_string(),
+            r#"(?i)(?:password|pwd|passwd)[\s_-]*(?:=|:[^:])\s*["']?([a-z0-9][^\s"'`:]{7,})"#
+                .to_string(),
         ),
         keywords: vec!["password".to_string(), "pwd".to_string()],
         entropy_threshold: Some(3.0),

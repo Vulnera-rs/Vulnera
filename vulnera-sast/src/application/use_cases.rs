@@ -5,7 +5,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::SastConfig;
 
-use crate::domain::entities::{Finding as SastFinding, RulePattern};
+use crate::domain::entities::{Finding as SastFinding, RulePattern, FileSuppressions};
 use crate::domain::value_objects::Confidence;
 use crate::infrastructure::parsers::{ParserFactory, find_call_node, node_has_literal_argument};
 use crate::infrastructure::rules::{RuleEngine, RuleRepository};
@@ -74,6 +74,12 @@ impl ScanProjectUseCase {
                 }
             };
 
+            // Parse suppression comments from the file
+            let suppressions = FileSuppressions::parse(&content);
+
+            // Detect test context for the file
+            let is_test_context = Self::is_test_file(&file.path, &content);
+
             let mut parser = match self.parser_factory.create_parser(&file.language) {
                 Ok(parser) => parser,
                 Err(e) => {
@@ -94,8 +100,8 @@ impl ScanProjectUseCase {
             let rules = self.rule_repository.get_rules_for_language(&file.language);
             debug!(rule_count = rules.len(), "Applying rules to file");
 
-            // Traverse AST and match rules
-            self.traverse_and_match(&ast, &rules, &file.path, &mut all_findings);
+            // Traverse AST and match rules with suppression and test context
+            self.traverse_and_match(&ast, &rules, &file.path, &suppressions, is_test_context, &mut all_findings);
         }
 
         info!(
@@ -108,20 +114,69 @@ impl ScanProjectUseCase {
         })
     }
 
+    /// Check if a file is in a test context
+    fn is_test_file(path: &Path, content: &str) -> bool {
+        // Check path-based test indicators
+        let path_str = path.display().to_string();
+        if path_str.contains("/tests/")
+            || path_str.contains("/test/")
+            || path_str.ends_with("_test.rs")
+            || path_str.ends_with("_test.py")
+            || path_str.ends_with(".test.js")
+            || path_str.ends_with(".test.ts")
+            || path_str.ends_with("_test.go")
+            || path_str.contains("/benches/")
+            || path_str.contains("/examples/")
+        {
+            return true;
+        }
+
+        // Check content-based test indicators (for Rust inline tests)
+        if content.contains("#[cfg(test)]") || content.contains("#[test]") {
+            return true;
+        }
+
+        false
+    }
+
     fn traverse_and_match(
         &self,
         node: &crate::infrastructure::parsers::AstNode,
         rules: &[&crate::domain::entities::Rule],
         file_path: &Path,
+        suppressions: &FileSuppressions,
+        is_test_context: bool,
         findings: &mut Vec<SastFinding>,
     ) {
         // Check each rule against this node
         for rule in rules {
             if self.rule_engine.match_rule(rule, node) {
+                let line = node.start_point.0 + 1; // 1-based line number
+
+                // Check if this finding should be suppressed
+                if suppressions.is_suppressed(line, &rule.id) {
+                    debug!(
+                        rule_id = %rule.id,
+                        line,
+                        "Finding suppressed by comment directive"
+                    );
+                    continue;
+                }
+
+                // Check if this finding should be suppressed due to test context
+                if is_test_context && rule.options.suppress_in_tests {
+                    debug!(
+                        rule_id = %rule.id,
+                        line,
+                        "Finding suppressed in test context"
+                    );
+                    continue;
+                }
+
                 debug!(
                     rule_id = %rule.id,
                     node_type = %node.node_type,
-                    line = node.start_point.0 + 1,
+                    line,
                     "Rule matched"
                 );
 
@@ -133,7 +188,7 @@ impl ScanProjectUseCase {
                     rule_id: rule.id.clone(),
                     location: crate::domain::entities::Location {
                         file_path: file_path.display().to_string(),
-                        line: node.start_point.0 + 1, // Convert to 1-based
+                        line,
                         column: Some(node.start_point.1),
                         end_line: Some(node.end_point.0 + 1),
                         end_column: Some(node.end_point.1),
@@ -149,7 +204,7 @@ impl ScanProjectUseCase {
 
         // Recursively check children
         for child in &node.children {
-            self.traverse_and_match(child, rules, file_path, findings);
+            self.traverse_and_match(child, rules, file_path, suppressions, is_test_context, findings);
         }
     }
 }
@@ -201,6 +256,8 @@ fn calculate_confidence(
                 Confidence::Low
             }
         }
+        // MethodCall patterns are AST-aware and precise - high confidence
+        RulePattern::MethodCall(_) => Confidence::High,
         // Custom patterns - default to medium
         RulePattern::Custom(_) => Confidence::Medium,
     }
