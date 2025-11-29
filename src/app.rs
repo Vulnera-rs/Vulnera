@@ -44,10 +44,11 @@ use vulnera_core::domain::organization::repositories::{
 use vulnera_core::infrastructure::{
     VulneraAdvisorRepository,
     auth::{
-        ApiKeyGenerator, JwtService, PasswordHasher, SqlxAnalysisEventRepository,
-        SqlxApiKeyRepository, SqlxOrganizationMemberRepository, SqlxOrganizationRepository,
-        SqlxPersistedJobResultRepository, SqlxPersonalStatsMonthlyRepository,
-        SqlxSubscriptionLimitsRepository, SqlxUserRepository, SqlxUserStatsMonthlyRepository,
+        ApiKeyGenerator, CacheTokenBlacklistService, JwtService, PasswordHasher,
+        SqlxAnalysisEventRepository, SqlxApiKeyRepository, SqlxOrganizationMemberRepository,
+        SqlxOrganizationRepository, SqlxPersistedJobResultRepository,
+        SqlxPersonalStatsMonthlyRepository, SqlxSubscriptionLimitsRepository, SqlxUserRepository,
+        SqlxUserStatsMonthlyRepository, TokenBlacklistService,
     },
     cache::CacheServiceImpl,
     parsers::ParserFactory,
@@ -460,6 +461,10 @@ pub async fn create_app(
     let password_hasher = Arc::new(PasswordHasher::new());
     let api_key_generator = Arc::new(ApiKeyGenerator::new());
 
+    // Initialize token blacklist service (uses the same dragonfly cache)
+    let token_blacklist: Arc<dyn TokenBlacklistService> =
+        Arc::new(CacheTokenBlacklistService::new(cache_service.clone()));
+
     // Initialize auth use cases
     let login_use_case = Arc::new(LoginUseCase::new(
         user_repository.clone(),
@@ -471,11 +476,15 @@ pub async fn create_app(
         password_hasher.clone(),
         jwt_service.clone(),
     ));
-    let validate_token_use_case = Arc::new(ValidateTokenUseCase::new(jwt_service.clone()));
-    let refresh_token_use_case = Arc::new(RefreshTokenUseCase::new(
+    // Create ValidateTokenUseCase with blacklist checking enabled
+    let validate_token_use_case = Arc::new(ValidateTokenUseCase::with_blacklist(
         jwt_service.clone(),
-        user_repository.clone(),
+        token_blacklist.clone(),
     ));
+    let refresh_token_use_case = Arc::new(
+        RefreshTokenUseCase::new(jwt_service.clone(), user_repository.clone())
+            .with_blacklist(token_blacklist.clone()),
+    );
     let validate_api_key_use_case = Arc::new(ValidateApiKeyUseCase::new(
         api_key_repository.clone(),
         api_key_generator.clone(),
@@ -621,6 +630,7 @@ pub async fn create_app(
         validate_token_use_case,
         refresh_token_use_case,
         validate_api_key_use_case,
+        token_blacklist,
         auth_state,
         // Organization-related
         organization_member_repository,

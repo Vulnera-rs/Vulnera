@@ -91,7 +91,8 @@ When your access token expires (after 24 hours), refresh it:
 # No CSRF token needed - the refresh_token cookie (HttpOnly, SameSite=Strict)
 # already provides sufficient CSRF protection
 curl -X POST http://localhost:3000/api/v1/auth/refresh \
-  -b cookies.txt
+  -b cookies.txt \
+  -c cookies.txt
 ```
 
 **Response:**
@@ -103,7 +104,7 @@ curl -X POST http://localhost:3000/api/v1/auth/refresh \
 }
 ```
 
-New tokens are automatically set in cookies by the server.
+**Important:** The refresh endpoint implements **token rotation** - each refresh invalidates the old refresh token and issues a new one. This limits the damage if a refresh token is compromised. Always use `-c cookies.txt` to save the new refresh token cookie.
 
 ### Logout
 

@@ -39,9 +39,9 @@ use crate::presentation::{
         },
     },
     middleware::{
-        CsrfMiddlewareState, RateLimiterState, csrf_validation_middleware, ghsa_token_middleware,
-        https_enforcement_middleware, logging_middleware, rate_limit_middleware,
-        security_headers_middleware,
+        CsrfMiddlewareState, EarlyAuthState, RateLimiterState, csrf_validation_middleware,
+        early_auth_middleware, ghsa_token_middleware, https_enforcement_middleware,
+        logging_middleware, rate_limit_middleware, security_headers_middleware,
     },
     models::*,
 };
@@ -202,8 +202,12 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         login_use_case: orchestrator_state.login_use_case.clone(),
         register_use_case: orchestrator_state.register_use_case.clone(),
         refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
+        validate_token_use_case: orchestrator_state.validate_token_use_case.clone(),
         auth_state: orchestrator_state.auth_state.clone(),
         token_ttl_hours: config.auth.token_ttl_hours,
+        refresh_token_ttl_hours: config.auth.refresh_token_ttl_hours,
+        token_blacklist: Some(orchestrator_state.token_blacklist.clone()),
+        blacklist_tokens_on_logout: config.auth.blacklist_tokens_on_logout,
         csrf_service: csrf_service.clone(),
         cookie_domain: config.auth.cookie_domain.clone(),
         cookie_secure: config.auth.cookie_secure,
@@ -452,13 +456,28 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         router = router.layer(middleware::from_fn(https_enforcement_middleware));
     }
 
-    // Conditionally add rate limiting middleware
+    // Conditionally add rate limiting middleware with early auth extraction
     if let Some(rate_limiter_service) = &orchestrator_state.rate_limiter_service {
         let rate_limiter_state = Arc::new(RateLimiterState::new(Arc::clone(rate_limiter_service)));
-        router = router.layer(middleware::from_fn_with_state(
-            rate_limiter_state,
-            rate_limit_middleware,
-        ));
+
+        // Early auth middleware runs BEFORE rate limiting to properly identify authenticated users
+        // This ensures authenticated requests get the correct rate limit tier
+        let early_auth_state = Arc::new(EarlyAuthState {
+            validate_token: orchestrator_state.validate_token_use_case.clone(),
+            validate_api_key: orchestrator_state.auth_state.validate_api_key.clone(),
+        });
+
+        // Layer order is reversed - rate_limit runs first, then early_auth
+        // So we add rate_limit first, then early_auth (which will execute before rate_limit)
+        router = router
+            .layer(middleware::from_fn_with_state(
+                rate_limiter_state,
+                rate_limit_middleware,
+            ))
+            .layer(middleware::from_fn_with_state(
+                early_auth_state,
+                early_auth_middleware,
+            ));
     }
 
     router

@@ -49,8 +49,8 @@ burst_size = 5
 [server.rate_limit.costs]
 get = 1      # Read operations
 post = 2     # Write operations
-analysis = 5 # Dependency scanning, SAST, etc.
-llm = 10     # LLM operations (explanations, code fixes)
+analysis = 3 # Dependency scanning, SAST, etc.
+llm = 6    # LLM operations (explanations, code fixes)
 
 # Auth endpoint brute-force protection (sliding window algorithm)
 [server.rate_limit.auth_protection]
@@ -86,7 +86,7 @@ cache_extension_results = true     # Cache results for faster repeated analysis
 # Background vulnerability data synchronization
 enabled = true
 interval_hours = 8            # Re-sync every 8 hours (GHSA, OSV, NVD)
-on_startup = true             # Sync immediately on server start
+on_startup = false             # Sync immediately on server start
 shutdown_timeout_seconds = 30 # Max wait time for sync task on shutdown
 
 [analytics]
