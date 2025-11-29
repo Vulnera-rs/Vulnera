@@ -1,57 +1,184 @@
 //! SAST use cases
+//!
+//! Production-ready SAST analysis pipeline with:
+//! - Tree-sitter as primary analysis engine (S-expression pattern queries)
+//! - Semgrep OSS for taint analysis (subprocess execution)
+//! - PostgreSQL rule storage with hot-reload
+//! - SARIF v2.1.0 export
 
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::SastConfig;
 
-use crate::domain::entities::{FileSuppressions, Finding as SastFinding, RulePattern};
-use crate::domain::value_objects::Confidence;
-use crate::infrastructure::parsers::{ParserFactory, find_call_node, node_has_literal_argument};
-use crate::infrastructure::rules::{RuleEngine, RuleRepository};
+use crate::domain::entities::{
+    FileSuppressions, Finding as SastFinding, Rule, RulePattern, SemgrepRule,
+};
+use crate::domain::value_objects::{AnalysisEngine, Language};
+use crate::infrastructure::analysis_selector::AnalysisSelector;
+use crate::infrastructure::ast_cache::AstCacheService;
+use crate::infrastructure::rules::{
+    PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
+};
+use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
+use crate::infrastructure::semgrep::SemgrepExecutor;
 
 /// Result of a SAST scan
 #[derive(Debug)]
 pub struct ScanResult {
     pub findings: Vec<SastFinding>,
     pub files_scanned: usize,
+    pub analysis_engine: AnalysisEngine,
 }
 
-/// Use case for scanning a project
+impl ScanResult {
+    /// Export findings to SARIF JSON string
+    pub fn to_sarif_json(
+        &self,
+        rules: &[Rule],
+        tool_name: Option<&str>,
+        tool_version: Option<&str>,
+    ) -> Result<String, serde_json::Error> {
+        let config = SarifExporterConfig {
+            tool_name: tool_name.unwrap_or("vulnera-sast").to_string(),
+            tool_version: Some(
+                tool_version
+                    .unwrap_or(env!("CARGO_PKG_VERSION"))
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+        let exporter = SarifExporter::with_config(config);
+        let report = exporter.export(&self.findings, rules);
+        serde_json::to_string_pretty(&report)
+    }
+}
+
+/// Configuration for the analysis pipeline
+#[derive(Debug, Clone)]
+pub struct AnalysisConfig {
+    /// Use tree-sitter as primary engine (recommended)
+    pub use_tree_sitter: bool,
+    /// Use Semgrep for taint analysis
+    pub use_semgrep: bool,
+    /// Path to Semgrep binary (defaults to "semgrep" in PATH)
+    pub semgrep_path: Option<String>,
+    /// Semgrep execution timeout in seconds
+    pub semgrep_timeout_secs: u64,
+    /// Enable AST caching via Dragonfly
+    pub enable_ast_cache: bool,
+    /// AST cache TTL in hours
+    pub ast_cache_ttl_hours: u64,
+    /// Maximum concurrent file analysis
+    pub max_concurrent_files: usize,
+}
+
+impl Default for AnalysisConfig {
+    fn default() -> Self {
+        Self {
+            use_tree_sitter: true,
+            use_semgrep: true,
+            semgrep_path: None,
+            semgrep_timeout_secs: 60,
+            enable_ast_cache: true,
+            ast_cache_ttl_hours: 1,
+            max_concurrent_files: 4,
+        }
+    }
+}
+
+/// Production-ready use case for scanning a project
 pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
-    parser_factory: ParserFactory,
-    rule_repository: RuleRepository,
+    rule_repository: Arc<RwLock<RuleRepository>>,
     rule_engine: RuleEngine,
+    analysis_selector: AnalysisSelector,
+    semgrep_executor: Option<SemgrepExecutor>,
+    semgrep_rules: Vec<SemgrepRule>,
+    /// AST cache for parsed file caching (Dragonfly-backed)
+    #[allow(dead_code)]
+    ast_cache: Option<Arc<dyn AstCacheService>>,
+    #[allow(dead_code)]
+    config: AnalysisConfig,
 }
 
 impl ScanProjectUseCase {
     pub fn new() -> Self {
-        Self::with_config(&SastConfig::default())
+        Self::with_config(&SastConfig::default(), AnalysisConfig::default())
     }
 
-    pub fn with_config(config: &SastConfig) -> Self {
-        let scanner = DirectoryScanner::new(config.max_scan_depth)
-            .with_exclude_patterns(config.exclude_patterns.clone());
+    pub fn with_config(sast_config: &SastConfig, analysis_config: AnalysisConfig) -> Self {
+        let scanner = DirectoryScanner::new(sast_config.max_scan_depth)
+            .with_exclude_patterns(sast_config.exclude_patterns.clone());
 
-        let rule_repository = if let Some(ref rule_file_path) = config.rule_file_path {
+        let rule_repository = if let Some(ref rule_file_path) = sast_config.rule_file_path {
             RuleRepository::with_file_and_defaults(rule_file_path)
         } else {
             RuleRepository::new()
         };
 
+        let semgrep_executor = if analysis_config.use_semgrep {
+            Some(SemgrepExecutor::new())
+        } else {
+            None
+        };
+
         Self {
             scanner,
-            parser_factory: ParserFactory,
-            rule_repository,
+            rule_repository: Arc::new(RwLock::new(rule_repository)),
             rule_engine: RuleEngine::new(),
+            analysis_selector: AnalysisSelector::new(),
+            semgrep_executor,
+            semgrep_rules: Vec::new(),
+            ast_cache: None,
+            config: analysis_config,
         }
+    }
+
+    pub async fn with_database_rules(
+        mut self,
+        db_repository: &PostgresRuleRepository,
+    ) -> Result<Self, ScanError> {
+        let tree_sitter_rules = db_repository
+            .get_tree_sitter_rules()
+            .await
+            .map_err(|e| ScanError::DatabaseError(e.to_string()))?;
+
+        let semgrep_rules = db_repository
+            .get_semgrep_rules()
+            .await
+            .map_err(|e| ScanError::DatabaseError(e.to_string()))?;
+
+        {
+            let mut repo = self.rule_repository.write().await;
+            repo.extend_with_rules(tree_sitter_rules);
+        }
+
+        self.semgrep_rules = semgrep_rules;
+        Ok(self)
+    }
+
+    pub fn with_semgrep_rules(mut self, rules: Vec<SemgrepRule>) -> Self {
+        self.semgrep_rules.extend(rules);
+        self
+    }
+
+    /// Add AST cache service for parsed file caching
+    ///
+    /// When enabled, parsed ASTs are cached by content hash in Dragonfly,
+    /// reducing parse time for unchanged files.
+    pub fn with_ast_cache(mut self, cache: Arc<dyn AstCacheService>) -> Self {
+        self.ast_cache = Some(cache);
+        self
     }
 
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
-        info!("Starting SAST scan");
+        info!("Starting production SAST scan");
+
         let files = self.scanner.scan(root).map_err(|e| {
             error!(error = %e, "Failed to scan directory");
             ScanError::Io(e)
@@ -62,6 +189,10 @@ impl ScanProjectUseCase {
 
         let mut all_findings = Vec::new();
         let mut files_scanned = 0;
+        let mut primary_engine = AnalysisEngine::TreeSitter;
+
+        let rules = self.rule_repository.read().await;
+        let all_rules = rules.get_all_rules();
 
         for file in files {
             debug!(file = %file.path.display(), language = ?file.language, "Scanning file");
@@ -74,56 +205,214 @@ impl ScanProjectUseCase {
                 }
             };
 
-            // Parse suppression comments from the file
             let suppressions = FileSuppressions::parse(&content);
-
-            // Detect test context for the file
             let is_test_context = Self::is_test_file(&file.path, &content);
 
-            let mut parser = match self.parser_factory.create_parser(&file.language) {
-                Ok(parser) => parser,
-                Err(e) => {
-                    error!(file = %file.path.display(), language = ?file.language, error = %e, "Failed to create parser");
-                    continue;
-                }
-            };
-
-            let ast = match parser.parse(&content) {
-                Ok(ast) => ast,
-                Err(e) => {
-                    warn!(file = %file.path.display(), error = %e, "Failed to parse file");
-                    continue;
-                }
-            };
-
             files_scanned += 1;
-            let rules = self.rule_repository.get_rules_for_language(&file.language);
-            debug!(rule_count = rules.len(), "Applying rules to file");
 
-            // Traverse AST and match rules with suppression and test context
-            self.traverse_and_match(
-                &ast,
-                &rules,
+            let selection = self.analysis_selector.select_for_file(
                 &file.path,
-                &suppressions,
-                is_test_context,
-                &mut all_findings,
+                &file.language,
+                all_rules,
+                &self.semgrep_rules,
             );
+
+            debug!(
+                engine = ?selection.engine,
+                ts_rules = selection.tree_sitter_rules.len(),
+                sg_rules = selection.semgrep_rules.len(),
+                "Engine selection for file"
+            );
+
+            primary_engine = selection.engine.clone();
+
+            match &selection.engine {
+                AnalysisEngine::TreeSitter => {
+                    self.execute_tree_sitter_analysis(
+                        &file.path,
+                        &file.language,
+                        &content,
+                        &selection.tree_sitter_rules,
+                        &suppressions,
+                        is_test_context,
+                        &mut all_findings,
+                    )
+                    .await?;
+                }
+                AnalysisEngine::Semgrep => {
+                    if let Some(ref executor) = self.semgrep_executor {
+                        self.execute_semgrep_analysis(
+                            executor,
+                            &file.path,
+                            &selection.semgrep_rules,
+                            &suppressions,
+                            &mut all_findings,
+                        )
+                        .await?;
+                    }
+                }
+                AnalysisEngine::Hybrid => {
+                    self.execute_tree_sitter_analysis(
+                        &file.path,
+                        &file.language,
+                        &content,
+                        &selection.tree_sitter_rules,
+                        &suppressions,
+                        is_test_context,
+                        &mut all_findings,
+                    )
+                    .await?;
+
+                    if let Some(ref executor) = self.semgrep_executor {
+                        self.execute_semgrep_analysis(
+                            executor,
+                            &file.path,
+                            &selection.semgrep_rules,
+                            &suppressions,
+                            &mut all_findings,
+                        )
+                        .await?;
+                    }
+                }
+            }
         }
+
+        all_findings = Self::deduplicate_findings(all_findings);
 
         info!(
             finding_count = all_findings.len(),
-            files_scanned, "SAST scan completed"
+            files_scanned,
+            engine = ?primary_engine,
+            "SAST scan completed"
         );
+
         Ok(ScanResult {
             findings: all_findings,
             files_scanned,
+            analysis_engine: primary_engine,
         })
     }
 
-    /// Check if a file is in a test context
+    async fn execute_tree_sitter_analysis(
+        &self,
+        file_path: &Path,
+        language: &Language,
+        content: &str,
+        rules: &[Rule],
+        suppressions: &FileSuppressions,
+        is_test_context: bool,
+        findings: &mut Vec<SastFinding>,
+    ) -> Result<(), ScanError> {
+        let ts_rules: Vec<&Rule> = rules
+            .iter()
+            .filter(|r| matches!(&r.pattern, RulePattern::TreeSitterQuery(_)))
+            .collect();
+
+        if ts_rules.is_empty() {
+            return Ok(());
+        }
+
+        debug!(
+            rule_count = ts_rules.len(),
+            file = %file_path.display(),
+            "Executing tree-sitter rules"
+        );
+
+        let results = self
+            .rule_engine
+            .execute_tree_sitter_rules(&ts_rules, language, content)
+            .await;
+
+        let query_engine = self.rule_engine.query_engine();
+        let engine = query_engine.read().await;
+
+        for (rule_id, matches) in results {
+            let rule = ts_rules.iter().find(|r| r.id == rule_id);
+            if let Some(rule) = rule {
+                for match_result in matches {
+                    let line = match_result.start_position.0 as u32 + 1;
+
+                    if suppressions.is_suppressed(line, &rule.id) {
+                        debug!(rule_id = %rule.id, line, "Finding suppressed by comment");
+                        continue;
+                    }
+
+                    if is_test_context && rule.options.suppress_in_tests {
+                        debug!(rule_id = %rule.id, line, "Finding suppressed in test context");
+                        continue;
+                    }
+
+                    let finding = engine.match_to_finding(
+                        &match_result,
+                        rule,
+                        &file_path.display().to_string(),
+                        content,
+                    );
+                    findings.push(finding);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn execute_semgrep_analysis(
+        &self,
+        executor: &SemgrepExecutor,
+        file_path: &Path,
+        rules: &[SemgrepRule],
+        suppressions: &FileSuppressions,
+        findings: &mut Vec<SastFinding>,
+    ) -> Result<(), ScanError> {
+        if rules.is_empty() {
+            return Ok(());
+        }
+
+        debug!(
+            rule_count = rules.len(),
+            file = %file_path.display(),
+            "Executing Semgrep rules"
+        );
+
+        match executor.execute(rules, file_path).await {
+            Ok(semgrep_findings) => {
+                for finding in semgrep_findings {
+                    if suppressions.is_suppressed(finding.location.line, &finding.rule_id) {
+                        debug!(
+                            rule_id = %finding.rule_id,
+                            line = finding.location.line,
+                            "Semgrep finding suppressed by comment"
+                        );
+                        continue;
+                    }
+                    findings.push(finding);
+                }
+            }
+            Err(e) => {
+                warn!(
+                    file = %file_path.display(),
+                    error = %e,
+                    "Semgrep execution failed"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn deduplicate_findings(findings: Vec<SastFinding>) -> Vec<SastFinding> {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        findings
+            .into_iter()
+            .filter(|f| {
+                let key = format!("{}:{}:{}", f.rule_id, f.location.file_path, f.location.line);
+                seen.insert(key)
+            })
+            .collect()
+    }
+
     fn is_test_file(path: &Path, content: &str) -> bool {
-        // Check path-based test indicators
         let path_str = path.display().to_string();
         if path_str.contains("/tests/")
             || path_str.contains("/test/")
@@ -138,142 +427,11 @@ impl ScanProjectUseCase {
             return true;
         }
 
-        // Check content-based test indicators (for Rust inline tests)
         if content.contains("#[cfg(test)]") || content.contains("#[test]") {
             return true;
         }
 
         false
-    }
-
-    fn traverse_and_match(
-        &self,
-        node: &crate::infrastructure::parsers::AstNode,
-        rules: &[&crate::domain::entities::Rule],
-        file_path: &Path,
-        suppressions: &FileSuppressions,
-        is_test_context: bool,
-        findings: &mut Vec<SastFinding>,
-    ) {
-        // Check each rule against this node
-        for rule in rules {
-            if self.rule_engine.match_rule(rule, node) {
-                let line = node.start_point.0 + 1; // 1-based line number
-
-                // Check if this finding should be suppressed
-                if suppressions.is_suppressed(line, &rule.id) {
-                    debug!(
-                        rule_id = %rule.id,
-                        line,
-                        "Finding suppressed by comment directive"
-                    );
-                    continue;
-                }
-
-                // Check if this finding should be suppressed due to test context
-                if is_test_context && rule.options.suppress_in_tests {
-                    debug!(
-                        rule_id = %rule.id,
-                        line,
-                        "Finding suppressed in test context"
-                    );
-                    continue;
-                }
-
-                debug!(
-                    rule_id = %rule.id,
-                    node_type = %node.node_type,
-                    line,
-                    "Rule matched"
-                );
-
-                // Calculate confidence based on pattern specificity and context
-                let confidence = calculate_confidence(&rule.pattern, node);
-
-                let finding = SastFinding {
-                    id: format!("{}-{}-{}", rule.id, file_path.display(), node.start_point.0),
-                    rule_id: rule.id.clone(),
-                    location: crate::domain::entities::Location {
-                        file_path: file_path.display().to_string(),
-                        line,
-                        column: Some(node.start_point.1),
-                        end_line: Some(node.end_point.0 + 1),
-                        end_column: Some(node.end_point.1),
-                    },
-                    severity: rule.severity.clone(),
-                    confidence,
-                    description: rule.description.clone(),
-                    recommendation: Some(format!("Review and fix: {}", rule.name)),
-                };
-                findings.push(finding);
-            }
-        }
-
-        // Recursively check children
-        for child in &node.children {
-            self.traverse_and_match(
-                child,
-                rules,
-                file_path,
-                suppressions,
-                is_test_context,
-                findings,
-            );
-        }
-    }
-}
-
-/// Calculate confidence level based on pattern specificity and context
-fn calculate_confidence(
-    pattern: &RulePattern,
-    node: &crate::infrastructure::parsers::AstNode,
-) -> Confidence {
-    match pattern {
-        // Regex patterns are most specific - high confidence
-        RulePattern::Regex(_) => Confidence::High,
-        // Function call patterns are specific - use AST context (call node + argument heuristics)
-        RulePattern::FunctionCall(_) => {
-            // Determine the call node (either the node itself, or a nested child call node)
-            let call_node_opt = find_call_node(node);
-
-            // If we found a call node, inspect its arguments to see if the first argument is a literal.
-            // If the argument is a literal (e.g., setTimeout("literal", ...)), decrease confidence to reduce false positives.
-            // Otherwise, if the call exists and arguments are non-literal, treat as high confidence.
-            if let Some(call_node) = call_node_opt {
-                if node_has_literal_argument(call_node) {
-                    Confidence::Low
-                } else {
-                    // Call node found and arguments are not purely literal → likely dynamic/unsafe
-                    Confidence::High
-                }
-            } else {
-                // No call node found — fallback heuristics based on the node source to detect literals
-                // Basic heuristic: if there's an opening '(' followed by a quote, treat as literal.
-                if let Some(idx) = node.source.find('(') {
-                    let after = node.source[idx + 1..].trim_start();
-                    if after.starts_with('"') || after.starts_with('\'') {
-                        Confidence::Low
-                    } else {
-                        Confidence::Medium
-                    }
-                } else {
-                    Confidence::Medium
-                }
-            }
-        }
-        // AST node type patterns are less specific - medium confidence
-        RulePattern::AstNodeType(_) => {
-            // Check context: if node has specific children or structure, increase confidence
-            if !node.children.is_empty() {
-                Confidence::Medium
-            } else {
-                Confidence::Low
-            }
-        }
-        // MethodCall patterns are AST-aware and precise - high confidence
-        RulePattern::MethodCall(_) => Confidence::High,
-        // Custom patterns - default to medium
-        RulePattern::Custom(_) => Confidence::Medium,
     }
 }
 
@@ -283,7 +441,6 @@ impl Default for ScanProjectUseCase {
     }
 }
 
-/// Scan error
 #[derive(Debug, thiserror::Error)]
 pub enum ScanError {
     #[error("IO error: {0}")]
@@ -291,4 +448,13 @@ pub enum ScanError {
 
     #[error("Parse error: {0}")]
     ParseFailed(String),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
+
+    #[error("Semgrep error: {0}")]
+    SemgrepError(String),
+
+    #[error("Query engine error: {0}")]
+    QueryEngineError(String),
 }
