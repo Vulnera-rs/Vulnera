@@ -23,6 +23,7 @@ async fn start_redis() -> (testcontainers::ContainerAsync<GenericImage>, String)
 
 /// Integration test for DragonflyCache
 #[tokio::test]
+#[ignore]
 async fn test_dragonfly_cache_integration() {
     let (_container, url) = start_redis().await;
 
@@ -53,6 +54,7 @@ async fn test_dragonfly_cache_integration() {
 
 /// Integration test for DragonflyCache with compression
 #[tokio::test]
+#[ignore]
 async fn test_dragonfly_cache_compression_integration() {
     let (_container, url) = start_redis().await;
 
@@ -82,6 +84,7 @@ async fn test_dragonfly_cache_compression_integration() {
 
 /// Integration test for DragonflyCache TTL expiration
 #[tokio::test]
+#[ignore]
 async fn test_dragonfly_cache_ttl_integration() {
     let (_container, url) = start_redis().await;
 

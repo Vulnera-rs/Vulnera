@@ -97,6 +97,7 @@ directories = { workspace = true, optional = true }
 console = { workspace = true, optional = true }
 hostname = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
+tempfile.workspace = true
 
 [workspace.package]
 version = "0.3.2"
