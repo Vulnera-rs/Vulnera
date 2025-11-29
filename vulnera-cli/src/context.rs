@@ -17,7 +17,7 @@ use crate::output::OutputWriter;
 use crate::quota_tracker::QuotaTracker;
 
 /// Default server URL for API calls
-pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.dev";
+pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.studio/";
 
 /// Lightweight context for CLI operations
 ///
@@ -71,16 +71,15 @@ impl CliContext {
         // Initialize quota tracker
         let quota = QuotaTracker::new(api_key.is_some())?;
 
-        // Determine server URL
+        // Determine server URL (from CLI flag or config)
         let server_url = cli
             .server
             .clone()
             .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
 
-        // Create API client if not offline
+        // Create API client if not offline (use resolved server URL)
         let api_client = if !cli.offline {
-            let mut client =
-                VulneraClient::new(config.server.host.clone(), config.server.port, None)?;
+            let mut client = VulneraClient::with_url(server_url.clone(), None)?;
             if let Some(key) = &api_key {
                 client = client.with_api_key(key.clone());
             }

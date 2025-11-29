@@ -75,6 +75,16 @@ impl AnalysisExecutor {
         self.offline_mode
     }
 
+    /// Check if API client is available
+    pub fn has_api_client(&self) -> bool {
+        self.api_client.is_some()
+    }
+
+    /// Get a reference to the API client (if available)
+    pub fn get_api_client(&self) -> Option<&VulneraClient> {
+        self.api_client.as_ref()
+    }
+
     /// Run SAST analysis locally
     pub async fn run_sast(&self, source_path: &Path) -> Result<LocalAnalysisResult> {
         let job_id = Uuid::new_v4();

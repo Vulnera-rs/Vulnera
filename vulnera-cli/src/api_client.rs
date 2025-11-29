@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Default server URL
-pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.dev";
+pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.studio/";
 
 /// API client for Vulnera server
 #[derive(Clone)]
@@ -22,19 +22,24 @@ pub struct VulneraClient {
     api_key: Option<String>,
 }
 
-/// Request for dependency analysis
-#[derive(Debug, Serialize)]
-pub struct DependencyAnalysisRequest {
-    pub files: Vec<DependencyFileRequest>,
-}
-
 /// Individual dependency file for analysis
 #[derive(Debug, Serialize)]
 pub struct DependencyFileRequest {
     pub filename: String,
-    pub content: String,
+    pub file_content: String,
+    pub ecosystem: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_path: Option<String>,
+}
+
+/// Batch dependency analysis request matching server API
+#[derive(Debug, Serialize)]
+pub struct BatchDependencyAnalysisRequest {
+    pub files: Vec<DependencyFileRequest>,
+    #[serde(default)]
+    pub enable_cache: bool,
+    #[serde(default)]
+    pub compact_mode: bool,
 }
 
 /// Response from dependency analysis
@@ -151,7 +156,7 @@ impl VulneraClient {
     /// Create a new API client
     pub fn new(host: String, port: u16, api_key: Option<String>) -> Result<Self> {
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(600))
             .connect_timeout(Duration::from_secs(10))
             .user_agent(format!("vulnera-cli/{}", env!("CARGO_PKG_VERSION")))
             .build()
@@ -180,7 +185,7 @@ impl VulneraClient {
     /// Create with a full URL (for testing)
     pub fn with_url(base_url: String, api_key: Option<String>) -> Result<Self> {
         let client = Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(600))
             .connect_timeout(Duration::from_secs(10))
             .user_agent(format!("vulnera-cli/{}", env!("CARGO_PKG_VERSION")))
             .build()
@@ -291,10 +296,21 @@ impl VulneraClient {
         for name in manifest_names {
             let file_path = path.join(name);
             if file_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&file_path) {
+                if let Ok(file_content) = std::fs::read_to_string(&file_path) {
+                    let ecosystem = match name {
+                        "package.json" | "package-lock.json" => "npm".to_string(),
+                        "Cargo.toml" | "Cargo.lock" => "cargo".to_string(),
+                        "requirements.txt" => "pypi".to_string(),
+                        "Pipfile" | "pyproject.toml" => "pypi".to_string(),
+                        "pom.xml" => "maven".to_string(),
+                        "build.gradle" | "build.gradle.kts" => "gradle".to_string(),
+                        "go.mod" | "go.sum" => "go".to_string(),
+                        _ => "unknown".to_string(),
+                    };
                     files.push(DependencyFileRequest {
                         filename: name.to_string(),
-                        content,
+                        file_content,
+                        ecosystem,
                         workspace_path: Some(path.to_string_lossy().to_string()),
                     });
                 }
@@ -309,9 +325,16 @@ impl VulneraClient {
         &self,
         files: Vec<DependencyFileRequest>,
     ) -> Result<DependencyAnalysisResponse> {
-        let url = format!("{}/api/v1/dependencies/analyze", self.base_url);
+        let url = format!(
+            "{}/api/v1/dependencies/analyze",
+            self.base_url.trim_end_matches('/')
+        );
 
-        let request = DependencyAnalysisRequest { files };
+        let request = BatchDependencyAnalysisRequest {
+            files,
+            enable_cache: true,
+            compact_mode: false,
+        };
 
         let mut req = self.client.post(&url).json(&request);
 
@@ -319,10 +342,15 @@ impl VulneraClient {
             req = req.header("X-API-Key", api_key);
         }
 
-        let response = req
-            .send()
-            .await
-            .context("Failed to send request to server")?;
+        let response = req.send().await.map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to send request to server at {}: {} (is_connect: {}, is_timeout: {})",
+                url,
+                e,
+                e.is_connect(),
+                e.is_timeout()
+            )
+        })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -347,16 +375,41 @@ impl VulneraClient {
     }
 
     /// Verify an API key with the server (raw response)
+    /// Uses the /api/v1/dependencies/analyze endpoint with a minimal request
     pub async fn verify_api_key_raw(&self, api_key: &str) -> Result<VerifyApiKeyResponse> {
-        let url = format!("{}/api/v1/auth/verify", self.base_url);
+        let url = format!(
+            "{}/api/v1/dependencies/analyze",
+            self.base_url.trim_end_matches('/')
+        );
+
+        // Create a minimal dependency file request to verify the API key
+        let verify_request = BatchDependencyAnalysisRequest {
+            files: vec![DependencyFileRequest {
+                filename: "package.json".to_string(),
+                file_content: "{}".to_string(),
+                ecosystem: "npm".to_string(),
+                workspace_path: None,
+            }],
+            enable_cache: false,
+            compact_mode: true,
+        };
 
         let response = self
             .client
-            .get(&url)
+            .post(&url)
             .header("X-API-Key", api_key)
+            .json(&verify_request)
             .send()
             .await
-            .context("Failed to connect to server")?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to connect to server at {}: {} (is_connect: {}, is_timeout: {})",
+                    url,
+                    e,
+                    e.is_connect(),
+                    e.is_timeout()
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -371,15 +424,18 @@ impl VulneraClient {
             return Err(self.handle_error_response(status, response).await);
         }
 
-        response
-            .json::<VerifyApiKeyResponse>()
-            .await
-            .context("Failed to parse verification response")
+        // If we got a successful response, the API key is valid
+        Ok(VerifyApiKeyResponse {
+            valid: true,
+            user_id: None,
+            tier: None,
+            daily_limit: None,
+        })
     }
 
     /// Get quota status from server
     pub async fn get_quota(&self) -> Result<QuotaStatusResponse> {
-        let url = format!("{}/api/v1/quota", self.base_url);
+        let url = format!("{}/api/v1/quota", self.base_url.trim_end_matches('/'));
 
         let mut req = self.client.get(&url);
 
@@ -387,7 +443,15 @@ impl VulneraClient {
             req = req.header("X-API-Key", api_key);
         }
 
-        let response = req.send().await.context("Failed to connect to server")?;
+        let response = req.send().await.map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to connect to server at {}: {} (is_connect: {}, is_timeout: {})",
+                url,
+                e,
+                e.is_connect(),
+                e.is_timeout()
+            )
+        })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -402,7 +466,7 @@ impl VulneraClient {
 
     /// Check if server is reachable
     pub async fn health_check(&self) -> Result<bool> {
-        let url = format!("{}/health", self.base_url);
+        let url = format!("{}/health", self.base_url.trim_end_matches('/'));
 
         match self.client.get(&url).send().await {
             Ok(response) => Ok(response.status().is_success()),

@@ -20,7 +20,6 @@ use vulnera_sast::module::SastModule;
 use vulnera_secrets::module::SecretDetectionModule;
 
 use crate::Cli;
-use crate::api_client::VulneraClient;
 use crate::context::CliContext;
 use crate::exit_codes;
 use crate::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
@@ -139,7 +138,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
 
     // Show analysis start
     if !cli.quiet {
-        ctx.output.header("Vulnera Analysis");
+        ctx.output.banner();
         ctx.output.info(&format!("Analyzing: {:?}", path));
 
         if cli.offline {
@@ -271,7 +270,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
                 ));
             }
 
-            // Show modules run
+            // Show modules run with styling
+            ctx.output.divider();
             ctx.output
                 .print(&format!("Modules: {}", result.modules_run.join(", ")));
 
@@ -281,7 +281,8 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
             }
 
             ctx.output
-                .print(&format!("\nCompleted in {:.2}s", duration.as_secs_f64()));
+                .print(&format!("✓ Completed in {:.2}s", duration.as_secs_f64()));
+            ctx.output.divider();
         }
     }
 
@@ -418,18 +419,20 @@ async fn run_deps_analysis(
     result: &mut AnalysisResult,
     min_severity: &str,
 ) {
-    let api_key = ctx.credentials.get_api_key().ok().flatten();
+    // Use the executor's already-configured API client if available
+    if !ctx.executor.has_api_client() {
+        result
+            .warnings
+            .push("Dependency analysis requires server connection".to_string());
+        return;
+    }
 
-    let client = match VulneraClient::new(
-        ctx.config.server.host.clone(),
-        ctx.config.server.port,
-        api_key,
-    ) {
-        Ok(c) => c,
-        Err(e) => {
+    let client = match ctx.executor.get_api_client() {
+        Some(c) => c,
+        None => {
             result
                 .warnings
-                .push(format!("Failed to create API client: {}", e));
+                .push("API client not available for dependency analysis".to_string());
             return;
         }
     };
