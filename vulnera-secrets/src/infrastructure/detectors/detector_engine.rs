@@ -1,10 +1,11 @@
 //! Detector engine that orchestrates multiple detectors
 
 use crate::domain::entities::{Location, SecretFinding, SecretType, Severity};
-use crate::domain::value_objects::Confidence;
+use crate::domain::value_objects::{Confidence, SecretRule};
 use crate::infrastructure::detectors::{EntropyDetector, RegexDetector, RegexMatch};
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::verification::{VerificationResult, VerificationService};
+use regex::Regex;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::debug;
@@ -75,6 +76,12 @@ impl DetectorEngine {
             // Run regex detection
             let regex_matches = self.regex_detector.detect_line(line, line_number);
             for regex_match in regex_matches {
+                // Skip matches when this rule defines specific path_patterns and they do not match this file path
+                if !self.rule_applies_to_file(&regex_match.rule, &file_path_str) {
+                    debug!(file = %file_path_str, rule_id = %regex_match.rule_id, "Skipping finding - rule path_patterns do not match this file path");
+                    continue;
+                }
+
                 let mut confidence = self.calculate_confidence_for_regex_match(&regex_match);
                 let severity = self.determine_severity(&regex_match.rule.secret_type);
 
@@ -215,6 +222,12 @@ impl DetectorEngine {
             // Run regex detection
             let regex_matches = self.regex_detector.detect_line(line, line_number);
             for regex_match in regex_matches {
+                // Skip matches when this rule defines specific path_patterns and they do not match this file path
+                if !self.rule_applies_to_file(&regex_match.rule, &file_path_str) {
+                    debug!(file = %file_path_str, rule_id = %regex_match.rule_id, "Skipping finding - rule path_patterns do not match this file path");
+                    continue;
+                }
+
                 let confidence = self.calculate_confidence_for_regex_match(&regex_match);
                 let severity = self.determine_severity(&regex_match.rule.secret_type);
 
@@ -353,5 +366,52 @@ impl DetectorEngine {
             return "***".to_string();
         }
         format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
+    }
+
+    /// Check whether a rule applies to the supplied file path.
+    /// If a rule defines `path_patterns` the rule only applies when at least one pattern matches the file path.
+    fn rule_applies_to_file(&self, rule: &SecretRule, file_path: &str) -> bool {
+        if rule.path_patterns.is_empty() {
+            return true;
+        }
+
+        for pattern in &rule.path_patterns {
+            if Self::path_matches(pattern, file_path) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Test whether a single pattern matches a file path.
+    /// Supports simple glob-like patterns:
+    /// - `**` matches any number of path segments
+    /// - `*` matches any sequence of characters excluding path separators
+    /// - `?` matches a single character
+    fn path_matches(pattern: &str, file_path: &str) -> bool {
+        // Normalize path separators for matching (Windows -> '/')
+        let path_norm = file_path.replace('\\', "/");
+        if let Some(re) = Self::pattern_to_regex(pattern) {
+            return re.is_match(&path_norm);
+        }
+        false
+    }
+
+    /// Convert a glob-style pattern into a Regex. This supports:
+    /// - `**` => match any path segments (including '/')
+    /// - `*` => match any sequence except '/'
+    /// - `?` => match any single char
+    fn pattern_to_regex(pattern: &str) -> Option<Regex> {
+        // Escape pattern so we can safely replace glob tokens
+        let mut escaped = regex::escape(pattern);
+        // `**` => `.*` (across directories)
+        escaped = escaped.replace("\\*\\*", ".*");
+        // `*` => `[^/]*` (within a path segment)
+        escaped = escaped.replace("\\*", "[^/]*");
+        // `?` => `.`
+        escaped = escaped.replace("\\?", ".");
+        let regex_str = format!("^{}$", escaped);
+        Regex::new(&regex_str).ok()
     }
 }

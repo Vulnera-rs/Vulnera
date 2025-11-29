@@ -14,6 +14,7 @@ pub struct ScanFile {
 pub struct DirectoryScanner {
     max_depth: usize,
     exclude_patterns: Vec<String>,
+    exclude_extensions: Vec<String>,
     max_file_size: u64,
 }
 
@@ -32,12 +33,23 @@ impl DirectoryScanner {
                 "dist".to_string(),
                 "build".to_string(),
             ],
+            exclude_extensions: vec![
+                "md".to_string(),
+                "markdown".to_string(),
+                "rst".to_string(),
+                "html".to_string(),
+            ],
             max_file_size,
         }
     }
 
     pub fn with_exclude_patterns(mut self, patterns: Vec<String>) -> Self {
         self.exclude_patterns = patterns;
+        self
+    }
+
+    pub fn with_exclude_extensions(mut self, extensions: Vec<String>) -> Self {
+        self.exclude_extensions = extensions;
         self
     }
 
@@ -99,7 +111,7 @@ impl DirectoryScanner {
                 }
 
                 // Check if file is text-based (basic check)
-                if Self::is_likely_text_file(path) {
+                if self.is_likely_text_file(path) {
                     trace!(file = %path.display(), "Found scannable file");
                     files.push(ScanFile {
                         path: path.to_path_buf(),
@@ -120,10 +132,20 @@ impl DirectoryScanner {
     }
 
     /// Check if a file is likely a text file
-    fn is_likely_text_file(path: &Path) -> bool {
+    fn is_likely_text_file(&self, path: &Path) -> bool {
         // Check extension
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             let ext_lower = ext.to_lowercase();
+
+            // Exclude file extensions matched by configuration to avoid docs/non-target files
+            if self
+                .exclude_extensions
+                .iter()
+                .any(|e| e.eq_ignore_ascii_case(&ext_lower))
+            {
+                return false;
+            }
+
             // Common binary extensions to exclude
             let binary_extensions = [
                 "exe", "dll", "so", "dylib", "bin", "o", "obj", "a", "lib", "jar", "war", "ear",
