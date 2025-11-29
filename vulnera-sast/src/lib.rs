@@ -29,3 +29,8 @@ pub mod infrastructure;
 pub mod module;
 
 pub use module::*;
+
+// Re-export key types for composition root wiring
+pub use application::use_cases::{AnalysisConfig, ScanError, ScanProjectUseCase, ScanResult};
+pub use infrastructure::ast_cache::{AstCacheService, DragonflyAstCache};
+pub use infrastructure::rules::{PostgresRuleRepository, SastRuleRepository};

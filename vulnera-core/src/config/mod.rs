@@ -604,6 +604,18 @@ pub struct SastConfig {
     pub rule_file_path: Option<PathBuf>,
     /// Whether to enable logging for SAST operations
     pub enable_logging: bool,
+    /// Enable Semgrep for taint analysis (default: true)
+    pub enable_semgrep: Option<bool>,
+    /// Path to Semgrep binary (default: "semgrep" in PATH)
+    pub semgrep_path: Option<String>,
+    /// Semgrep execution timeout in seconds (default: 60)
+    pub semgrep_timeout_secs: Option<u64>,
+    /// Enable AST caching via Dragonfly (default: true)
+    pub enable_ast_cache: Option<bool>,
+    /// AST cache TTL in hours (default: 4)
+    pub ast_cache_ttl_hours: Option<u64>,
+    /// Maximum concurrent file analysis (default: 4)
+    pub max_concurrent_files: Option<usize>,
 }
 
 impl Default for SastConfig {
@@ -631,6 +643,12 @@ impl Default for SastConfig {
             ],
             rule_file_path: None,
             enable_logging: true,
+            enable_semgrep: Some(true),
+            semgrep_path: None,
+            semgrep_timeout_secs: Some(60),
+            enable_ast_cache: Some(true),
+            ast_cache_ttl_hours: Some(4),
+            max_concurrent_files: Some(4),
         }
     }
 }
