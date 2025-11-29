@@ -1,7 +1,8 @@
 //! Integration tests for S3 project cleanup
 
-use std::path::PathBuf;
 use tokio::fs;
+use tokio_stream::StreamExt;
+use tokio_stream::wrappers::ReadDirStream;
 use vulnera_orchestrator::domain::entities::{Project, ProjectMetadata};
 use vulnera_orchestrator::domain::value_objects::SourceType;
 
@@ -12,17 +13,25 @@ async fn test_s3_temp_directory_cleanup() {
     let s3_temp_dir = temp_root.join("vulnera-s3-test-uuid");
 
     // Create the directory structure with some files
-    fs::create_dir_all(&s3_temp_dir).await.expect("Failed to create temp dir");
-    fs::write(s3_temp_dir.join("file1.txt"), "test").await.expect("Failed to write file");
-    fs::write(s3_temp_dir.join("file2.json"), "{}").await.expect("Failed to write file");
+    fs::create_dir_all(&s3_temp_dir)
+        .await
+        .expect("Failed to create temp dir");
+    fs::write(s3_temp_dir.join("file1.txt"), "test")
+        .await
+        .expect("Failed to write file");
+    fs::write(s3_temp_dir.join("file2.json"), "{}")
+        .await
+        .expect("Failed to write file");
 
     // Verify the directory exists
     assert!(s3_temp_dir.exists());
-    let files: Vec<_> = fs::read_dir(&s3_temp_dir)
+    let read_dir = fs::read_dir(&s3_temp_dir)
         .await
-        .expect("Failed to read dir")
+        .expect("Failed to read dir");
+    let files: Vec<_> = ReadDirStream::new(read_dir)
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .collect();
+        .collect()
+        .await;
     assert_eq!(files.len(), 2, "Should have 2 files in temp directory");
 
     // Create a project with S3 source and the temp directory path
