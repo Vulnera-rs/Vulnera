@@ -224,7 +224,7 @@ impl AnalyticsAggregationService {
         // Record the event
         self.record_analysis_event(
             subject.clone(),
-            user_id.clone(),
+            user_id,
             job_id,
             AnalysisEventType::JobCompleted,
             metadata,
@@ -249,7 +249,7 @@ impl AnalyticsAggregationService {
             if self.enable_user_level_tracking {
                 if let Err(e) = self
                     .add_findings_for_subject(
-                        &StatsSubject::User(user.clone()),
+                        &StatsSubject::User(*user),
                         &year_month,
                         findings_critical,
                         findings_high,
