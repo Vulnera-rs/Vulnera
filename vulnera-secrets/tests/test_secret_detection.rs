@@ -105,6 +105,102 @@ async fn test_entropy_detection() {
 }
 
 #[tokio::test]
+async fn test_skip_markdown_files() {
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    // Create README.md with a secret-like pattern that would normally match the regex detector
+    create_test_file(&temp_dir, "README.md", sample_aws_key()).await;
+
+    let config = SecretDetectionConfig::default();
+    let module = SecretDetectionModule::with_config(&config);
+
+    let module_config = ModuleConfig {
+        job_id: Uuid::new_v4(),
+        project_id: "test-project".to_string(),
+        source_uri: temp_dir.path().to_string_lossy().to_string(),
+        config: std::collections::HashMap::new(),
+    };
+
+    let result = module
+        .execute(&module_config)
+        .await
+        .expect("Module execution failed");
+
+    // By default markdown files are excluded; ensure no findings are reported for README.md
+    assert!(
+        result.findings.is_empty(),
+        "README.md should be excluded by default; expected no findings"
+    );
+}
+
+#[tokio::test]
+async fn test_rule_path_patterns() {
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    // Create a README.md with a generic key that would otherwise match the rule
+    create_test_file(&temp_dir, "README.md", sample_high_entropy()).await;
+
+    // Create a .env file with a generic key that should match the rule
+    create_test_file(&temp_dir, "config.env", sample_high_entropy()).await;
+
+    // Write a rule that only applies to .env files using a path pattern
+    let rules_toml = r#"
+[[rules]]
+id = "test-generic-api-key"
+name = "Test Generic API Key"
+description = "Generic API key only in .env files"
+secret_type = "api_key"
+pattern = '(?i)(?:api|apikey|api_key|apikey)[\s_-]*(?:key|token|secret)?[\s_-]*[:=]\s*([A-Za-z0-9_\-]{20,})'
+keywords = ["api", "key"]
+path_patterns = ["**/*.env"]
+"#;
+
+    let rules_path = temp_dir.path().join("rules.toml");
+    tokio::fs::write(&rules_path, rules_toml)
+        .await
+        .expect("Failed to write rules.toml");
+
+    let mut config = SecretDetectionConfig::default();
+    // Ensure markdown scanning is enabled for this test
+    config.exclude_extensions = vec![];
+    config.rule_file_path = Some(rules_path);
+    config.enable_entropy_detection = false; // Reduce noise for the test
+
+    let module = SecretDetectionModule::with_config(&config);
+
+    let module_config = ModuleConfig {
+        job_id: Uuid::new_v4(),
+        project_id: "test-project".to_string(),
+        source_uri: temp_dir.path().to_string_lossy().to_string(),
+        config: std::collections::HashMap::new(),
+    };
+
+    let result = module
+        .execute(&module_config)
+        .await
+        .expect("Module execution failed");
+
+    // Should find the key in config.env but it should NOT match in README.md because the rule only applies to .env files
+    let found_env = result.findings.iter().find(|f| {
+        f.rule_id.as_deref() == Some("test-generic-api-key")
+            && f.location.path.ends_with("config.env")
+    });
+    assert!(
+        found_env.is_some(),
+        "Should find generic API key in config.env"
+    );
+
+    let found_readme = result.findings.iter().find(|f| {
+        f.rule_id.as_deref() == Some("test-generic-api-key")
+            && f.location.path.ends_with("README.md")
+    });
+    assert!(
+        found_readme.is_none(),
+        "Should not find generic API key in README.md"
+    );
+}
+
+#[tokio::test]
 async fn test_git_scanner() {
     // Skip if git is not available or configured
     if std::process::Command::new("git")
