@@ -21,10 +21,11 @@ pub struct LlmRequest {
 }
 
 /// Message in a conversation with the LLM.
-/// Content can be null in API responses when the model returns reasoning_content only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
-    pub role: String,
+    /// Role can be None in streaming delta chunks where only content is sent
+    #[serde(default)]
+    pub role: Option<String>,
     /// Content can be null in API responses (e.g., when truncated or reasoning-only)
     #[serde(default)]
     pub content: Option<String>,
@@ -37,7 +38,7 @@ impl Message {
     /// Create a new message with content
     pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
-            role: role.into(),
+            role: Some(role.into()),
             content: Some(content.into()),
             reasoning_content: None,
         }
