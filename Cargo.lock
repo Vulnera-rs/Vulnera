@@ -6825,46 +6825,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vulnera-cli"
-version = "0.3.2"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "clap",
- "comfy-table",
- "console 0.16.1",
- "dialoguer",
- "directories",
- "dirs",
- "hex",
- "hostname",
- "indicatif",
- "keyring",
- "reqwest",
- "rstest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.17",
- "tokio",
- "tokio-test",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "vulnera-api",
- "vulnera-core",
- "vulnera-sast",
- "vulnera-secrets",
- "walkdir",
- "wiremock",
-]
-
-[[package]]
 name = "vulnera-core"
 version = "0.3.2"
 dependencies = [
