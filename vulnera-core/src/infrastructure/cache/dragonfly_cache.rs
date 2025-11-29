@@ -193,6 +193,77 @@ impl DragonflyCache {
             None => Ok(None),
         }
     }
+
+    /// Get raw bytes from cache (for binary data like bincode serialized ASTs)
+    pub async fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>, ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+
+        let value: Option<Vec<u8>> = redis::cmd("GET")
+            .arg(key)
+            .query_async::<Option<Vec<u8>>>(&mut conn)
+            .await
+            .map_err(|e| {
+                if e.kind() == redis::ErrorKind::TypeError {
+                    debug!("Cache key not found: {}", key);
+                    return ApplicationError::Cache(CacheError::KeyNotFound {
+                        key: key.to_string(),
+                    });
+                }
+                error!("Failed to get cache key {}: {}", key, e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Redis GET error: {}", e),
+                )))
+            })?;
+
+        Ok(value)
+    }
+
+    /// Set raw bytes in cache with TTL (for binary data like bincode serialized ASTs)
+    pub async fn set_raw(
+        &self,
+        key: &str,
+        value: &[u8],
+        ttl: Duration,
+    ) -> Result<(), ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+
+        redis::cmd("SET")
+            .arg(key)
+            .arg(value)
+            .arg("EX")
+            .arg(ttl.as_secs())
+            .query_async::<String>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to set cache key {}: {}", key, e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Redis SET error: {}", e),
+                )))
+            })?;
+
+        Ok(())
+    }
+
+    /// Delete a cache key
+    pub async fn delete(&self, key: &str) -> Result<bool, ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+
+        let deleted: i64 = redis::cmd("DEL")
+            .arg(key)
+            .query_async::<i64>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to delete cache key {}: {}", key, e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Redis DEL error: {}", e),
+                )))
+            })?;
+
+        Ok(deleted > 0)
+    }
 }
 
 #[async_trait]

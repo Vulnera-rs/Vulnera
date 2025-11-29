@@ -48,6 +48,15 @@ pub struct Rule {
     /// Rule-specific options
     #[serde(default)]
     pub options: RuleOptions,
+    /// CWE identifiers (e.g., ["CWE-89", "CWE-78"])
+    #[serde(default)]
+    pub cwe_ids: Vec<String>,
+    /// OWASP categories (e.g., ["A03:2021 - Injection"])
+    #[serde(default)]
+    pub owasp_categories: Vec<String>,
+    /// Custom tags for categorization
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// Rule-specific options for fine-tuning detection behavior
@@ -71,47 +80,16 @@ fn default_true() -> bool {
     true
 }
 
-/// Rule pattern for matching
+/// Rule pattern for matching - uses tree-sitter S-expression queries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum RulePattern {
-    /// AST node type pattern
-    AstNodeType(String),
-    /// Function call pattern (legacy - matches any call containing the name)
-    FunctionCall(String),
-    /// Method call pattern with AST context validation
-    MethodCall(MethodCallPattern),
-    /// Regex pattern
-    Regex(String),
-    /// Custom pattern matcher
-    Custom(String),
-}
-
-/// Method call pattern with context-aware matching
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MethodCallPattern {
-    /// Method name to match (e.g., "unwrap", "expect")
-    pub name: String,
-    /// Require the match to be an actual AST method call node
-    #[serde(default = "default_true")]
-    pub require_ast_node: bool,
-    /// Optional receiver type hints (not enforced without type analysis)
-    #[serde(default)]
-    pub receiver_hints: Vec<String>,
-}
-
-impl MethodCallPattern {
-    pub fn new(name: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            require_ast_node: true,
-            receiver_hints: vec![],
-        }
-    }
-
-    pub fn with_receiver_hints(mut self, hints: Vec<String>) -> Self {
-        self.receiver_hints = hints;
-        self
-    }
+    /// Tree-sitter S-expression query pattern (primary pattern type)
+    ///
+    /// Example queries:
+    /// - Function call: `(call_expression function: (identifier) @fn (#eq? @fn "eval"))`
+    /// - Method call: `(call_expression function: (attribute object: (_) attribute: (identifier) @method) (#eq? @method "unwrap"))`
+    /// - Unsafe block: `(unsafe_block) @unsafe`
+    TreeSitterQuery(String),
 }
 
 /// Suppression directive parsed from source comments
@@ -268,4 +246,328 @@ impl FileSuppressions {
             .filter(|s| s.target_line == line)
             .collect()
     }
+}
+
+// =============================================================================
+// Semgrep Taint Analysis Types
+// =============================================================================
+
+/// Configuration for Semgrep taint mode analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaintConfig {
+    /// Taint sources (patterns that introduce untrusted data)
+    pub sources: Vec<TaintPattern>,
+    /// Taint sinks (patterns where tainted data is dangerous)
+    pub sinks: Vec<TaintPattern>,
+    /// Sanitizers (patterns that clean/validate tainted data)
+    #[serde(default)]
+    pub sanitizers: Vec<TaintPattern>,
+    /// Propagators (patterns that transfer taint through functions)
+    #[serde(default)]
+    pub propagators: Vec<TaintPropagator>,
+}
+
+/// A taint pattern with optional label
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaintPattern {
+    /// Semgrep pattern string
+    pub pattern: String,
+    /// Optional label for taint tracking
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Require specific labels (for labeled taint tracking)
+    #[serde(default)]
+    pub requires: Option<String>,
+}
+
+/// Taint propagator specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaintPropagator {
+    /// Pattern to match
+    pub pattern: String,
+    /// Metavariable to propagate from
+    pub from: String,
+    /// Metavariable to propagate to
+    pub to: String,
+    /// Whether taint propagates by side-effect
+    #[serde(default)]
+    pub by_side_effect: bool,
+}
+
+/// Semgrep rule stored in database (separate table)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemgrepRule {
+    /// Unique rule identifier
+    pub id: String,
+    /// Rule name
+    pub name: String,
+    /// Human-readable message
+    pub message: String,
+    /// Target languages
+    pub languages: Vec<Language>,
+    /// Severity level
+    pub severity: Severity,
+    /// Rule mode (search or taint)
+    pub mode: SemgrepRuleMode,
+    /// Pattern for search mode
+    #[serde(default)]
+    pub pattern: Option<String>,
+    /// Patterns list for complex matching
+    #[serde(default)]
+    pub patterns: Option<Vec<String>>,
+    /// Taint configuration for taint mode
+    #[serde(default)]
+    pub taint_config: Option<TaintConfig>,
+    /// CWE identifiers
+    #[serde(default)]
+    pub cwe_ids: Vec<String>,
+    /// OWASP categories
+    #[serde(default)]
+    pub owasp_categories: Vec<String>,
+    /// Custom tags
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Autofix suggestion
+    #[serde(default)]
+    pub fix: Option<String>,
+    /// Additional metadata
+    #[serde(default)]
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// Semgrep rule mode
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SemgrepRuleMode {
+    /// Standard pattern search mode
+    Search,
+    /// Taint tracking mode
+    Taint,
+}
+
+impl Default for SemgrepRuleMode {
+    fn default() -> Self {
+        Self::Search
+    }
+}
+
+// =============================================================================
+// SARIF Export Types (v2.1.0)
+// =============================================================================
+
+/// SARIF report conforming to v2.1.0 schema
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifReport {
+    #[serde(rename = "$schema")]
+    pub schema: String,
+    pub version: String,
+    pub runs: Vec<SarifRun>,
+}
+
+impl Default for SarifReport {
+    fn default() -> Self {
+        Self {
+            schema:
+                "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json"
+                    .to_string(),
+            version: "2.1.0".to_string(),
+            runs: vec![],
+        }
+    }
+}
+
+/// A single SARIF run (one invocation of a tool)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifRun {
+    pub tool: SarifTool,
+    pub results: Vec<SarifResult>,
+    #[serde(default)]
+    pub invocations: Vec<SarifInvocation>,
+}
+
+/// SARIF tool information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifTool {
+    pub driver: SarifToolDriver,
+}
+
+/// SARIF tool driver (the main tool component)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifToolDriver {
+    pub name: String,
+    #[serde(default)]
+    pub semantic_version: Option<String>,
+    #[serde(default)]
+    pub rules: Vec<SarifRule>,
+}
+
+/// SARIF rule definition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifRule {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub short_description: Option<SarifMessage>,
+    #[serde(default)]
+    pub full_description: Option<SarifMessage>,
+    #[serde(default)]
+    pub help: Option<SarifMessage>,
+    #[serde(default)]
+    pub help_uri: Option<String>,
+    #[serde(default)]
+    pub default_configuration: Option<SarifDefaultConfiguration>,
+    #[serde(default)]
+    pub properties: Option<SarifRuleProperties>,
+}
+
+/// SARIF message with text
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifMessage {
+    pub text: String,
+    #[serde(default)]
+    pub markdown: Option<String>,
+}
+
+/// SARIF default configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifDefaultConfiguration {
+    pub level: SarifLevel,
+}
+
+/// SARIF severity level
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SarifLevel {
+    None,
+    Note,
+    Warning,
+    Error,
+}
+
+impl From<&Severity> for SarifLevel {
+    fn from(severity: &Severity) -> Self {
+        match severity {
+            Severity::Critical | Severity::High => SarifLevel::Error,
+            Severity::Medium => SarifLevel::Warning,
+            Severity::Low | Severity::Info => SarifLevel::Note,
+        }
+    }
+}
+
+/// SARIF rule properties (tags, CWE, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifRuleProperties {
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub precision: Option<String>,
+}
+
+/// SARIF result (a single finding)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifResult {
+    pub rule_id: String,
+    pub level: SarifLevel,
+    pub message: SarifMessage,
+    pub locations: Vec<SarifLocation>,
+    #[serde(default)]
+    pub fingerprints: Option<std::collections::HashMap<String, String>>,
+    #[serde(default)]
+    pub fixes: Option<Vec<SarifFix>>,
+}
+
+/// SARIF location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifLocation {
+    pub physical_location: SarifPhysicalLocation,
+}
+
+/// SARIF physical location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifPhysicalLocation {
+    pub artifact_location: SarifArtifactLocation,
+    #[serde(default)]
+    pub region: Option<SarifRegion>,
+}
+
+/// SARIF artifact location (file path)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifArtifactLocation {
+    pub uri: String,
+    #[serde(default)]
+    pub uri_base_id: Option<String>,
+}
+
+/// SARIF region (line/column range)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifRegion {
+    pub start_line: u32,
+    #[serde(default)]
+    pub start_column: Option<u32>,
+    #[serde(default)]
+    pub end_line: Option<u32>,
+    #[serde(default)]
+    pub end_column: Option<u32>,
+    #[serde(default)]
+    pub snippet: Option<SarifSnippet>,
+}
+
+/// SARIF code snippet
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifSnippet {
+    pub text: String,
+}
+
+/// SARIF fix suggestion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifFix {
+    pub description: SarifMessage,
+    pub artifact_changes: Vec<SarifArtifactChange>,
+}
+
+/// SARIF artifact change
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifArtifactChange {
+    pub artifact_location: SarifArtifactLocation,
+    pub replacements: Vec<SarifReplacement>,
+}
+
+/// SARIF replacement
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifReplacement {
+    pub deleted_region: SarifRegion,
+    pub inserted_content: SarifInsertedContent,
+}
+
+/// SARIF inserted content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifInsertedContent {
+    pub text: String,
+}
+
+/// SARIF invocation (execution metadata)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SarifInvocation {
+    pub execution_successful: bool,
+    #[serde(default)]
+    pub tool_execution_notifications: Vec<SarifNotification>,
+}
+
+/// SARIF notification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SarifNotification {
+    pub level: SarifLevel,
+    pub message: SarifMessage,
 }
