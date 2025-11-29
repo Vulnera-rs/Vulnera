@@ -6,7 +6,7 @@ use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use tokio::sync::Semaphore;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use vulnera_core::application::analytics::AnalyticsRecorder;
 use vulnera_core::domain::organization::value_objects::StatsSubject;
@@ -353,6 +353,9 @@ async fn process_job(
         warn!(project_id = %payload.project.id, "Git project cleanup reported no checkout");
     }
 
+    // Clean up S3 temporary directories
+    cleanup_s3_project(&payload.project).await;
+
     Ok(())
 }
 
@@ -364,6 +367,35 @@ async fn persist_snapshot(
         .save_snapshot(snapshot)
         .await
         .map_err(JobProcessingError::Snapshot)
+}
+
+/// Clean up S3 temporary directories after job completion
+///
+/// Removes the temporary directory created during S3 bucket download.
+/// Directory pattern: /tmp/vulnera-s3-{uuid}
+async fn cleanup_s3_project(project: &Project) {
+    use crate::domain::value_objects::SourceType;
+
+    // Only clean up if the project source is S3Bucket
+    if project.source_type != SourceType::S3Bucket {
+        return;
+    }
+
+    // Extract the temp directory UUID from the source_uri (s3://bucket-name/prefix or path)
+    // The root_path in metadata should point to /tmp/vulnera-s3-{uuid}
+    if let Some(root_path) = &project.metadata.root_path {
+        match tokio::fs::remove_dir_all(root_path).await {
+            Ok(_) => {
+                info!(project_id = %project.id, root_path = %root_path, "Cleaned up S3 temporary directory");
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                debug!(project_id = %project.id, root_path = %root_path, "S3 temporary directory already removed");
+            }
+            Err(e) => {
+                warn!(project_id = %project.id, root_path = %root_path, error = %e, "Failed to clean up S3 temporary directory");
+            }
+        }
+    }
 }
 
 /// Errors surfaced while executing background jobs.

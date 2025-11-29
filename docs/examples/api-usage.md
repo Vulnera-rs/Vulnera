@@ -48,6 +48,7 @@ The orchestrator endpoint (`/api/v1/analyze/job`) enables comprehensive analysis
 ### Analyze a Git Repository (Full Analysis)
 
 This will automatically execute:
+
 - Dependency Analysis (if dependency files are detected)
 - SAST (static code analysis for supported languages)
 - Secrets Detection (regex and entropy-based scanning)
@@ -76,6 +77,90 @@ curl -X POST http://localhost:3000/api/v1/analyze/job \
     "analysis_depth": "standard"
   }'
 ```
+
+### Analyze an S3 Bucket
+
+Analyze code stored in an AWS S3 bucket. Requires AWS credentials passed via the `X-AWS-Credentials` header as Base64-encoded JSON.
+
+#### Credential Format
+
+The `X-AWS-Credentials` header expects Base64-encoded JSON with the following structure:
+
+```json
+{
+  "access_key_id": "AKIAIOSFODNN7EXAMPLE",
+  "secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "session_token": "optional-sts-session-token",
+  "region": "us-east-1"
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `access_key_id` | Yes | AWS access key ID |
+| `secret_access_key` | Yes | AWS secret access key |
+| `session_token` | No | STS session token for temporary credentials |
+| `region` | No | AWS region (defaults to `us-east-1` if not provided) |
+
+#### Supported S3 URI Formats
+
+- `s3://bucket-name` - Analyze entire bucket
+- `s3://bucket-name/prefix/path` - Analyze specific prefix
+- `https://bucket-name.s3.amazonaws.com/prefix` - Virtual-hosted style URL
+- `https://bucket-name.s3.us-west-2.amazonaws.com/prefix` - With region
+- `https://s3.us-east-1.amazonaws.com/bucket-name/prefix` - Path-style URL
+
+#### Example: Basic S3 Analysis
+
+```bash
+# Encode credentials as Base64
+AWS_CREDS=$(echo -n '{"access_key_id":"AKIAIOSFODNN7EXAMPLE","secret_access_key":"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY","region":"us-east-1"}' | base64)
+
+curl -X POST http://localhost:3000/api/v1/analyze/job \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access_token>" \
+  -H "X-AWS-Credentials: $AWS_CREDS" \
+  -d '{
+    "source_type": "s3_bucket",
+    "source_uri": "s3://my-code-bucket/project-v1",
+    "analysis_depth": "full"
+  }'
+```
+
+#### Example: Using STS Temporary Credentials
+
+For enhanced security, use AWS STS to generate temporary credentials:
+
+```bash
+# Get temporary credentials from STS
+TEMP_CREDS=$(aws sts get-session-token --duration-seconds 3600)
+
+# Extract and encode for header
+AWS_CREDS=$(echo -n "{
+  \"access_key_id\": \"$(echo $TEMP_CREDS | jq -r '.Credentials.AccessKeyId')\",
+  \"secret_access_key\": \"$(echo $TEMP_CREDS | jq -r '.Credentials.SecretAccessKey')\",
+  \"session_token\": \"$(echo $TEMP_CREDS | jq -r '.Credentials.SessionToken')\",
+  \"region\": \"us-east-1\"
+}" | base64 -w 0)
+
+curl -X POST http://localhost:3000/api/v1/analyze/job \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access_token>" \
+  -H "X-AWS-Credentials: $AWS_CREDS" \
+  -d '{
+    "source_type": "s3_bucket",
+    "source_uri": "s3://my-secure-bucket/source-code",
+    "analysis_depth": "full"
+  }'
+```
+
+#### S3 Analysis Limits
+
+To prevent abuse, S3 bucket analysis has the following limits:
+
+- Maximum 10,000 objects per analysis
+- Maximum 1 GB total download size
+- Objects exceeding limits are skipped with warnings
 
 ### Analysis Depth Levels
 
@@ -110,6 +195,6 @@ curl -X POST http://localhost:3000/api/v1/dependencies/analyze \
 ## API Documentation
 
 Interactive API documentation is available at:
-- Swagger UI: http://localhost:3000/docs
-- OpenAPI Spec: http://localhost:3000/docs/openapi.json
 
+- Swagger UI: <http://localhost:3000/docs>
+- OpenAPI Spec: <http://localhost:3000/docs/openapi.json>

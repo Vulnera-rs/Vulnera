@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use vulnera_core::domain::module::ModuleType;
 
 use super::entities::Project;
-use super::value_objects::{AnalysisDepth, SourceType};
+use super::value_objects::{AnalysisDepth, AwsCredentials, SourceType};
 
 /// Service for detecting project characteristics
 #[async_trait]
@@ -15,6 +15,7 @@ pub trait ProjectDetector: Send + Sync {
         &self,
         source_type: &SourceType,
         source_uri: &str,
+        aws_credentials: Option<&AwsCredentials>,
     ) -> Result<Project, ProjectDetectionError>;
 }
 
@@ -39,4 +40,13 @@ pub enum ProjectDetectionError {
 
     #[error("Detection failed: {0}")]
     DetectionFailed(String),
+
+    #[error("S3 error: {0}")]
+    S3Error(String),
+
+    #[error("Missing AWS credentials for S3 bucket source")]
+    MissingAwsCredentials,
+
+    #[error("Invalid S3 bucket URI: {0}")]
+    InvalidS3Uri(String),
 }

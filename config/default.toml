@@ -7,8 +7,8 @@ workers = 4
 enable_docs = true
 request_timeout_seconds = 30
 # Per-endpoint timeouts (in seconds) - overrides global request_timeout_seconds
-dependencies_analysis_timeout_seconds = 120  # 2 minutes for dependency analysis
-general_analysis_timeout_seconds = 60        # 1 minute for general analysis
+dependencies_analysis_timeout_seconds = 180  # 3 minutes for dependency analysis
+general_analysis_timeout_seconds = 90        # 1.5 minutes for general analysis
 allowed_origins = []
 
 [server.security]
@@ -41,7 +41,7 @@ burst_size = 10
 
 [server.rate_limit.tiers.anonymous]
 # Unauthenticated users - lowest limits
-requests_per_minute = 20
+requests_per_minute = 10
 requests_per_hour = 100
 burst_size = 5
 

@@ -398,8 +398,14 @@ pub async fn create_app(
     module_registry.register(secrets_module);
     module_registry.register(api_module);
 
+    // Create S3 service for bucket analysis
+    let s3_service = Arc::new(vulnera_orchestrator::infrastructure::S3Service::new());
+
     // Create orchestrator use cases
-    let project_detector = Arc::new(FileSystemProjectDetector::new(git_service.clone()));
+    let project_detector = Arc::new(FileSystemProjectDetector::new(
+        git_service.clone(),
+        s3_service,
+    ));
     let module_selector = Arc::new(RuleBasedModuleSelector);
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
         project_detector,
