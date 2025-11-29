@@ -74,8 +74,7 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
     } else {
         // Interactive prompt
         ctx.output.info("Enter your Vulnera API key");
-        ctx.output
-            .info("Get one at: https://vulnera.dev/account/api-keys");
+        ctx.output.info("Get one at: https://vulnera.studio/");
 
         match output::password("API Key", false) {
             Ok(key) if !key.is_empty() => key,
@@ -90,10 +89,18 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
         }
     };
 
-    // Validate API key format
-    if api_key.len() < 32 {
-        ctx.output.error("Invalid API key format");
+    // Validate API key format (must be at least 1 character)
+    // Master keys can be any length; regular API keys should be 32+ chars
+    if api_key.is_empty() {
+        ctx.output.error("API key cannot be empty");
         return Ok(exit_codes::CONFIG_ERROR);
+    }
+
+    if api_key.len() < 32 {
+        ctx.output
+            .warn("Warning: API key is shorter than recommended (32+ characters)");
+        ctx.output
+            .info("Master keys are supported but should be treated as development-only");
     }
 
     // Store the API key
@@ -119,11 +126,13 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
     if !cli.offline {
         ctx.output.info("Verifying API key with server...");
 
-        let client = crate::api_client::VulneraClient::new(
-            ctx.config.server.host.clone(),
-            ctx.config.server.port,
-            Some(api_key.clone()),
-        )?;
+        let server_url = args
+            .server
+            .clone()
+            .unwrap_or_else(|| ctx.server_url.clone());
+
+        let client =
+            crate::api_client::VulneraClient::with_url(server_url.clone(), Some(api_key.clone()))?;
 
         match client.verify_api_key().await {
             Ok(true) => {
@@ -137,6 +146,16 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
             }
             Err(e) => {
                 ctx.output.warn(&format!("Could not verify API key: {}", e));
+                ctx.output.info("Possible reasons:");
+                ctx.output
+                    .info("  1. Server is not reachable at the configured URL");
+                ctx.output
+                    .info(&format!("  2. Current server: {}", server_url));
+                ctx.output
+                    .info("  3. Set VULNERA_SERVER_URL to connect to a different server");
+                ctx.output
+                    .info("  4. Run 'vulnera auth login --help' to see options");
+                ctx.output.info(&format!("Original error: {}", e));
                 ctx.output.info("The key has been stored for offline use");
             }
         }
@@ -180,7 +199,7 @@ async fn status(ctx: &CliContext, cli: &Cli) -> Result<i32> {
     let status = AuthStatus {
         authenticated,
         storage_method: ctx.credentials.storage_method().to_string(),
-        server_url: format!("{}:{}", ctx.config.server.host, ctx.config.server.port),
+        server_url: ctx.server_url.clone(),
         quota_limit: if authenticated { 40 } else { 10 },
     };
 
@@ -209,11 +228,8 @@ async fn status(ctx: &CliContext, cli: &Cli) -> Result<i32> {
             // Check server connectivity if not offline
             if !cli.offline {
                 let api_key = ctx.credentials.get_api_key().ok().flatten();
-                let client = crate::api_client::VulneraClient::new(
-                    ctx.config.server.host.clone(),
-                    ctx.config.server.port,
-                    api_key,
-                )?;
+                let client =
+                    crate::api_client::VulneraClient::with_url(ctx.server_url.clone(), api_key)?;
 
                 match client.health_check().await {
                     Ok(true) => ctx.output.success("Server connection: OK"),

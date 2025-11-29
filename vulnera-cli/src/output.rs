@@ -9,6 +9,20 @@ use comfy_table::{Cell, Color, ContentArrangement, Table, presets};
 use console::{Style, style};
 use serde::Serialize;
 
+/// Vulnera ASCII Art Banner
+const VULNERA_BANNER: &str = r#"
+  ╔═══════════════════════════════════════╗
+  ║   ██╗   ██╗██╗   ██╗██╗     ███████╗  ║
+  ║   ██║   ██║██║   ██║██║     ██╔════╝  ║
+  ║   ██║   ██║██║   ██║██║     ███████╗  ║
+  ║   ██║   ██║██║   ██║██║     ╚════██║  ║
+  ║   ╚██████╔╝╚██████╔╝███████╗███████║  ║
+  ║    ╚═════╝  ╚═════╝ ╚══════╝╚══════╝  ║
+  ║                                       ║
+  ║  Comprehensive Vulnerability Scanner  ║
+  ╚═══════════════════════════════════════╝
+"#;
+
 /// Output format options
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum OutputFormat {
@@ -76,12 +90,43 @@ impl OutputWriter {
         eprintln!("{} {}", style("✗").red().bold(), message);
     }
 
+    /// Print the Vulnera banner (only in non-quiet, non-JSON modes)
+    pub fn banner(&self) {
+        if self.quiet || self.format == OutputFormat::Json || self.format == OutputFormat::Sarif {
+            return;
+        }
+        println!("{}", style(VULNERA_BANNER).cyan());
+    }
+
+    /// Print a section divider
+    pub fn divider(&self) {
+        if self.quiet || self.format == OutputFormat::Json || self.format == OutputFormat::Sarif {
+            return;
+        }
+        println!("{}", style("─".repeat(50)).dim());
+    }
+
+    /// Print a summary section with styled heading
+    pub fn summary(&self, title: &str, count: usize, severity: &str) {
+        if self.quiet || self.format == OutputFormat::Json {
+            return;
+        }
+        let icon = match severity {
+            "critical" => style("●").red().bold(),
+            "high" => style("●").red(),
+            "medium" => style("●").yellow(),
+            "low" => style("●").yellow().dim(),
+            _ => style("●").white().dim(),
+        };
+        println!("{} {} {}", icon, style(title).bold(), count);
+    }
+
     /// Print an info message
     pub fn info(&self, message: &str) {
         if self.quiet {
             return;
         }
-        println!("{} {}", style("ℹ").blue().bold(), message);
+        println!("{} {}", style("ℹ").cyan().bold(), message);
     }
 
     /// Print a debug message (only in verbose mode)
@@ -92,14 +137,16 @@ impl OutputWriter {
         println!("{} {}", style("⋯").dim(), style(message).dim());
     }
 
-    /// Print a header/title
+    /// Print a header/title with styled formatting
     pub fn header(&self, title: &str) {
         if self.quiet {
             return;
         }
         match self.format {
             OutputFormat::Table | OutputFormat::Plain => {
-                println!("\n{}", style(title).bold().underlined());
+                self.divider();
+                println!("  {}", style(title).bold().cyan());
+                self.divider();
             }
             OutputFormat::Json | OutputFormat::Sarif => {
                 // Headers are part of JSON structure

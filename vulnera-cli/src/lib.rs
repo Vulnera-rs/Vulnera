@@ -68,7 +68,7 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
-    /// Server URL for API calls (default: https://api.vulnera.dev)
+    /// Server URL for API calls (default: https://api.vulnera.studio/)
     #[arg(long, global = true, env = "VULNERA_SERVER_URL")]
     pub server: Option<String>,
 
