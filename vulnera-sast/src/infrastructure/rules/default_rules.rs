@@ -1,9 +1,9 @@
-//! Default hardcoded security rules
+//! Default hardcoded security rules with tree-sitter query patterns
 
-use crate::domain::entities::{MethodCallPattern, Rule, RuleOptions, RulePattern, Severity};
+use crate::domain::entities::{Rule, RuleOptions, RulePattern, Severity};
 use crate::domain::value_objects::Language;
 
-/// SQL injection rule
+/// SQL injection rule - detects execute() calls that may contain SQL
 pub fn sql_injection_rule() -> Rule {
     Rule {
         id: "sql-injection".to_string(),
@@ -11,12 +11,25 @@ pub fn sql_injection_rule() -> Rule {
         description: "Potential SQL injection vulnerability".to_string(),
         severity: Severity::High,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
-        pattern: RulePattern::FunctionCall("execute".to_string()),
+        // Matches: execute(...), cursor.execute(...), db.execute(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: [
+                (identifier) @fn
+                (attribute attribute: (identifier) @fn)
+              ]
+              (#match? @fn "^execute$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "sql".to_string()],
     }
 }
 
-/// Command injection rule
+/// Command injection rule - detects exec() calls
 pub fn command_injection_rule() -> Rule {
     Rule {
         id: "command-injection".to_string(),
@@ -24,38 +37,75 @@ pub fn command_injection_rule() -> Rule {
         description: "Potential command injection vulnerability".to_string(),
         severity: Severity::High,
         languages: vec![Language::Python, Language::JavaScript, Language::Rust],
-        pattern: RulePattern::FunctionCall("exec".to_string()),
+        // Matches: exec(...), os.exec(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: [
+                (identifier) @fn
+                (attribute attribute: (identifier) @fn)
+              ]
+              (#match? @fn "^exec$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "command".to_string()],
     }
 }
 
-/// Unsafe deserialization rule
+/// Unsafe deserialization rule - detects pickle.loads() calls
 pub fn unsafe_deserialization_rule() -> Rule {
     Rule {
         id: "unsafe-deserialization".to_string(),
         name: "Unsafe Deserialization".to_string(),
         description: "Potential unsafe deserialization vulnerability".to_string(),
         severity: Severity::High,
-        languages: vec![Language::Python, Language::JavaScript, Language::Rust],
-        pattern: RulePattern::FunctionCall("pickle.loads".to_string()),
+        languages: vec![Language::Python],
+        // Matches: pickle.loads(...), pickle.load(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @obj
+                attribute: (identifier) @fn
+              )
+              (#eq? @obj "pickle")
+              (#match? @fn "^loads?$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-502".to_string()],
+        owasp_categories: vec!["A08:2021 - Software and Data Integrity Failures".to_string()],
+        tags: vec!["deserialization".to_string()],
     }
 }
 
-/// Unsafe function call rule
+/// Unsafe function call rule - detects eval() calls
 pub fn unsafe_function_call_rule() -> Rule {
     Rule {
         id: "unsafe-function-call".to_string(),
         name: "Unsafe Function Call".to_string(),
         description: "Potentially unsafe function call".to_string(),
         severity: Severity::Medium,
-        languages: vec![Language::Python, Language::JavaScript, Language::Rust],
-        pattern: RulePattern::FunctionCall("eval".to_string()),
+        languages: vec![Language::Python, Language::JavaScript],
+        // Matches: eval(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: (identifier) @fn
+              (#eq? @fn "eval")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-94".to_string(), "CWE-95".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "code-execution".to_string()],
     }
 }
 
-/// Null pointer rule - unwrap() can panic on None/Err
+/// Null pointer rule - unwrap() can panic on None/Err (Rust)
 pub fn null_pointer_rule() -> Rule {
     Rule {
         id: "null-pointer".to_string(),
@@ -63,31 +113,55 @@ pub fn null_pointer_rule() -> Rule {
         description: "Potential panic from unwrap() on None or Err value".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::Rust],
-        pattern: RulePattern::MethodCall(MethodCallPattern::new("unwrap")),
+        // Matches: .unwrap() method calls in Rust
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (field_expression
+                field: (field_identifier) @method
+              )
+              (#eq? @method "unwrap")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions {
             suppress_in_tests: true,
             suppress_in_examples: false,
             suppress_in_benches: false,
             related_rules: vec!["expect-panic".to_string()],
         },
+        cwe_ids: vec!["CWE-476".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["reliability".to_string(), "rust".to_string()],
     }
 }
 
-/// Expect panic rule - expect() can panic with a message
+/// Expect panic rule - expect() can panic with a message (Rust)
 pub fn expect_panic_rule() -> Rule {
     Rule {
         id: "expect-panic".to_string(),
         name: "Potential Panic from expect()".to_string(),
         description: "Potential panic from expect() on None or Err value".to_string(),
-        severity: Severity::Low, // Lower than unwrap since it provides context
+        severity: Severity::Low,
         languages: vec![Language::Rust],
-        pattern: RulePattern::MethodCall(MethodCallPattern::new("expect")),
+        // Matches: .expect(...) method calls in Rust
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (field_expression
+                field: (field_identifier) @method
+              )
+              (#eq? @method "expect")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions {
             suppress_in_tests: true,
             suppress_in_examples: false,
             suppress_in_benches: false,
             related_rules: vec!["null-pointer".to_string()],
         },
+        cwe_ids: vec!["CWE-476".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["reliability".to_string(), "rust".to_string()],
     }
 }
 
@@ -124,7 +198,7 @@ pub fn get_default_rules() -> Vec<Rule> {
     ]
 }
 
-/// Go command injection rule
+/// Go command injection rule - exec.Command()
 pub fn go_command_injection_rule() -> Rule {
     Rule {
         id: "go-command-injection".to_string(),
@@ -132,12 +206,26 @@ pub fn go_command_injection_rule() -> Rule {
         description: "Potential command injection in Go".to_string(),
         severity: Severity::High,
         languages: vec![Language::Go],
-        pattern: RulePattern::FunctionCall("exec.Command".to_string()),
+        // Matches: exec.Command(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              (#eq? @pkg "exec")
+              (#eq? @fn "Command")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "go".to_string()],
     }
 }
 
-/// C/C++ buffer overflow rule
+/// C/C++ buffer overflow rule - strcpy()
 pub fn c_buffer_overflow_rule() -> Rule {
     Rule {
         id: "c-buffer-overflow".to_string(),
@@ -145,12 +233,22 @@ pub fn c_buffer_overflow_rule() -> Rule {
         description: "Potential buffer overflow using strcpy".to_string(),
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
-        pattern: RulePattern::FunctionCall("strcpy".to_string()),
+        // Matches: strcpy(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "strcpy")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-120".to_string(), "CWE-121".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory-safety".to_string(), "buffer-overflow".to_string()],
     }
 }
 
-/// C/C++ command injection rule
+/// C/C++ command injection rule - system()
 pub fn c_command_injection_rule() -> Rule {
     Rule {
         id: "c-command-injection".to_string(),
@@ -158,8 +256,18 @@ pub fn c_command_injection_rule() -> Rule {
         description: "Potential command injection using system".to_string(),
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
-        pattern: RulePattern::FunctionCall("system".to_string()),
+        // Matches: system(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "system")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "command".to_string()],
     }
 }
 
@@ -172,8 +280,22 @@ pub fn python_subprocess_rule() -> Rule {
         description: "Potential command injection using subprocess".to_string(),
         severity: Severity::High,
         languages: vec![Language::Python],
-        pattern: RulePattern::FunctionCall("subprocess.call".to_string()),
+        // Matches: subprocess.call(...), subprocess.run(...), subprocess.Popen(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @obj
+                attribute: (identifier) @fn
+              )
+              (#eq? @obj "subprocess")
+              (#match? @fn "^(call|run|Popen|check_output|check_call)$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "python".to_string()],
     }
 }
 
@@ -181,11 +303,25 @@ pub fn python_yaml_load_rule() -> Rule {
     Rule {
         id: "python-yaml-load".to_string(),
         name: "Unsafe YAML Load".to_string(),
-        description: "Unsafe deserialization using yaml.load".to_string(),
+        description: "Unsafe deserialization using yaml.load without safe_load".to_string(),
         severity: Severity::Critical,
         languages: vec![Language::Python],
-        pattern: RulePattern::FunctionCall("yaml.load".to_string()),
+        // Matches: yaml.load(...) but not yaml.safe_load(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @obj
+                attribute: (identifier) @fn
+              )
+              (#eq? @obj "yaml")
+              (#eq? @fn "load")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-502".to_string()],
+        owasp_categories: vec!["A08:2021 - Software and Data Integrity Failures".to_string()],
+        tags: vec!["deserialization".to_string(), "python".to_string()],
     }
 }
 
@@ -196,8 +332,18 @@ pub fn python_ssti_rule() -> Rule {
         description: "Potential SSTI using render_template_string".to_string(),
         severity: Severity::High,
         languages: vec![Language::Python],
-        pattern: RulePattern::FunctionCall("render_template_string".to_string()),
+        // Matches: render_template_string(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call
+              function: (identifier) @fn
+              (#eq? @fn "render_template_string")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-94".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "ssti".to_string()],
     }
 }
 
@@ -210,8 +356,20 @@ pub fn js_child_process_rule() -> Rule {
         description: "Potential command injection using child_process".to_string(),
         severity: Severity::High,
         languages: vec![Language::JavaScript],
-        pattern: RulePattern::FunctionCall("child_process.exec".to_string()),
+        // Matches: child_process.exec(...), require('child_process').exec(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile)$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "javascript".to_string()],
     }
 }
 
@@ -219,11 +377,29 @@ pub fn js_xss_rule() -> Rule {
     Rule {
         id: "js-xss".to_string(),
         name: "Cross-Site Scripting".to_string(),
-        description: "Potential XSS using dangerouslySetInnerHTML".to_string(),
+        description: "Potential XSS using dangerouslySetInnerHTML or innerHTML".to_string(),
         severity: Severity::High,
         languages: vec![Language::JavaScript],
-        pattern: RulePattern::FunctionCall("dangerouslySetInnerHTML".to_string()),
+        // Matches: dangerouslySetInnerHTML, innerHTML assignments
+        pattern: RulePattern::TreeSitterQuery(
+            r#"[
+              (jsx_attribute
+                (property_identifier) @attr
+                (#eq? @attr "dangerouslySetInnerHTML")
+              )
+              (assignment_expression
+                left: (member_expression
+                  property: (property_identifier) @prop
+                )
+                (#eq? @prop "innerHTML")
+              )
+            ] @xss"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-79".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["xss".to_string(), "javascript".to_string()],
     }
 }
 
@@ -231,11 +407,24 @@ pub fn js_eval_rule() -> Rule {
     Rule {
         id: "js-eval-indirect".to_string(),
         name: "Indirect Eval".to_string(),
-        description: "Potential indirect eval using setTimeout/setInterval".to_string(),
+        description: "Potential indirect eval using setTimeout/setInterval with string".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::JavaScript],
-        pattern: RulePattern::FunctionCall("setTimeout".to_string()),
+        // Matches: setTimeout("...", ...), setInterval("...", ...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (string) @str
+              )
+              (#match? @fn "^(setTimeout|setInterval)$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-95".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "javascript".to_string()],
     }
 }
 
@@ -248,8 +437,22 @@ pub fn rust_command_rule() -> Rule {
         description: "Potential command injection using std::process::Command".to_string(),
         severity: Severity::High,
         languages: vec![Language::Rust],
-        pattern: RulePattern::FunctionCall("Command::new".to_string()),
+        // Matches: Command::new(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (scoped_identifier
+                path: (identifier) @type
+                name: (identifier) @fn
+              )
+              (#eq? @type "Command")
+              (#eq? @fn "new")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "rust".to_string()],
     }
 }
 
@@ -260,8 +463,12 @@ pub fn rust_unsafe_rule() -> Rule {
         description: "Usage of unsafe block".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::Rust],
-        pattern: RulePattern::AstNodeType("unsafe_block".to_string()),
+        // Matches: unsafe { ... }
+        pattern: RulePattern::TreeSitterQuery(r#"(unsafe_block) @unsafe"#.to_string()),
         options: RuleOptions::default(),
+        cwe_ids: vec![],
+        owasp_categories: vec![],
+        tags: vec!["unsafe".to_string(), "rust".to_string()],
     }
 }
 
@@ -274,8 +481,20 @@ pub fn go_sql_injection_rule() -> Rule {
         description: "Potential SQL injection in Go".to_string(),
         severity: Severity::High,
         languages: vec![Language::Go],
-        pattern: RulePattern::FunctionCall("sql.Query".to_string()),
+        // Matches: db.Query(...), db.Exec(...), sql.Query(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                field: (field_identifier) @fn
+              )
+              (#match? @fn "^(Query|Exec|QueryRow)$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "sql".to_string(), "go".to_string()],
     }
 }
 
@@ -286,8 +505,22 @@ pub fn go_unsafe_rule() -> Rule {
         description: "Usage of unsafe.Pointer".to_string(),
         severity: Severity::Medium,
         languages: vec![Language::Go],
-        pattern: RulePattern::FunctionCall("unsafe.Pointer".to_string()), // Matches call-like usage
+        // Matches: unsafe.Pointer(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              (#eq? @pkg "unsafe")
+              (#eq? @fn "Pointer")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec![],
+        owasp_categories: vec![],
+        tags: vec!["unsafe".to_string(), "go".to_string()],
     }
 }
 
@@ -300,8 +533,18 @@ pub fn c_gets_rule() -> Rule {
         description: "Usage of unsafe gets() function".to_string(),
         severity: Severity::Critical,
         languages: vec![Language::C, Language::Cpp],
-        pattern: RulePattern::FunctionCall("gets".to_string()),
+        // Matches: gets(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "gets")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-120".to_string(), "CWE-676".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory-safety".to_string(), "deprecated".to_string()],
     }
 }
 
@@ -312,8 +555,18 @@ pub fn c_sprintf_rule() -> Rule {
         description: "Potential buffer overflow using sprintf".to_string(),
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
-        pattern: RulePattern::FunctionCall("sprintf".to_string()),
+        // Matches: sprintf(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "sprintf")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-120".to_string(), "CWE-134".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory-safety".to_string(), "format-string".to_string()],
     }
 }
 
@@ -324,7 +577,17 @@ pub fn c_exec_rule() -> Rule {
         description: "Potential command injection using exec family".to_string(),
         severity: Severity::High,
         languages: vec![Language::C, Language::Cpp],
-        pattern: RulePattern::FunctionCall("execl".to_string()),
+        // Matches: execl(...), execv(...), execle(...), execve(...), execlp(...), execvp(...)
+        pattern: RulePattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#match? @fn "^exec[lv]p?e?$")
+            ) @call"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["injection".to_string(), "command".to_string()],
     }
 }

@@ -10,7 +10,7 @@ use vulnera_core::domain::module::{
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
 };
 
-use crate::application::use_cases::ScanProjectUseCase;
+use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
 use crate::domain::entities::Severity as SastSeverity;
 
 /// SAST analysis module
@@ -25,8 +25,37 @@ impl SastModule {
 
     pub fn with_config(config: &SastConfig) -> Self {
         Self {
-            use_case: Arc::new(ScanProjectUseCase::with_config(config)),
+            use_case: Arc::new(ScanProjectUseCase::with_config(
+                config,
+                AnalysisConfig::default(),
+            )),
         }
+    }
+
+    /// Create with custom analysis config
+    pub fn with_full_config(sast_config: &SastConfig, analysis_config: AnalysisConfig) -> Self {
+        Self {
+            use_case: Arc::new(ScanProjectUseCase::with_config(
+                sast_config,
+                analysis_config,
+            )),
+        }
+    }
+
+    /// Create with a pre-built use case (dependency injection)
+    ///
+    /// Use this when you want to inject a fully-configured ScanProjectUseCase,
+    /// e.g., one with database rules loaded and AST cache configured.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let use_case = ScanProjectUseCase::with_config(&config, analysis_config)
+    ///     .with_database_rules(&db_repo).await?
+    ///     .with_ast_cache(cache);
+    /// let module = SastModule::with_use_case(Arc::new(use_case));
+    /// ```
+    pub fn with_use_case(use_case: Arc<ScanProjectUseCase>) -> Self {
+        Self { use_case }
     }
 }
 

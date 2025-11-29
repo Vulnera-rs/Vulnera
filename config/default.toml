@@ -155,6 +155,24 @@ backoff_jitter = true
 level = "info"
 format = "json"
 
+# SAST (Static Application Security Testing) configuration
+[sast]
+max_scan_depth = 10
+exclude_patterns = [
+    "node_modules", ".git", "target", "__pycache__",
+    ".venv", "venv", "dist", "build", "docs", "doc",
+    "examples", "example", "test", "tests", "vendor",
+    "third_party", "fixtures"
+]
+# rule_file_path = "/path/to/custom/rules.toml"  # Optional custom rule file
+enable_logging = true
+enable_semgrep = true           # Enable Semgrep for taint analysis
+# semgrep_path = "semgrep"      # Path to Semgrep binary (defaults to "semgrep" in PATH)
+semgrep_timeout_secs = 60       # Timeout for Semgrep execution
+enable_ast_cache = true         # Enable AST caching via Dragonfly
+ast_cache_ttl_hours = 4         # AST cache TTL in hours
+max_concurrent_files = 4        # Maximum concurrent file analysis
+
 # Popular packages configuration for vulnerability listing
 [popular_packages]
 # Cache TTL for popular package vulnerability listings (in hours)
