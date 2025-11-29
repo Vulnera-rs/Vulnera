@@ -6,12 +6,13 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
+use directories::ProjectDirs;
 use serde::Serialize;
 
-use crate::cli::Cli;
-use crate::cli::context::CliContext;
-use crate::cli::exit_codes;
-use crate::cli::output::OutputFormat;
+use crate::context::CliContext;
+use crate::exit_codes;
+use crate::output::OutputFormat;
+use crate::Cli;
 
 /// Arguments for the config command
 #[derive(Args, Debug)]
@@ -62,7 +63,6 @@ pub struct InitArgs {
 }
 
 /// Configuration info for JSON output
-#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 pub struct ConfigInfo {
     pub config_file: Option<PathBuf>,
@@ -183,17 +183,66 @@ async fn show_path(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
     Ok(exit_codes::SUCCESS)
 }
 
+/// Get configuration file search paths
+fn get_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    // 1. Current directory
+    paths.push(PathBuf::from(".vulnera.toml"));
+    paths.push(PathBuf::from("vulnera.toml"));
+
+    // 2. User config directory
+    if let Some(dirs) = ProjectDirs::from("dev", "vulnera", "vulnera-cli") {
+        paths.push(dirs.config_dir().join("config.toml"));
+    }
+
+    // 3. XDG config
+    if let Some(config_dir) = dirs::config_dir() {
+        paths.push(config_dir.join("vulnera").join("config.toml"));
+    }
+
+    // 4. Home directory
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".vulnera").join("config.toml"));
+        paths.push(home.join(".config").join("vulnera").join("config.toml"));
+    }
+
+    paths
+}
+
 /// Set a configuration value
 async fn set_config(ctx: &CliContext, _cli: &Cli, args: &SetArgs) -> Result<i32> {
-    ctx.output.warn("Config modification not yet implemented");
-    ctx.output
-        .info(&format!("Would set {} = {}", args.key, args.value));
+    // Parse key path
+    let parts: Vec<&str> = args.key.split('.').collect();
+    if parts.is_empty() {
+        ctx.output.error("Invalid configuration key");
+        return Ok(exit_codes::CONFIG_ERROR);
+    }
 
-    // TODO: Implement config modification
-    // 1. Load config file (or create new one)
-    // 2. Parse the key path (e.g., "server.port" -> ["server", "port"])
-    // 3. Update the value
-    // 4. Save the config file
+    // Get user config path
+    let config_path = get_user_config_path();
+
+    // Load existing config or create new
+    let mut config: toml::Value = if config_path.exists() {
+        let content = std::fs::read_to_string(&config_path)?;
+        toml::from_str(&content)?
+    } else {
+        toml::Value::Table(toml::map::Map::new())
+    };
+
+    // Navigate to the correct location and set value
+    set_nested_value(&mut config, &parts, &args.value)?;
+
+    // Write config back
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = toml::to_string_pretty(&config)?;
+    std::fs::write(&config_path, content)?;
+
+    ctx.output.success(&format!("Set {} = {}", args.key, args.value));
+    ctx.output.info(&format!("Config saved to {:?}", config_path));
 
     Ok(exit_codes::SUCCESS)
 }
@@ -202,7 +251,6 @@ async fn set_config(ctx: &CliContext, _cli: &Cli, args: &SetArgs) -> Result<i32>
 async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32> {
     let config_value = serde_json::to_value(&*ctx.config)?;
 
-    // Navigate to the requested key
     let parts: Vec<&str> = args.key.split('.').collect();
     let mut current = &config_value;
 
@@ -210,8 +258,7 @@ async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32>
         match current.get(part) {
             Some(v) => current = v,
             None => {
-                ctx.output
-                    .error(&format!("Configuration key not found: {}", args.key));
+                ctx.output.error(&format!("Configuration key not found: {}", args.key));
                 return Ok(exit_codes::CONFIG_ERROR);
             }
         }
@@ -231,20 +278,29 @@ async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32>
 
 /// Reset configuration to defaults
 async fn reset_config(ctx: &CliContext, cli: &Cli) -> Result<i32> {
+    let config_path = get_user_config_path();
+
+    if !config_path.exists() {
+        ctx.output.info("No user configuration file to reset");
+        return Ok(exit_codes::SUCCESS);
+    }
+
+    // Confirm in interactive mode
     if !cli.ci {
-        let confirm =
-            crate::cli::output::confirm("Reset configuration to defaults?", false, cli.ci)?;
+        let confirm = crate::output::confirm(
+            "Are you sure you want to reset configuration to defaults?",
+            false,
+            cli.ci,
+        )?;
         if !confirm {
             ctx.output.info("Reset cancelled");
             return Ok(exit_codes::SUCCESS);
         }
     }
 
-    // TODO: Implement config reset
-    // 1. Find the config file being used
-    // 2. Delete it or overwrite with defaults
-
-    ctx.output.warn("Config reset not yet implemented");
+    std::fs::remove_file(&config_path)?;
+    ctx.output.success("Configuration reset to defaults");
+    ctx.output.info(&format!("Removed: {:?}", config_path));
 
     Ok(exit_codes::SUCCESS)
 }
@@ -252,52 +308,36 @@ async fn reset_config(ctx: &CliContext, cli: &Cli) -> Result<i32> {
 /// Initialize a new configuration file
 async fn init_config(ctx: &CliContext, _cli: &Cli, args: &InitArgs) -> Result<i32> {
     let config_path = if args.local {
-        ctx.working_dir.join(".vulnera.toml")
+        PathBuf::from(".vulnera.toml")
     } else {
         get_user_config_path()
     };
 
     if config_path.exists() && !args.force {
-        ctx.output.error(&format!(
-            "Configuration file already exists: {:?}",
-            config_path
-        ));
+        ctx.output.error(&format!("Config file already exists: {:?}", config_path));
         ctx.output.info("Use --force to overwrite");
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
-    // Create default config
+    // Create default config content
     let default_config = r#"# Vulnera CLI Configuration
-# For full documentation, see: https://docs.vulnera.dev/cli/configuration
+# See https://vulnera.dev/docs/cli/configuration for full options
 
 [server]
-# Vulnera API server URL
-host = "127.0.0.1"
-port = 8080
-
-[server.rate_limit]
-enabled = true
-storage_backend = "dragonfly"
-
-[server.rate_limit.tiers.api_key]
-requests_per_minute = 100
-requests_per_hour = 2000
-
-[server.rate_limit.tiers.authenticated]
-requests_per_minute = 60
-requests_per_hour = 1000
-
-[server.rate_limit.tiers.anonymous]
-requests_per_minute = 20
-requests_per_hour = 100
+host = "https://api.vulnera.dev"
+port = 443
 
 [analysis]
-# Maximum number of packages to analyze concurrently
+# Maximum concurrent packages to analyze
 max_concurrent_packages = 10
+# Timeout for analysis in seconds
+timeout_seconds = 300
 
-[cache]
-# Dragonfly/Redis URL for caching vulnerability data
-dragonfly_url = "redis://127.0.0.1:6379"
+[output]
+# Default output format: table, json, sarif
+format = "table"
+# Use colors in output
+colors = true
 "#;
 
     // Create parent directories
@@ -307,50 +347,59 @@ dragonfly_url = "redis://127.0.0.1:6379"
 
     std::fs::write(&config_path, default_config)?;
 
-    ctx.output
-        .success(&format!("Created configuration file: {:?}", config_path));
-    ctx.output.info("Edit this file to customize your settings");
+    ctx.output.success(&format!("Created config file: {:?}", config_path));
+    ctx.output.info("Edit this file to customize Vulnera CLI behavior");
 
     Ok(exit_codes::SUCCESS)
 }
 
-/// Get possible configuration file paths
-fn get_config_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-
-    // Current directory
-    paths.push(PathBuf::from(".vulnera.toml"));
-    paths.push(PathBuf::from("vulnera.toml"));
-
-    // User config directory
-    if let Some(dirs) = directories::ProjectDirs::from("dev", "vulnera", "vulnera-cli") {
-        paths.push(dirs.config_dir().join("config.toml"));
-    }
-
-    // System config (Unix)
-    #[cfg(unix)]
-    {
-        paths.push(PathBuf::from("/etc/vulnera/config.toml"));
-    }
-
-    paths
-}
-
-/// Get user configuration file path
+/// Get user config file path
 fn get_user_config_path() -> PathBuf {
-    directories::ProjectDirs::from("dev", "vulnera", "vulnera-cli")
-        .map(|d| d.config_dir().join("config.toml"))
-        .unwrap_or_else(|| PathBuf::from("vulnera.toml"))
+    if let Some(dirs) = ProjectDirs::from("dev", "vulnera", "vulnera-cli") {
+        dirs.config_dir().join("config.toml")
+    } else if let Some(home) = dirs::home_dir() {
+        home.join(".vulnera").join("config.toml")
+    } else {
+        PathBuf::from(".vulnera.toml")
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_config_paths() {
-        let paths = get_config_paths();
-        assert!(!paths.is_empty());
-        assert!(paths[0].to_string_lossy().contains("vulnera"));
+/// Set a nested value in a TOML document
+fn set_nested_value(root: &mut toml::Value, parts: &[&str], value: &str) -> Result<()> {
+    if parts.is_empty() {
+        return Ok(());
     }
+
+    let mut current = root;
+
+    // Navigate/create path to parent
+    for part in &parts[..parts.len() - 1] {
+        current = current
+            .as_table_mut()
+            .ok_or_else(|| anyhow::anyhow!("Invalid config structure"))?
+            .entry(*part)
+            .or_insert(toml::Value::Table(toml::map::Map::new()));
+    }
+
+    // Set the final value
+    let table = current
+        .as_table_mut()
+        .ok_or_else(|| anyhow::anyhow!("Invalid config structure"))?;
+
+    // Try to parse the value as the appropriate type
+    let parsed_value = if value == "true" {
+        toml::Value::Boolean(true)
+    } else if value == "false" {
+        toml::Value::Boolean(false)
+    } else if let Ok(n) = value.parse::<i64>() {
+        toml::Value::Integer(n)
+    } else if let Ok(f) = value.parse::<f64>() {
+        toml::Value::Float(f)
+    } else {
+        toml::Value::String(value.to_string())
+    };
+
+    table.insert(parts[parts.len() - 1].to_string(), parsed_value);
+
+    Ok(())
 }

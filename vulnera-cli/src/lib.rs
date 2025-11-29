@@ -1,23 +1,28 @@
-//! Vulnera CLI - Command-line interface for vulnerability analysis
+//! Vulnera CLI - Standalone vulnerability analysis tool
 //!
-//! This module provides a lightweight, offline-first CLI for running vulnerability
-//! analysis locally without requiring a full server deployment.
+//! This crate provides a standalone CLI for vulnerability analysis that can be
+//! distributed independently from the server. It embeds three offline-capable
+//! analysis modules (SAST, secrets, API) and uses the Vulnera server API for
+//! dependency vulnerability scanning.
 //!
 //! ## Features
-//! - Offline-first: SAST, secrets, and API analysis work fully offline
-//! - Quota tracking: 10 requests/day unauthenticated, 40 with API key
-//! - Cross-device sync: Quota synced with Dragonfly when online
-//! - Encrypted credentials: OS keyring with AES-256-GCM fallback
-//! - CI mode: Non-interactive mode for CI/CD pipelines
+//! - **Offline Analysis**: SAST, secret detection, and API security work fully offline
+//! - **Online Dependency Scanning**: Uses server API for CVE database lookups
+//! - **Quota Management**: 10 requests/day unauthenticated, 40 with API key
+//! - **Credential Storage**: OS keyring with AES-256-GCM encrypted file fallback
+//! - **CI/CD Integration**: Exit codes, SARIF output, non-interactive mode
 
-mod commands;
-mod context;
-mod credentials;
-mod output;
-mod quota_tracker;
+pub mod api_client;
+pub mod commands;
+pub mod context;
+pub mod credentials;
+pub mod executor;
+pub mod output;
+pub mod quota_tracker;
 
 pub use context::CliContext;
 pub use credentials::CredentialManager;
+pub use executor::AnalysisExecutor;
 pub use output::{OutputFormat, OutputWriter};
 pub use quota_tracker::QuotaTracker;
 
@@ -33,6 +38,8 @@ use std::path::PathBuf;
     about = "Comprehensive vulnerability analysis for your codebase",
     long_about = "Vulnera CLI provides offline-first vulnerability analysis including dependency \
                   scanning, SAST, secret detection, and API security analysis.\n\n\
+                  Offline modules: SAST, Secrets, API Security\n\
+                  Online modules: Dependency vulnerability scanning (requires server)\n\n\
                   Daily limits: 10 requests unauthenticated, 40 with API key.\n\
                   Run 'vulnera auth login' to authenticate for higher limits."
 )]
@@ -45,7 +52,7 @@ pub struct Cli {
     #[arg(long, global = true, env = "VULNERA_CI")]
     pub ci: bool,
 
-    /// Force offline mode (skip network requests for vulnerability data)
+    /// Force offline mode (skip network requests, deps analysis unavailable)
     #[arg(long, global = true)]
     pub offline: bool,
 
@@ -61,6 +68,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
+    /// Server URL for API calls (default: https://api.vulnera.dev)
+    #[arg(long, global = true, env = "VULNERA_SERVER_URL")]
+    pub server: Option<String>,
+
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -71,19 +82,19 @@ pub enum Commands {
     #[command(visible_alias = "a")]
     Analyze(commands::analyze::AnalyzeArgs),
 
-    /// Analyze dependencies for known vulnerabilities
+    /// Analyze dependencies for known vulnerabilities (requires server)
     #[command(visible_alias = "d")]
     Deps(commands::deps::DepsArgs),
 
-    /// Run static analysis for security issues (SAST)
+    /// Run static analysis for security issues (SAST) - works offline
     #[command(visible_alias = "s")]
     Sast(commands::sast::SastArgs),
 
-    /// Detect hardcoded secrets and credentials
+    /// Detect hardcoded secrets and credentials - works offline
     #[command(visible_alias = "sec")]
     Secrets(commands::secrets::SecretsArgs),
 
-    /// Analyze API endpoints for security issues
+    /// Analyze API endpoints for security issues - works offline
     Api(commands::api::ApiArgs),
 
     /// Show or manage quota status
