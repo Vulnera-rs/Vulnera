@@ -280,6 +280,8 @@ impl fmt::Display for UserRole {
 /// JWT authentication token claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthToken {
+    /// JWT ID - unique identifier for this token (for blacklisting)
+    pub jti: String,
     /// Subject (user_id)
     pub sub: String,
     /// User email
@@ -295,7 +297,7 @@ pub struct AuthToken {
 }
 
 impl AuthToken {
-    /// Create a new access token
+    /// Create a new access token with auto-generated JTI
     pub fn new_access(
         user_id: UserId,
         email: Email,
@@ -304,6 +306,7 @@ impl AuthToken {
         iat: usize,
     ) -> Self {
         Self {
+            jti: Uuid::new_v4().to_string(),
             sub: user_id.as_str(),
             email: email.as_str().to_string(),
             roles: roles.iter().map(|r| r.to_string()).collect(),
@@ -313,9 +316,10 @@ impl AuthToken {
         }
     }
 
-    /// Create a new refresh token
+    /// Create a new refresh token with auto-generated JTI
     pub fn new_refresh(user_id: UserId, exp: usize, iat: usize) -> Self {
         Self {
+            jti: Uuid::new_v4().to_string(),
             sub: user_id.as_str(),
             email: String::new(), // Not needed for refresh tokens
             roles: vec![],        // Not needed for refresh tokens
@@ -340,6 +344,16 @@ impl AuthToken {
     /// Check if token is a refresh token
     pub fn is_refresh_token(&self) -> bool {
         self.typ == "refresh"
+    }
+
+    /// Get the JWT ID (for blacklisting)
+    pub fn jti(&self) -> &str {
+        &self.jti
+    }
+
+    /// Get the issued-at timestamp
+    pub fn iat(&self) -> i64 {
+        self.iat as i64
     }
 }
 
@@ -565,5 +579,23 @@ mod tests {
         assert_eq!(token.user_id().unwrap(), user_id);
         assert!(token.is_access_token());
         assert!(!token.is_refresh_token());
+        // Verify JTI is generated and is a valid UUID
+        assert!(!token.jti().is_empty());
+        assert!(Uuid::parse_str(token.jti()).is_ok());
+    }
+
+    #[test]
+    fn test_auth_token_jti_uniqueness() {
+        let user_id = UserId::generate();
+        let email = Email::new("user@example.com".to_string()).unwrap();
+        let roles = vec![UserRole::User];
+        let now = chrono::Utc::now().timestamp() as usize;
+        let exp = now + 3600;
+
+        let token1 = AuthToken::new_access(user_id, email.clone(), roles.clone(), exp, now);
+        let token2 = AuthToken::new_access(user_id, email, roles, exp, now);
+
+        // Each token should have a unique JTI
+        assert_ne!(token1.jti(), token2.jti());
     }
 }
