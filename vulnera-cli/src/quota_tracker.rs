@@ -1,22 +1,17 @@
-//! Quota Tracker - Usage limit management with Dragonfly sync
+//! Quota Tracker - Usage limit management with local persistence
 //!
 //! This module tracks CLI usage quotas with:
 //! - Local persistence in JSON file
 //! - UTC daily reset at midnight
-//! - Cross-device sync via Dragonfly (takes max to prevent abuse)
 //! - Graceful handling of corrupted/missing files
 
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, Utc};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::time::Duration as StdDuration;
-use vulnera_core::application::vulnerability::services::cache::CacheService;
-use vulnera_core::infrastructure::cache::DragonflyCache;
 
 /// Default daily limit for unauthenticated users
 pub const UNAUTHENTICATED_DAILY_LIMIT: u32 = 10;
@@ -24,13 +19,10 @@ pub const UNAUTHENTICATED_DAILY_LIMIT: u32 = 10;
 /// Default daily limit for authenticated users
 pub const AUTHENTICATED_DAILY_LIMIT: u32 = 40;
 
-/// Redis/Dragonfly key prefix for quota storage
-const QUOTA_KEY_PREFIX: &str = "vulnera:cli:quota:";
-
 /// Local quota file name
 const QUOTA_FILE_NAME: &str = "quota.json";
 
-/// Manages usage quotas with local persistence and remote sync
+/// Manages usage quotas with local persistence
 pub struct QuotaTracker {
     /// Path to local quota file
     quota_file: PathBuf,
@@ -240,80 +232,6 @@ impl QuotaTracker {
         tomorrow_utc.signed_duration_since(now)
     }
 
-    /// Sync quota with remote Dragonfly cache
-    ///
-    /// This implements a "take max" strategy to prevent abuse across devices:
-    /// - Fetch remote quota count
-    /// - Take max(local, remote)
-    /// - Update both local and remote
-    pub async fn sync_with_remote(&mut self, cache: &Arc<DragonflyCache>) -> Result<()> {
-        let key = self.get_remote_key();
-
-        // Fetch remote quota
-        let remote_used: u32 = match cache.get::<u32>(&key).await {
-            Ok(Some(count)) => count,
-            Ok(None) => 0,
-            Err(e) => {
-                tracing::warn!("Failed to fetch remote quota: {}", e);
-                return Ok(()); // Continue with local quota
-            }
-        };
-
-        // Take max to prevent abuse
-        let merged_used = self.state.used.max(remote_used);
-
-        if merged_used != self.state.used {
-            tracing::debug!(
-                "Syncing quota: local={}, remote={}, merged={}",
-                self.state.used,
-                remote_used,
-                merged_used
-            );
-            self.state.used = merged_used;
-            self.save_state()?;
-        }
-
-        // Update remote with merged value
-        if let Err(e) = self.update_remote(cache, merged_used).await {
-            tracing::warn!("Failed to update remote quota: {}", e);
-        }
-
-        self.state.last_sync = Some(Utc::now());
-        self.save_state()?;
-
-        Ok(())
-    }
-
-    /// Get the remote key for this user/machine
-    fn get_remote_key(&self) -> String {
-        let auth_prefix = if self.is_authenticated {
-            "auth"
-        } else {
-            "unauth"
-        };
-        let date = self.state.date.format("%Y-%m-%d");
-        format!(
-            "{}{}:{}:{}",
-            QUOTA_KEY_PREFIX, auth_prefix, self.machine_id, date
-        )
-    }
-
-    /// Update remote quota
-    async fn update_remote(&self, cache: &Arc<DragonflyCache>, count: u32) -> Result<()> {
-        let key = self.get_remote_key();
-
-        // Set with expiry at end of day (UTC) + 1 hour buffer
-        let ttl = self.time_until_reset() + chrono::Duration::hours(1);
-        let ttl_secs = ttl.num_seconds().max(1) as u64;
-
-        cache
-            .set(&key, &count, StdDuration::from_secs(ttl_secs))
-            .await
-            .context("Failed to set remote quota")?;
-
-        Ok(())
-    }
-
     /// Reset quota (for testing or admin purposes)
     pub fn reset(&mut self) -> Result<()> {
         self.state = QuotaState::default();
@@ -341,6 +259,11 @@ impl QuotaTracker {
             is_authenticated: self.is_authenticated,
             last_sync: self.state.last_sync,
         }
+    }
+
+    /// Get the machine ID
+    pub fn machine_id(&self) -> &str {
+        &self.machine_id
     }
 }
 
@@ -426,7 +349,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_authenticated_limit() {
-        let (mut tracker, _temp) = test_tracker(true);
+        let (tracker, _temp) = test_tracker(true);
 
         assert_eq!(tracker.daily_limit(), AUTHENTICATED_DAILY_LIMIT);
         assert_eq!(tracker.remaining(), AUTHENTICATED_DAILY_LIMIT);

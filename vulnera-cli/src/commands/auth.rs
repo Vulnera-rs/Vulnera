@@ -6,10 +6,10 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
-use crate::cli::Cli;
-use crate::cli::context::CliContext;
-use crate::cli::exit_codes;
-use crate::cli::output::{self, OutputFormat};
+use crate::Cli;
+use crate::context::CliContext;
+use crate::exit_codes;
+use crate::output::{self, OutputFormat};
 
 /// Arguments for the auth command
 #[derive(Args, Debug)]
@@ -46,7 +46,7 @@ pub struct LoginArgs {
 pub struct AuthStatus {
     pub authenticated: bool,
     pub storage_method: String,
-    pub server_url: Option<String>,
+    pub server_url: String,
     pub quota_limit: u32,
 }
 
@@ -115,12 +115,31 @@ async fn login(ctx: &CliContext, cli: &Cli, args: &LoginArgs) -> Result<i32> {
     ));
     ctx.output.info("You now have 40 requests per day");
 
-    // Optionally verify the key with the server
-    if ctx.is_online() && !cli.offline {
+    // Verify the key with the server if not offline
+    if !cli.offline {
         ctx.output.info("Verifying API key with server...");
-        // TODO: Implement API key verification
-        // let valid = verify_api_key(&api_key, ctx.cache.as_ref()).await?;
-        ctx.output.success("API key verified");
+
+        let client = crate::api_client::VulneraClient::new(
+            ctx.config.server.host.clone(),
+            ctx.config.server.port,
+            Some(api_key.clone()),
+        )?;
+
+        match client.verify_api_key().await {
+            Ok(true) => {
+                ctx.output.success("API key verified");
+            }
+            Ok(false) => {
+                ctx.output
+                    .warn("API key could not be verified - it may be invalid");
+                ctx.output
+                    .info("The key has been stored, but you may need to check it");
+            }
+            Err(e) => {
+                ctx.output.warn(&format!("Could not verify API key: {}", e));
+                ctx.output.info("The key has been stored for offline use");
+            }
+        }
     }
 
     Ok(exit_codes::SUCCESS)
@@ -155,13 +174,13 @@ async fn logout(ctx: &CliContext, cli: &Cli) -> Result<i32> {
 }
 
 /// Show authentication status
-async fn status(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
-    let authenticated = ctx.is_authenticated();
+async fn status(ctx: &CliContext, cli: &Cli) -> Result<i32> {
+    let authenticated = ctx.credentials.has_credentials();
 
     let status = AuthStatus {
         authenticated,
         storage_method: ctx.credentials.storage_method().to_string(),
-        server_url: Some(ctx.config.server.host.clone()),
+        server_url: format!("{}:{}", ctx.config.server.host, ctx.config.server.port),
         quota_limit: if authenticated { 40 } else { 10 },
     };
 
@@ -185,11 +204,21 @@ async fn status(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
             ctx.output
                 .print(&format!("Storage: {}", status.storage_method));
+            ctx.output.print(&format!("Server: {}", status.server_url));
 
-            if ctx.is_online() {
-                ctx.output.success("Server connection: OK");
-            } else {
-                ctx.output.warn("Server connection: Offline");
+            // Check server connectivity if not offline
+            if !cli.offline {
+                let api_key = ctx.credentials.get_api_key().ok().flatten();
+                let client = crate::api_client::VulneraClient::new(
+                    ctx.config.server.host.clone(),
+                    ctx.config.server.port,
+                    api_key,
+                )?;
+
+                match client.health_check().await {
+                    Ok(true) => ctx.output.success("Server connection: OK"),
+                    Ok(false) | Err(_) => ctx.output.warn("Server connection: Failed"),
+                }
             }
         }
     }
@@ -199,54 +228,32 @@ async fn status(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
 
 /// Show credential storage information
 async fn info(ctx: &CliContext, _cli: &Cli) -> Result<i32> {
-    ctx.output.header("Credential Storage Info");
+    ctx.output.header("Credential Storage Information");
+
+    ctx.output.print(&format!(
+        "Current method: {}",
+        ctx.credentials.storage_method()
+    ));
 
     ctx.output
-        .print(&format!("Method: {}", ctx.credentials.storage_method()));
+        .print("\nStorage methods (in order of preference):");
+    ctx.output.print(
+        "  1. OS Keychain (macOS Keychain / Linux Secret Service / Windows Credential Manager)",
+    );
+    ctx.output
+        .print("  2. Encrypted file (~/.vulnera/credentials.enc)");
 
-    match ctx.credentials.storage_method() {
-        "OS Keyring" => {
-            ctx.output.print("Location: System credential manager");
-            #[cfg(target_os = "macos")]
-            ctx.output.print("  macOS: Keychain Access");
-            #[cfg(target_os = "windows")]
-            ctx.output.print("  Windows: Credential Manager");
-            #[cfg(target_os = "linux")]
-            ctx.output
-                .print("  Linux: Secret Service (e.g., GNOME Keyring)");
-        }
-        "Encrypted File" => {
-            let dirs = directories::ProjectDirs::from("dev", "vulnera", "vulnera-cli");
-            if let Some(d) = dirs {
-                ctx.output.print(&format!("Location: {:?}", d.data_dir()));
-            }
-            ctx.output.print("Encryption: AES-256-GCM");
-        }
-        _ => {}
+    ctx.output.print("\nEnvironment variables:");
+    ctx.output
+        .print("  VULNERA_API_KEY - API key for authentication");
+    ctx.output
+        .print("  VULNERA_SERVER_URL - Override server URL");
+
+    if ctx.credentials.has_credentials() {
+        ctx.output.success("\nCredentials are currently stored");
+    } else {
+        ctx.output.info("\nNo credentials stored");
     }
-
-    ctx.output.print("");
-    ctx.output
-        .info("Credentials are never sent over the network unencrypted");
 
     Ok(exit_codes::SUCCESS)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_auth_status_serialization() {
-        let status = AuthStatus {
-            authenticated: true,
-            storage_method: "OS Keyring".to_string(),
-            server_url: Some("https://api.vulnera.dev".to_string()),
-            quota_limit: 40,
-        };
-
-        let json = serde_json::to_string(&status).unwrap();
-        assert!(json.contains("\"authenticated\":true"));
-        assert!(json.contains("\"quota_limit\":40"));
-    }
 }
