@@ -4796,6 +4796,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "streaming-iterator",
  "syn 2.0.111",
  "tempfile",
  "thiserror 2.0.17",
