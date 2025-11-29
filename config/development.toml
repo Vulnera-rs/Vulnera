@@ -5,12 +5,12 @@ workers = 0
 enable_docs = true
 request_timeout_seconds = 60
 # For development, specify origins explicitly to support credentials (cookies)
-# Wildcard "*" cannot be used with allow_credentials=true in CORS
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:8080",
     "http://localhost:5173",
+    "https://vulnera.studio",
 ]
 
 [server.security]
