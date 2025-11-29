@@ -37,6 +37,8 @@ pub struct ScanForSecretsUseCase {
     scan_semaphore: Arc<Semaphore>,
     /// Timeout for file read operations
     file_read_timeout: Duration,
+    /// Whether to scan code blocks inside Markdown files (when Markdown files are processed)
+    scan_markdown_codeblocks: bool,
     /// Overall scan timeout
     scan_timeout: Option<Duration>,
 }
@@ -48,7 +50,8 @@ impl ScanForSecretsUseCase {
 
     pub fn with_config(config: &SecretDetectionConfig) -> Self {
         let scanner = DirectoryScanner::new(config.max_scan_depth, config.max_file_size_bytes)
-            .with_exclude_patterns(config.exclude_patterns.clone());
+            .with_exclude_patterns(config.exclude_patterns.clone())
+            .with_exclude_extensions(config.exclude_extensions.clone());
 
         let rule_repository = if let Some(ref rule_file_path) = config.rule_file_path {
             RuleRepository::with_file_and_defaults(rule_file_path)
@@ -103,6 +106,7 @@ impl ScanForSecretsUseCase {
             since_date: config.since_date,
             scan_semaphore,
             file_read_timeout,
+            scan_markdown_codeblocks: config.scan_markdown_codeblocks,
             scan_timeout,
         }
     }
@@ -149,6 +153,7 @@ impl ScanForSecretsUseCase {
             let semaphore = self.scan_semaphore.clone();
             let file_read_timeout = self.file_read_timeout;
             let cancel_tx_clone = cancel_tx.clone();
+            let scan_markdown_codeblocks = self.scan_markdown_codeblocks;
 
             for file in files {
                 // Check for cancellation before spawning new tasks
@@ -160,6 +165,7 @@ impl ScanForSecretsUseCase {
                 let detector_engine = self.detector_engine.clone();
                 let semaphore = semaphore.clone();
                 let cancel_tx_task = cancel_tx_clone.clone();
+                let scan_markdown_codeblocks = scan_markdown_codeblocks;
                 let handle = tokio::spawn(async move {
                     // Check cancellation before acquiring permit
                     if *cancel_tx_task.subscribe().borrow() {
@@ -181,8 +187,13 @@ impl ScanForSecretsUseCase {
                         return Err(ScanError::Configuration("Task cancelled".to_string()));
                     }
 
-                    Self::scan_file_async_with_timeout(&detector_engine, &file, file_read_timeout)
-                        .await
+                    Self::scan_file_async_with_timeout(
+                        &detector_engine,
+                        &file,
+                        file_read_timeout,
+                        scan_markdown_codeblocks,
+                    )
+                    .await
                 });
                 handles.push(handle);
             }
@@ -334,12 +345,13 @@ impl ScanForSecretsUseCase {
         detector_engine: &DetectorEngine,
         file: &ScanFile,
         timeout_duration: Duration,
+        scan_markdown_codeblocks: bool,
     ) -> Result<Vec<SecretFinding>, ScanError> {
         debug!(file = %file.path.display(), "Scanning file");
 
         // Read file with timeout
         let read_future = tokio::fs::read_to_string(&file.path);
-        let content = match timeout(timeout_duration, read_future).await {
+        let mut content = match timeout(timeout_duration, read_future).await {
             Ok(Ok(content)) => content,
             Ok(Err(e)) => {
                 warn!(
@@ -366,10 +378,42 @@ impl ScanForSecretsUseCase {
             }
         };
 
+        // Optionally strip markdown code blocks if Markdown files are being scanned
+        if !scan_markdown_codeblocks {
+            if let Some(ext) = file.path.extension().and_then(|e| e.to_str()) {
+                let ext_lower = ext.to_lowercase();
+                if ext_lower == "md" || ext_lower == "markdown" {
+                    content = Self::strip_markdown_code_blocks(&content);
+                }
+            }
+        }
+
         let findings = detector_engine
             .detect_in_file_async(&file.path, &content)
             .await;
         Ok(findings)
+    }
+
+    /// Remove code blocks from Markdown content (``` fenced blocks or ~~~ fences)
+    fn strip_markdown_code_blocks(content: &str) -> String {
+        let mut out = String::new();
+        let mut in_block = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+                in_block = !in_block;
+                // Skip fence lines entirely
+                continue;
+            }
+
+            if !in_block {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+
+        out
     }
 }
 

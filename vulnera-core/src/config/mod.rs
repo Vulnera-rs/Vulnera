@@ -617,9 +617,17 @@ impl Default for SastConfig {
                 "__pycache__".to_string(),
                 ".venv".to_string(),
                 "venv".to_string(),
-                ".pytest_cache".to_string(),
                 "dist".to_string(),
                 "build".to_string(),
+                "docs".to_string(),
+                "doc".to_string(),
+                "examples".to_string(),
+                "example".to_string(),
+                "test".to_string(),
+                "tests".to_string(),
+                "vendor".to_string(),
+                "third_party".to_string(),
+                "fixtures".to_string(),
             ],
             rule_file_path: None,
             enable_logging: true,
@@ -635,6 +643,10 @@ pub struct SecretDetectionConfig {
     pub max_scan_depth: usize,
     /// Patterns to exclude from scanning (directory or file names)
     pub exclude_patterns: Vec<String>,
+    /// File extensions to exclude from scanning (e.g., "md", "markdown", "rst", "txt", "html")
+    pub exclude_extensions: Vec<String>,
+    /// Whether to scan code blocks inside Markdown files (when Markdown files are included).
+    pub scan_markdown_codeblocks: bool,
     /// Optional path to rule configuration file (TOML or JSON)
     pub rule_file_path: Option<PathBuf>,
     /// Entropy threshold for Base64 strings (default: 4.5)
@@ -687,6 +699,15 @@ impl Default for SecretDetectionConfig {
                 "*.min.js".to_string(),
                 "*.min.css".to_string(),
             ],
+            // Default file extensions to skip during secret scanning to reduce false positives in docs and non-target files
+            exclude_extensions: vec![
+                "md".to_string(),
+                "markdown".to_string(),
+                "rst".to_string(),
+                "html".to_string(),
+            ],
+            // Whether to scan code blocks inside Markdown files when Markdown files are explicitly included.
+            scan_markdown_codeblocks: false,
             rule_file_path: None,
             base64_entropy_threshold: 4.5,
             hex_entropy_threshold: 3.0,
