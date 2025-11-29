@@ -414,6 +414,4 @@ impl DetectorEngine {
 
         false
     }
-
-
 }
