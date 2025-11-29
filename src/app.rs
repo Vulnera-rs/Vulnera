@@ -19,7 +19,6 @@ use vulnera_orchestrator::infrastructure::{
 };
 use vulnera_orchestrator::presentation::controllers::OrchestratorState;
 use vulnera_orchestrator::presentation::routes::create_router;
-use vulnera_sast::SastModule;
 use vulnera_secrets::SecretDetectionModule;
 
 use vulnera_core::application::analytics::AnalyticsAggregationService;
@@ -382,8 +381,61 @@ pub async fn create_app(
         config.analysis.max_concurrent_registry_queries,
     ));
 
-    // Create SAST module
-    let sast_module = Arc::new(SastModule::with_config(&config.sast));
+    // Create SAST module with database rules and AST cache
+    let sast_module = {
+        use std::time::Duration;
+        use vulnera_sast::{
+            AnalysisConfig, DragonflyAstCache, PostgresRuleRepository, SastModule,
+            ScanProjectUseCase,
+        };
+
+        // Create AST cache backed by Dragonfly
+        let ast_cache_ttl = Duration::from_secs(config.sast.ast_cache_ttl_hours.unwrap_or(4) * 3600);
+        let ast_cache = Arc::new(DragonflyAstCache::with_ttl(
+            dragonfly_cache.clone(),
+            ast_cache_ttl,
+        ));
+
+        // Create PostgreSQL-backed rule repository
+        let rule_repository = PostgresRuleRepository::new((*db_pool).clone());
+
+        // Build the use case with database rules and cache
+        let analysis_config = AnalysisConfig {
+            use_tree_sitter: true,
+            use_semgrep: config.sast.enable_semgrep.unwrap_or(true),
+            semgrep_path: config.sast.semgrep_path.clone(),
+            semgrep_timeout_secs: config.sast.semgrep_timeout_secs.unwrap_or(60),
+            enable_ast_cache: config.sast.enable_ast_cache.unwrap_or(true),
+            ast_cache_ttl_hours: config.sast.ast_cache_ttl_hours.unwrap_or(4),
+            max_concurrent_files: config.sast.max_concurrent_files.unwrap_or(4),
+        };
+
+        let use_case = ScanProjectUseCase::with_config(&config.sast, analysis_config);
+
+        // Load database rules if available (non-blocking, fallback to defaults)
+        let use_case = match use_case.with_database_rules(&rule_repository).await {
+            Ok(uc) => {
+                tracing::info!("Loaded SAST rules from database");
+                uc
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to load SAST rules from database, using defaults"
+                );
+                ScanProjectUseCase::with_config(&config.sast, AnalysisConfig::default())
+            }
+        };
+
+        // Add AST cache if enabled
+        let use_case = if config.sast.enable_ast_cache.unwrap_or(true) {
+            use_case.with_ast_cache(ast_cache)
+        } else {
+            use_case
+        };
+
+        Arc::new(SastModule::with_use_case(Arc::new(use_case)))
+    };
 
     // Create secret detection module
     let secrets_module = Arc::new(SecretDetectionModule::with_config(&config.secret_detection));

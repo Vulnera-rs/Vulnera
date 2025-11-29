@@ -89,30 +89,13 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
         return Err("Rule must specify at least one language".to_string());
     }
 
-    // Validate pattern based on type
-    match &rule.pattern {
-        RulePattern::Regex(pattern) => {
-            regex::Regex::new(pattern).map_err(|e| format!("Invalid regex pattern: {}", e))?;
-        }
-        RulePattern::FunctionCall(name) => {
-            if name.is_empty() {
-                return Err("Function call pattern cannot be empty".to_string());
-            }
-        }
-        RulePattern::AstNodeType(node_type) => {
-            if node_type.is_empty() {
-                return Err("AST node type pattern cannot be empty".to_string());
-            }
-        }
-        RulePattern::Custom(_) => {
-            // Custom patterns are not validated
-        }
-        RulePattern::MethodCall(method_pattern) => {
-            if method_pattern.name.is_empty() {
-                return Err("MethodCall pattern name cannot be empty".to_string());
-            }
-        }
+    // Validate tree-sitter query pattern
+    let RulePattern::TreeSitterQuery(query) = &rule.pattern;
+    if query.is_empty() {
+        return Err("Tree-sitter query pattern cannot be empty".to_string());
     }
+    // Additional validation could be done here by attempting to compile the query
+    // For now, we trust the query syntax will be validated at execution time
 
     Ok(())
 }

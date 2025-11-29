@@ -50,7 +50,7 @@ burst_size = 5
 get = 1      # Read operations
 post = 2     # Write operations
 analysis = 5 # Dependency scanning, SAST, etc.
-llm = 10     # LLM operations (explanations, code fixes)
+llm = 5     # LLM operations (explanations, code fixes)
 
 # Auth endpoint brute-force protection (sliding window algorithm)
 [server.rate_limit.auth_protection]
@@ -154,6 +154,24 @@ backoff_jitter = true
 [logging]
 level = "info"
 format = "json"
+
+# SAST (Static Application Security Testing) configuration
+[sast]
+max_scan_depth = 10
+exclude_patterns = [
+    "node_modules", ".git", "target", "__pycache__",
+    ".venv", "venv", "dist", "build", "docs", "doc",
+    "examples", "example", "test", "tests", "vendor",
+    "third_party", "fixtures"
+]
+# rule_file_path = "/path/to/custom/rules.toml"  # Optional custom rule file
+enable_logging = true
+enable_semgrep = true           # Enable Semgrep for taint analysis
+# semgrep_path = "semgrep"      # Path to Semgrep binary (defaults to "semgrep" in PATH)
+semgrep_timeout_secs = 60       # Timeout for Semgrep execution
+enable_ast_cache = true         # Enable AST caching via Dragonfly
+ast_cache_ttl_hours = 4         # AST cache TTL in hours
+max_concurrent_files = 4        # Maximum concurrent file analysis
 
 # Popular packages configuration for vulnerability listing
 [popular_packages]
