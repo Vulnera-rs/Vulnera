@@ -131,16 +131,18 @@ Config files: `config/development.toml`, `config/production.toml`
 ## 🔐 Authentication
 
 ```bash
-# Register
+# Register (sets HttpOnly cookies)
 curl -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
+  -c cookies.txt \
   -d '{"email": "user@example.com", "password": "SecurePass123"}'
 
-# Use token
+# Extract CSRF token from response, then make protected requests
 curl -X POST http://localhost:3000/api/v1/analyze/job \
-  -H "Authorization: Bearer <token>" \
+  -b cookies.txt \
+  -H "X-CSRF-Token: <csrf_token>" \
   -H "Content-Type: application/json" \
-  -d '{"source": {"type": "directory", "path": "."}}'
+  -d '{"source": {"type": "directory", "path": "."}}'  
 ```
 
 ---

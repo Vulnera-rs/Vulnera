@@ -26,7 +26,9 @@ use vulnera_core::application::organization::use_cases::{
 use vulnera_core::application::reporting::ReportServiceImpl;
 use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
 use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
-use vulnera_core::infrastructure::auth::{ApiKeyGenerator, JwtService, PasswordHasher};
+use vulnera_core::infrastructure::auth::{
+    ApiKeyGenerator, JwtService, PasswordHasher, TokenBlacklistService,
+};
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
 use vulnera_core::infrastructure::rate_limiter::RateLimiterService;
 use vulnera_deps::types::VersionResolutionService;
@@ -107,6 +109,9 @@ pub struct OrchestratorState {
     pub validate_token_use_case: Arc<ValidateTokenUseCase>,
     pub refresh_token_use_case: Arc<RefreshTokenUseCase>,
     pub validate_api_key_use_case: Arc<ValidateApiKeyUseCase>,
+
+    // Token blacklist for logout/revocation
+    pub token_blacklist: Arc<dyn TokenBlacklistService>,
 
     // Auth state (for extractors)
     pub auth_state: AuthState,

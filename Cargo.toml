@@ -130,7 +130,7 @@ oas3 = { version = "0.20.1", features = ["yaml-spec"] }
 anyhow = "1.0"
 thiserror = "2.0"
 # advisor
-vulnera-advisor = "0.1.1"
+vulnera-advisor = "0.1.2"
 
 # Configuration
 config = "0.15"

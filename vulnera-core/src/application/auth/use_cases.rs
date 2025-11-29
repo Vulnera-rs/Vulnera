@@ -10,7 +10,9 @@ use crate::domain::auth::{
     repositories::{IApiKeyRepository, IUserRepository},
     value_objects::{ApiKeyId, Email, Password, UserId, UserRole},
 };
-use crate::infrastructure::auth::{ApiKeyGenerator, JwtService, PasswordHasher};
+use crate::infrastructure::auth::{
+    ApiKeyGenerator, JwtService, PasswordHasher, TokenBlacklistService,
+};
 
 /// Result type for login operations
 pub struct LoginResult {
@@ -182,15 +184,35 @@ impl RegisterUserUseCase {
 }
 
 /// Use case for validating JWT tokens
+///
+/// Validates the JWT signature/expiration and checks the token blacklist
+/// to ensure the token hasn't been revoked.
 pub struct ValidateTokenUseCase {
     jwt_service: Arc<JwtService>,
+    token_blacklist: Option<Arc<dyn crate::infrastructure::auth::TokenBlacklistService>>,
 }
 
 impl ValidateTokenUseCase {
+    /// Create a new ValidateTokenUseCase without blacklist checking (for backwards compatibility)
     pub fn new(jwt_service: Arc<JwtService>) -> Self {
-        Self { jwt_service }
+        Self {
+            jwt_service,
+            token_blacklist: None,
+        }
     }
 
+    /// Create a new ValidateTokenUseCase with blacklist checking enabled
+    pub fn with_blacklist(
+        jwt_service: Arc<JwtService>,
+        token_blacklist: Arc<dyn crate::infrastructure::auth::TokenBlacklistService>,
+    ) -> Self {
+        Self {
+            jwt_service,
+            token_blacklist: Some(token_blacklist),
+        }
+    }
+
+    /// Synchronous validation (without blacklist check) - for backwards compatibility
     pub fn execute(&self, token: &str) -> Result<(UserId, Email, Vec<UserRole>), AuthError> {
         let claims = self.jwt_service.validate_token(token)?;
 
@@ -210,12 +232,84 @@ impl ValidateTokenUseCase {
 
         Ok((user_id, email, roles))
     }
+
+    /// Async validation with blacklist checking
+    ///
+    /// This is the preferred method when blacklist checking is enabled.
+    /// Checks both per-token blacklist and per-user revocation.
+    pub async fn execute_with_blacklist_check(
+        &self,
+        token: &str,
+    ) -> Result<(UserId, Email, Vec<UserRole>), AuthError> {
+        let claims = self.jwt_service.validate_token(token)?;
+
+        // Only accept access tokens for validation
+        if !claims.is_access_token() {
+            return Err(AuthError::InvalidToken);
+        }
+
+        let user_id = claims.user_id().map_err(|_| AuthError::InvalidToken)?;
+
+        // Check blacklist if service is configured
+        if let Some(ref blacklist) = self.token_blacklist {
+            // Check if this specific token is blacklisted
+            let is_blacklisted = blacklist.is_blacklisted(claims.jti()).await.map_err(|e| {
+                tracing::error!("Failed to check token blacklist: {}", e);
+                AuthError::InvalidToken
+            })?;
+
+            if is_blacklisted {
+                tracing::debug!(jti = %claims.jti(), "Token is blacklisted");
+                return Err(AuthError::TokenRevoked);
+            }
+
+            // Check if all user's tokens have been revoked (e.g., logout from all devices)
+            let user_revoked = blacklist
+                .are_user_tokens_revoked(&user_id, claims.iat())
+                .await
+                .map_err(|e| {
+                    tracing::error!("Failed to check user token revocation: {}", e);
+                    AuthError::InvalidToken
+                })?;
+
+            if user_revoked {
+                tracing::debug!(user_id = %user_id, "User tokens have been revoked");
+                return Err(AuthError::TokenRevoked);
+            }
+        }
+
+        let email = Email::new(claims.email).map_err(|_| AuthError::InvalidToken)?;
+
+        let roles = claims
+            .roles
+            .iter()
+            .filter_map(|r| UserRole::from_str(r).ok())
+            .collect();
+
+        Ok((user_id, email, roles))
+    }
+
+    /// Get the raw claims from a token without blacklist checking
+    /// Useful for extracting user info during logout
+    pub fn get_claims(
+        &self,
+        token: &str,
+    ) -> Result<crate::domain::auth::value_objects::AuthToken, AuthError> {
+        self.jwt_service.validate_token(token)
+    }
 }
 
-/// Use case for refreshing access tokens
+/// Result of a token refresh operation with rotation
+pub struct RefreshResult {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+/// Use case for refreshing access tokens with rotation support
 pub struct RefreshTokenUseCase {
     jwt_service: Arc<JwtService>,
     user_repository: Arc<dyn IUserRepository>,
+    token_blacklist: Option<Arc<dyn TokenBlacklistService>>,
 }
 
 impl RefreshTokenUseCase {
@@ -223,15 +317,52 @@ impl RefreshTokenUseCase {
         Self {
             jwt_service,
             user_repository,
+            token_blacklist: None,
         }
     }
 
+    /// Set the token blacklist service for rotation support
+    pub fn with_blacklist(mut self, blacklist: Arc<dyn TokenBlacklistService>) -> Self {
+        self.token_blacklist = Some(blacklist);
+        self
+    }
+
+    /// Legacy execute that only returns access token (for backward compatibility)
     pub async fn execute(&self, refresh_token: &str) -> Result<String, AuthError> {
+        let result = self.execute_with_rotation(refresh_token).await?;
+        Ok(result.access_token)
+    }
+
+    /// Execute with full token rotation - returns both new access and refresh tokens
+    /// The old refresh token is blacklisted to prevent reuse
+    pub async fn execute_with_rotation(
+        &self,
+        refresh_token: &str,
+    ) -> Result<RefreshResult, AuthError> {
         // Validate refresh token
         let claims = self.jwt_service.validate_token(refresh_token)?;
 
         if !claims.is_refresh_token() {
             return Err(AuthError::InvalidToken);
+        }
+
+        // Check if old refresh token is blacklisted
+        if let Some(ref blacklist) = self.token_blacklist {
+            let jti = claims.jti();
+            if blacklist.is_blacklisted(jti).await.unwrap_or(false) {
+                return Err(AuthError::InvalidToken);
+            }
+
+            // Also check user-level revocation
+            let user_id = claims.user_id().map_err(|_| AuthError::InvalidToken)?;
+            let iat = claims.iat();
+            if blacklist
+                .are_user_tokens_revoked(&user_id, iat)
+                .await
+                .unwrap_or(false)
+            {
+                return Err(AuthError::InvalidToken);
+            }
         }
 
         // Get user from token
@@ -244,12 +375,31 @@ impl RefreshTokenUseCase {
                 email: user_id.as_str().to_string(),
             })?;
 
-        // Generate new access token
-        let access_token =
-            self.jwt_service
-                .generate_access_token(user.user_id, user.email, user.roles)?;
+        // Blacklist the old refresh token before issuing new one
+        if let Some(ref blacklist) = self.token_blacklist {
+            let jti = claims.jti();
+            let ttl_secs = (claims.exp as u64).saturating_sub(claims.iat() as u64);
+            if let Err(e) = blacklist
+                .blacklist_token(jti, std::time::Duration::from_secs(ttl_secs))
+                .await
+            {
+                tracing::warn!("Failed to blacklist old refresh token: {}", e);
+                // Continue anyway - better to issue new token than fail the refresh
+            }
+        }
 
-        Ok(access_token)
+        // Generate new tokens
+        let access_token = self.jwt_service.generate_access_token(
+            user.user_id.clone(),
+            user.email.clone(),
+            user.roles.clone(),
+        )?;
+        let new_refresh_token = self.jwt_service.generate_refresh_token(user.user_id)?;
+
+        Ok(RefreshResult {
+            access_token,
+            refresh_token: new_refresh_token,
+        })
     }
 }
 
