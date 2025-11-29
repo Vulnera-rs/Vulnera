@@ -310,6 +310,110 @@ impl std::fmt::Debug for RateLimiterState {
     }
 }
 
+/// authentication info extracted before rate limiting
+/// This is a lightweight version used by rate limiter to determine tiers
+#[derive(Debug, Clone)]
+pub struct EarlyAuthInfo {
+    pub user_id: Option<uuid::Uuid>,
+    pub api_key_id: Option<uuid::Uuid>,
+    pub is_org_member: bool,
+}
+
+/// State for early auth extraction middleware
+#[derive(Clone)]
+pub struct EarlyAuthState {
+    pub validate_token: Arc<vulnera_core::application::auth::use_cases::ValidateTokenUseCase>,
+    pub validate_api_key: Arc<vulnera_core::application::auth::use_cases::ValidateApiKeyUseCase>,
+}
+
+/// Early authentication middleware - runs BEFORE rate limiting to properly identify users
+///
+/// This extracts authentication info from cookies/API keys and stores it in request extensions
+pub async fn early_auth_middleware(
+    State(state): State<Arc<EarlyAuthState>>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let mut auth_info = EarlyAuthInfo {
+        user_id: None,
+        api_key_id: None,
+        is_org_member: false,
+    };
+
+    // Try API key first (X-API-Key header or Authorization: ApiKey ...)
+    if let Some(api_key) = extract_api_key_from_headers(request.headers()) {
+        // Check if it's the master key
+        if vulnera_core::infrastructure::auth::is_master_key(&api_key) {
+            // Master key - use a synthetic user ID for rate limiting
+            auth_info.user_id = Some(uuid::Uuid::nil()); // Nil UUID for master key
+            auth_info.api_key_id = Some(uuid::Uuid::new_v4()); // Synthetic API key ID
+        } else {
+            // Validate regular API key
+            match state.validate_api_key.execute(&api_key).await {
+                Ok(result) => {
+                    auth_info.user_id = Some(result.user_id.into());
+                    auth_info.api_key_id = Some(result.api_key_id.into());
+                }
+                Err(_) => {
+                    // Invalid API key - will be treated as anonymous
+                    // The actual auth extractor will return 401 later
+                }
+            }
+        }
+    }
+    // Try cookie auth if no API key
+    else if let Some(token) = extract_access_token_from_cookies(request.headers()) {
+        match state.validate_token.execute(&token) {
+            Ok((user_id, _email, _roles)) => {
+                auth_info.user_id = Some(user_id.into());
+            }
+            Err(_) => {
+                // Invalid/expired token - will be treated as anonymous
+                // Token refresh or re-auth will be needed
+            }
+        }
+    }
+
+    // Store auth info in extensions for rate limiter
+    request.extensions_mut().insert(auth_info);
+
+    next.run(request).await
+}
+
+/// Extract API key from request headers
+fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    // Check X-API-Key header first
+    if let Some(key) = headers.get("x-api-key").and_then(|v| v.to_str().ok()) {
+        return Some(key.to_string());
+    }
+
+    // Check Authorization header with "ApiKey" scheme
+    if let Some(auth) = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(key) = auth.strip_prefix("ApiKey ") {
+            return Some(key.to_string());
+        }
+    }
+
+    None
+}
+
+/// Extract access token from cookies
+fn extract_access_token_from_cookies(headers: &axum::http::HeaderMap) -> Option<String> {
+    let cookies = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok())?;
+
+    cookies
+        .split(';')
+        .map(|s| s.trim())
+        .find(|s| s.starts_with("access_token="))?
+        .strip_prefix("access_token=")
+        .map(|s| s.to_string())
+}
+
 /// Extract IP address from request
 pub fn extract_ip(request: &Request) -> String {
     request
@@ -567,6 +671,18 @@ pub async fn auth_rate_limit_middleware(
 fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
     use crate::presentation::auth::extractors::{ApiKeyAuth, Auth, AuthUser};
 
+    // First check for EarlyAuthInfo (set by early_auth_middleware)
+    if let Some(early_auth) = request.extensions().get::<EarlyAuthInfo>() {
+        if early_auth.user_id.is_some() {
+            return (
+                early_auth.user_id,
+                early_auth.api_key_id,
+                early_auth.is_org_member,
+            );
+        }
+    }
+
+    // Fall back to checking handler extractors (in case middleware didn't run)
     // First check for the unified Auth extractor (has most info)
     if let Some(auth) = request.extensions().get::<Auth>() {
         return (
@@ -592,27 +708,6 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
             None,  // Cookie auth doesn't use API keys
             false, // Cookie auth doesn't carry org info currently
         );
-    }
-
-    // Check for API key in headers (for early rate limit decisions before full extraction)
-    let has_api_key = request.headers().contains_key("x-api-key");
-    if has_api_key {
-        // API key present but not yet extracted - will be handled with anonymous tier for now
-        // The actual tier will be properly determined once auth extractors run
-        return (None, None, false);
-    }
-
-    // Check for cookie-based auth (access_token cookie)
-    let has_auth_cookie = request
-        .headers()
-        .get(axum::http::header::COOKIE)
-        .and_then(|h| h.to_str().ok())
-        .map(|cookies| cookies.contains("access_token="))
-        .unwrap_or(false);
-
-    if has_auth_cookie {
-        // Cookie auth present, but user not yet extracted
-        return (None, None, false);
     }
 
     // Anonymous user

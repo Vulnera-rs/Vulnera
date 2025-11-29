@@ -52,8 +52,11 @@ pub fn is_master_key(api_key: &str) -> bool {
     match key {
         Some(master) => {
             // Use constant-time comparison to prevent timing attacks
-            use std::ops::Deref;
-            let matches = master.deref() == api_key;
+            use subtle::ConstantTimeEq;
+            let matches: bool = master
+                .as_bytes()
+                .ct_eq(api_key.as_bytes())
+                .into();
             if matches {
                 debug!("Master API key authentication successful");
             }

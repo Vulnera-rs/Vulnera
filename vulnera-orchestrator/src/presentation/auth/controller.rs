@@ -11,14 +11,14 @@ use uuid::Uuid;
 
 use vulnera_core::application::auth::use_cases::{
     GenerateApiKeyUseCase, ListApiKeysUseCase, LoginUseCase, RefreshTokenUseCase,
-    RegisterUserUseCase, RevokeApiKeyUseCase,
+    RegisterUserUseCase, RevokeApiKeyUseCase, ValidateTokenUseCase,
 };
 use vulnera_core::config::CookieSameSite;
 use vulnera_core::domain::auth::{
     errors::AuthError,
     value_objects::{ApiKeyId, Email},
 };
-use vulnera_core::infrastructure::auth::CsrfService;
+use vulnera_core::infrastructure::auth::{CsrfService, TokenBlacklistService};
 
 use crate::presentation::auth::extractors::{Auth, AuthState};
 use crate::presentation::auth::models::*;
@@ -30,9 +30,14 @@ pub struct AuthAppState {
     pub login_use_case: Arc<LoginUseCase>,
     pub register_use_case: Arc<RegisterUserUseCase>,
     pub refresh_token_use_case: Arc<RefreshTokenUseCase>,
+    pub validate_token_use_case: Arc<ValidateTokenUseCase>,
     pub auth_state: AuthState,
     pub csrf_service: Arc<CsrfService>,
     pub token_ttl_hours: u64,
+    pub refresh_token_ttl_hours: u64,
+    // Token blacklist for logout
+    pub token_blacklist: Option<Arc<dyn TokenBlacklistService>>,
+    pub blacklist_tokens_on_logout: bool,
     // Cookie configuration
     pub cookie_domain: Option<String>,
     pub cookie_secure: bool,
@@ -383,10 +388,10 @@ pub async fn refresh_token(
         )
     })?;
 
-    // Execute refresh use case
-    let access_token = state
+    // Execute refresh use case with rotation (blacklists old refresh token, issues new one)
+    let result = state
         .refresh_token_use_case
-        .execute(&refresh_token_value)
+        .execute_with_rotation(&refresh_token_value)
         .await
         .map_err(|e| {
             (
@@ -401,19 +406,29 @@ pub async fn refresh_token(
             )
         })?;
 
-    // Calculate cookie expiration time
+    // Calculate cookie expiration times
     let access_token_max_age = (state.token_ttl_hours * 3600) as i64;
+    let refresh_token_max_age = (state.refresh_token_ttl_hours * 3600) as i64;
 
     // Generate new CSRF token
     let csrf_token = state.csrf_service.generate_token();
 
-    // Build response with new cookies
+    // Build response with new cookies (both access and rotated refresh token)
     let mut response_headers = HeaderMap::new();
 
     response_headers.insert(
         header::SET_COOKIE,
         HeaderValue::from_str(
-            &state.build_access_token_cookie(&access_token, access_token_max_age),
+            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )
+        .unwrap(),
+    );
+
+    // Set rotated refresh token cookie
+    response_headers.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(
+            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
         )
         .unwrap(),
     );
@@ -431,7 +446,7 @@ pub async fn refresh_token(
     Ok((StatusCode::OK, response_headers, Json(body)).into_response())
 }
 
-/// Logout endpoint - clears auth cookies
+/// Logout endpoint - clears auth cookies and optionally blacklists tokens
 #[utoipa::path(
     post,
     path = "/api/v1/auth/logout",
@@ -442,8 +457,37 @@ pub async fn refresh_token(
 )]
 pub async fn logout(
     State(state): State<AuthAppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
+    // If blacklist is enabled, revoke all user tokens
+    if state.blacklist_tokens_on_logout {
+        if let Some(ref blacklist) = state.token_blacklist {
+            // Try to extract user from the access token cookie
+            if let Some(access_token) = extract_cookie(&headers, "access_token") {
+                // Get the user ID from the token (even if expired, we can still extract claims)
+                if let Ok(claims) = state.validate_token_use_case.get_claims(&access_token) {
+                    if let Ok(user_id) = claims.user_id() {
+                        // Revoke all tokens for this user
+                        // TTL should match the refresh token TTL to ensure all tokens are invalidated
+                        let ttl =
+                            std::time::Duration::from_secs(state.refresh_token_ttl_hours * 3600);
+
+                        if let Err(e) = blacklist.revoke_all_user_tokens(&user_id, ttl).await {
+                            tracing::warn!(
+                                user_id = %user_id,
+                                error = %e,
+                                "Failed to revoke user tokens on logout"
+                            );
+                            // Don't fail the logout - cookie clearing will still work
+                        } else {
+                            tracing::info!(user_id = %user_id, "User tokens revoked on logout");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Build response with cleared cookies
     let mut response_headers = HeaderMap::new();
 
