@@ -6971,6 +6971,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tower",
