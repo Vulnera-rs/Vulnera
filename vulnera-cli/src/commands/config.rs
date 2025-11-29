@@ -9,10 +9,10 @@ use clap::{Args, Subcommand};
 use directories::ProjectDirs;
 use serde::Serialize;
 
+use crate::Cli;
 use crate::context::CliContext;
 use crate::exit_codes;
 use crate::output::OutputFormat;
-use crate::Cli;
 
 /// Arguments for the config command
 #[derive(Args, Debug)]
@@ -241,8 +241,10 @@ async fn set_config(ctx: &CliContext, _cli: &Cli, args: &SetArgs) -> Result<i32>
     let content = toml::to_string_pretty(&config)?;
     std::fs::write(&config_path, content)?;
 
-    ctx.output.success(&format!("Set {} = {}", args.key, args.value));
-    ctx.output.info(&format!("Config saved to {:?}", config_path));
+    ctx.output
+        .success(&format!("Set {} = {}", args.key, args.value));
+    ctx.output
+        .info(&format!("Config saved to {:?}", config_path));
 
     Ok(exit_codes::SUCCESS)
 }
@@ -258,7 +260,8 @@ async fn get_config(ctx: &CliContext, _cli: &Cli, args: &GetArgs) -> Result<i32>
         match current.get(part) {
             Some(v) => current = v,
             None => {
-                ctx.output.error(&format!("Configuration key not found: {}", args.key));
+                ctx.output
+                    .error(&format!("Configuration key not found: {}", args.key));
                 return Ok(exit_codes::CONFIG_ERROR);
             }
         }
@@ -314,7 +317,8 @@ async fn init_config(ctx: &CliContext, _cli: &Cli, args: &InitArgs) -> Result<i3
     };
 
     if config_path.exists() && !args.force {
-        ctx.output.error(&format!("Config file already exists: {:?}", config_path));
+        ctx.output
+            .error(&format!("Config file already exists: {:?}", config_path));
         ctx.output.info("Use --force to overwrite");
         return Ok(exit_codes::CONFIG_ERROR);
     }
@@ -347,8 +351,10 @@ colors = true
 
     std::fs::write(&config_path, default_config)?;
 
-    ctx.output.success(&format!("Created config file: {:?}", config_path));
-    ctx.output.info("Edit this file to customize Vulnera CLI behavior");
+    ctx.output
+        .success(&format!("Created config file: {:?}", config_path));
+    ctx.output
+        .info("Edit this file to customize Vulnera CLI behavior");
 
     Ok(exit_codes::SUCCESS)
 }

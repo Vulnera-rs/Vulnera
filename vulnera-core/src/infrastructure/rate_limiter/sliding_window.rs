@@ -222,8 +222,8 @@ impl SlidingWindowLimiter {
         } else if state.window_start + window_size == window_start {
             // Previous window became current window
             let elapsed_ratio = (now % window_size) as f64 / window_size as f64;
-            let weighted_prev = state.current_count as f64 * (1.0 - elapsed_ratio);
-            weighted_prev
+            
+            state.current_count as f64 * (1.0 - elapsed_ratio)
         } else {
             // Windows are too old, start fresh
             0.0

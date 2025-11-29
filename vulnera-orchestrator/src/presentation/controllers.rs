@@ -38,7 +38,9 @@ use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
 use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
 use crate::infrastructure::job_store::{JobSnapshot, JobStore};
-use crate::presentation::auth::extractors::{Auth, AuthState, OptionalApiKeyAuth, OptionalAwsCredentials};
+use crate::presentation::auth::extractors::{
+    Auth, AuthState, OptionalApiKeyAuth, OptionalAwsCredentials,
+};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
@@ -202,10 +204,10 @@ pub async fn analyze(
     let organization_id = if !auth.is_master_key {
         state
             .list_user_organizations_use_case
-            .execute(auth.user_id.clone())
+            .execute(auth.user_id)
             .await
             .ok()
-            .and_then(|orgs| orgs.first().map(|org| org.id.clone()))
+            .and_then(|orgs| orgs.first().map(|org| org.id))
     } else {
         None
     };
