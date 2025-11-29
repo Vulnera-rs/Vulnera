@@ -38,7 +38,7 @@ use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
 use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
 use crate::infrastructure::job_store::{JobSnapshot, JobStore};
-use crate::presentation::auth::extractors::{Auth, AuthState, OptionalApiKeyAuth};
+use crate::presentation::auth::extractors::{Auth, AuthState, OptionalApiKeyAuth, OptionalAwsCredentials};
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
@@ -159,6 +159,7 @@ pub struct OrchestratorState {
 pub async fn analyze(
     State(state): State<OrchestratorState>,
     auth: Auth,
+    aws_credentials: OptionalAwsCredentials,
     Json(request): Json<AnalysisRequest>,
 ) -> Result<(StatusCode, Json<JobAcceptedResponse>), String> {
     use crate::presentation::auth::extractors::AuthMethod;
@@ -167,10 +168,25 @@ pub async fn analyze(
     let source_type = request.parse_source_type()?;
     let analysis_depth = request.parse_analysis_depth()?;
 
+    // Validate S3 bucket requests have credentials
+    if source_type == crate::domain::value_objects::SourceType::S3Bucket
+        && aws_credentials.0.is_none()
+    {
+        return Err(
+            "S3 bucket source requires X-AWS-Credentials header with Base64-encoded JSON credentials"
+                .to_string(),
+        );
+    }
+
     // Create job
     let (job, project) = state
         .create_job_use_case
-        .execute(source_type, request.source_uri.clone(), analysis_depth)
+        .execute(
+            source_type,
+            request.source_uri.clone(),
+            analysis_depth,
+            aws_credentials.0.as_ref(),
+        )
         .await
         .map_err(|e| format!("Failed to create job: {}", e))?;
 

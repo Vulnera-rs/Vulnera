@@ -10,7 +10,7 @@ use redis::aio::ConnectionManager;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error};
+use tracing::{debug, warn};
 
 /// Trait for rate limit storage backends
 #[async_trait]
@@ -59,12 +59,12 @@ impl DragonflyRateLimitStorage {
     /// Create a new Dragonfly storage backend
     pub async fn new(url: &str) -> Result<Self, String> {
         let client = redis::Client::open(url).map_err(|e| {
-            error!("Failed to create Redis client for rate limiting: {}", e);
+            warn!("Failed to create Redis client for rate limiting: {}", e);
             format!("Failed to create Redis client: {}", e)
         })?;
 
         let connection_manager = ConnectionManager::new(client).await.map_err(|e| {
-            error!(
+            warn!(
                 "Failed to create connection manager for rate limiting: {}",
                 e
             );
@@ -77,7 +77,7 @@ impl DragonflyRateLimitStorage {
             .query_async::<String>(&mut conn)
             .await
             .map_err(|e| {
-                error!("Failed to ping Redis for rate limiting: {}", e);
+                warn!("Failed to ping Redis for rate limiting: {}", e);
                 format!("Failed to ping Redis: {}", e)
             })?;
 
