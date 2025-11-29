@@ -107,6 +107,11 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
         RulePattern::Custom(_) => {
             // Custom patterns are not validated
         }
+        RulePattern::MethodCall(method_pattern) => {
+            if method_pattern.name.is_empty() {
+                return Err("MethodCall pattern name cannot be empty".to_string());
+            }
+        }
     }
 
     Ok(())
