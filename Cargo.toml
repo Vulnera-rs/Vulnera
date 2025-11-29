@@ -8,6 +8,8 @@ members = [
     "vulnera-api",
     "vulnera-llm",
 ]
+exclude = ["vulnera-cli"]
+
 resolver = "2"
 
 [package]
@@ -166,6 +168,7 @@ flate2 = "1.0"
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 bcrypt = "0.17.1"
 rand = "0.9.2"
+rustls = { version = "0.23", features = ["ring"] }
 
 # Database
 sqlx = { version = "0.8.6", features = [
@@ -209,7 +212,7 @@ tree-sitter-cpp = "0.23.4"
 petgraph = "0.8.1"
 syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
 quote = "1.0"
-proc-macro2 = "1.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 walkdir = "2.5"
 bytes = "1.4.0"
 

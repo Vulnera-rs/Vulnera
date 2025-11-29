@@ -1,6 +1,7 @@
 //! AST parsers for different languages
 
 use crate::domain::value_objects::Language;
+use syn::spanned::Spanned;
 use tracing::{debug, error, instrument, warn};
 
 /// AST node (simplified representation)
@@ -145,6 +146,35 @@ impl Parser for RustParser {
     }
 }
 
+/// Convert line/column (1-based) to byte offset in source
+fn line_col_to_byte(source: &str, line: usize, col: usize) -> usize {
+    if line == 0 {
+        return 0;
+    }
+    let mut byte_offset = 0;
+    for (i, line_content) in source.lines().enumerate() {
+        if i + 1 == line {
+            return byte_offset + col.min(line_content.len());
+        }
+        byte_offset += line_content.len() + 1; // +1 for newline
+    }
+    source.len()
+}
+
+/// Extract span information from a syn Spanned item
+fn get_span_info(span: proc_macro2::Span, source: &str) -> ((u32, u32), (u32, u32), usize, usize) {
+    let start = span.start();
+    let end = span.end();
+    // proc_macro2 line is 1-based, convert to 0-based for consistency with tree-sitter
+    let start_line = start.line.saturating_sub(1) as u32;
+    let end_line = end.line.saturating_sub(1) as u32;
+    let start_point = (start_line, start.column as u32);
+    let end_point = (end_line, end.column as u32);
+    let start_byte = line_col_to_byte(source, start.line, start.column);
+    let end_byte = line_col_to_byte(source, end.line, end.column);
+    (start_point, end_point, start_byte, end_byte)
+}
+
 fn convert_syn_file(file: &syn::File, source: &str) -> AstNode {
     let mut children = Vec::new();
 
@@ -152,12 +182,16 @@ fn convert_syn_file(file: &syn::File, source: &str) -> AstNode {
         children.push(convert_syn_item(item, source));
     }
 
+    // Calculate end point from source
+    let line_count = source.lines().count().saturating_sub(1) as u32;
+    let last_line_len = source.lines().last().map(|l| l.len()).unwrap_or(0) as u32;
+
     AstNode {
         node_type: "source_file".to_string(),
         start_byte: 0,
         end_byte: source.len(),
         start_point: (0, 0),
-        end_point: (0, 0), // We'd need line/col calculation for full accuracy
+        end_point: (line_count, last_line_len),
         children,
         source: source.to_string(),
     }
@@ -166,30 +200,45 @@ fn convert_syn_file(file: &syn::File, source: &str) -> AstNode {
 fn convert_syn_item(item: &syn::Item, source: &str) -> AstNode {
     match item {
         syn::Item::Fn(item_fn) => {
+            let (start_point, end_point, start_byte, end_byte) =
+                get_span_info(item_fn.span(), source);
             let mut children = Vec::new();
             for stmt in &item_fn.block.stmts {
                 children.push(convert_syn_stmt(stmt, source));
             }
 
+            let fn_source = if end_byte > start_byte && end_byte <= source.len() {
+                source[start_byte..end_byte].to_string()
+            } else {
+                format!("fn {}", item_fn.sig.ident)
+            };
+
             AstNode {
                 node_type: "function_definition".to_string(),
-                start_byte: 0, // Simplified
-                end_byte: 0,
-                start_point: (0, 0),
-                end_point: (0, 0),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
                 children,
-                source: "fn ...".to_string(), // Simplified
+                source: fn_source,
             }
         }
-        _ => AstNode {
-            node_type: "item".to_string(),
-            start_byte: 0,
-            end_byte: 0,
-            start_point: (0, 0),
-            end_point: (0, 0),
-            children: vec![],
-            source: "".to_string(),
-        },
+        _ => {
+            let (start_point, end_point, start_byte, end_byte) = get_span_info(item.span(), source);
+            AstNode {
+                node_type: "item".to_string(),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
+                children: vec![],
+                source: if end_byte > start_byte && end_byte <= source.len() {
+                    source[start_byte..end_byte].to_string()
+                } else {
+                    String::new()
+                },
+            }
+        }
     }
 }
 
@@ -197,33 +246,55 @@ fn convert_syn_stmt(stmt: &syn::Stmt, source: &str) -> AstNode {
     match stmt {
         syn::Stmt::Expr(expr, _) => convert_syn_expr(expr, source),
         syn::Stmt::Local(local) => {
+            let (start_point, end_point, start_byte, end_byte) =
+                get_span_info(local.span(), source);
             if let Some(init) = &local.init {
+                // Return the expression node but with the local's span for context
                 convert_syn_expr(&init.expr, source)
             } else {
                 AstNode {
                     node_type: "local".to_string(),
-                    start_byte: 0,
-                    end_byte: 0,
-                    start_point: (0, 0),
-                    end_point: (0, 0),
+                    start_byte,
+                    end_byte,
+                    start_point,
+                    end_point,
                     children: vec![],
-                    source: "".to_string(),
+                    source: if end_byte > start_byte && end_byte <= source.len() {
+                        source[start_byte..end_byte].to_string()
+                    } else {
+                        String::new()
+                    },
                 }
             }
         }
-        _ => AstNode {
-            node_type: "stmt".to_string(),
-            start_byte: 0,
-            end_byte: 0,
-            start_point: (0, 0),
-            end_point: (0, 0),
-            children: vec![],
-            source: "".to_string(),
-        },
+        _ => {
+            // For other statement types, try to get span info
+            let span = match stmt {
+                syn::Stmt::Item(item) => item.span(),
+                syn::Stmt::Macro(m) => m.span(),
+                _ => proc_macro2::Span::call_site(), // Fallback
+            };
+            let (start_point, end_point, start_byte, end_byte) = get_span_info(span, source);
+            AstNode {
+                node_type: "stmt".to_string(),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
+                children: vec![],
+                source: if end_byte > start_byte && end_byte <= source.len() {
+                    source[start_byte..end_byte].to_string()
+                } else {
+                    String::new()
+                },
+            }
+        }
     }
 }
 
 fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
+    let (start_point, end_point, start_byte, end_byte) = get_span_info(expr.span(), source);
+
     match expr {
         syn::Expr::Call(expr_call) => {
             let func_name = if let syn::Expr::Path(path) = &*expr_call.func {
@@ -239,10 +310,10 @@ fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
 
             AstNode {
                 node_type: "call".to_string(),
-                start_byte: 0,
-                end_byte: 0,
-                start_point: (0, 0),
-                end_point: (0, 0),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
                 children: vec![],
                 source: func_name, // Store function name in source for matching
             }
@@ -251,10 +322,10 @@ fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
             let children = vec![convert_syn_expr(&method_call.receiver, source)];
             AstNode {
                 node_type: "call".to_string(),
-                start_byte: 0,
-                end_byte: 0,
-                start_point: (0, 0),
-                end_point: (0, 0),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
                 children,
                 source: method_call.method.to_string(), // Store method name
             }
@@ -266,12 +337,16 @@ fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
             }
             AstNode {
                 node_type: "block".to_string(),
-                start_byte: 0,
-                end_byte: 0,
-                start_point: (0, 0),
-                end_point: (0, 0),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
                 children,
-                source: "".to_string(),
+                source: if end_byte > start_byte && end_byte <= source.len() {
+                    source[start_byte..end_byte].to_string()
+                } else {
+                    String::new()
+                },
             }
         }
         syn::Expr::Unsafe(expr_unsafe) => {
@@ -281,22 +356,30 @@ fn convert_syn_expr(expr: &syn::Expr, source: &str) -> AstNode {
             }
             AstNode {
                 node_type: "unsafe_block".to_string(),
-                start_byte: 0,
-                end_byte: 0,
-                start_point: (0, 0),
-                end_point: (0, 0),
+                start_byte,
+                end_byte,
+                start_point,
+                end_point,
                 children,
-                source: "unsafe { ... }".to_string(),
+                source: if end_byte > start_byte && end_byte <= source.len() {
+                    source[start_byte..end_byte].to_string()
+                } else {
+                    "unsafe { ... }".to_string()
+                },
             }
         }
         _ => AstNode {
             node_type: "expr".to_string(),
-            start_byte: 0,
-            end_byte: 0,
-            start_point: (0, 0),
-            end_point: (0, 0),
+            start_byte,
+            end_byte,
+            start_point,
+            end_point,
             children: vec![],
-            source: "".to_string(),
+            source: if end_byte > start_byte && end_byte <= source.len() {
+                source[start_byte..end_byte].to_string()
+            } else {
+                String::new()
+            },
         },
     }
 }

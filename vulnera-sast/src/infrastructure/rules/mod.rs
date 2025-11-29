@@ -30,9 +30,25 @@ impl RuleEngine {
             RulePattern::AstNodeType(pattern) => node.node_type == *pattern,
             RulePattern::FunctionCall(func_name) => {
                 // Check if node is a function call with matching name
-                // Support both "call" (Python) and "call_expression" (JS)
+                // Support both "call" (Python/Rust) and "call_expression" (JS)
                 let is_call = node.node_type == "call" || node.node_type == "call_expression";
                 is_call && node.source.contains(func_name)
+            }
+            RulePattern::MethodCall(method_pattern) => {
+                // Strict method call matching - requires actual AST call node
+                if method_pattern.require_ast_node {
+                    // Must be a call node type
+                    let is_call = node.node_type == "call" || node.node_type == "call_expression";
+                    if !is_call {
+                        return false;
+                    }
+                    // Method name must match exactly (stored in source for method calls)
+                    node.source == method_pattern.name
+                } else {
+                    // Fallback to substring matching (less strict)
+                    let is_call = node.node_type == "call" || node.node_type == "call_expression";
+                    is_call && node.source.contains(&method_pattern.name)
+                }
             }
             RulePattern::Regex(pattern) => {
                 if let Ok(re) = regex::Regex::new(pattern) {
