@@ -33,11 +33,35 @@ tree-sitter-javascript = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
+tree-sitter-rust = { workspace = true }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
 walkdir = { workspace = true }
 regex = { workspace = true }
+
+# Streaming iterator for tree-sitter queries
+streaming-iterator = "0.1"
+
+# Database
+sqlx = { workspace = true }
+
+# Caching serialization
+bincode = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# UUID for entity IDs
+uuid = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Glob patterns for file matching
+globset = { workspace = true }
+
+# Temporary files for Semgrep rules
+tempfile = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
@@ -47,4 +71,3 @@ rstest = { workspace = true }
 tempfile = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
-
