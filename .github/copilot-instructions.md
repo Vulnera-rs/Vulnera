@@ -54,22 +54,30 @@ vulnera-rust (binary + CLI)
 make quick-check             # fmt + clippy + fast unit tests
 make test-comprehensive      # full suite with coverage + property tests
 
-# Database
+# Database (required for integration tests)
 export DATABASE_URL='postgresql://user:pass@localhost/vulnera'
 make migrate                 # Apply pending migrations
 make migrate-info            # Check migration status
 
-# Server
+# Server with hot-reload
 cargo run                    # Load .env via dotenvy
+cargo watch -x run           # Auto-rebuild on file changes
 
 # Testing specifics
-cargo nextest run --workspace              # Run tests (respects nextest.toml retries)
+cargo nextest run --workspace              # Run tests (respects nextest.toml retries: 3x, 300s timeout)
+cargo nextest run -p vulnera-deps          # Run single crate tests
 cargo insta review                         # Review snapshot test changes after API updates
-cargo test --test proptest_*               # Property-based tests
-cargo test --test datatest_*               # Data-driven tests
+cargo test --test proptest_*               # Property-based tests (version/parser edge cases)
+cargo test --test datatest_*               # Data-driven tests (SAST/deps analysis)
+cargo test --features cli                  # Test CLI commands locally
 ```
 
-**Test organization**: Unit tests live in crate `tests/` dirs. Snapshot tests in `vulnera-orchestrator/tests/snapshots/` use `insta`—must review after any API response shape change.
+**Test organization**:
+
+- Unit tests: `crate/tests/` dirs (run with cargo, no `#[cfg(test)]` inline)
+- Snapshot tests: `vulnera-orchestrator/tests/snapshots/` using `insta` crate—review with `cargo insta review` after API shape changes
+- Integration tests: In `tests/` dirs; use `#[serial]` decorator if sharing DB state
+- Nextest config: `nextest.toml` defines 3x retries, 300s unit timeout, 600s integration timeout
 
 ## Adding a Feature: By Type
 
@@ -86,6 +94,15 @@ cargo test --test datatest_*               # Data-driven tests
 3. Add `#[openapi(paths(...))]` path entry in `ApiDoc`
 4. Add request/response types to `models.rs` with `#[derive(ToSchema, Serialize, Deserialize)]`
 
+### New CLI Command
+
+1. Add `CommandName(Args)` variant to `Commands` enum in `vulnera-cli/src/lib.rs`
+2. Create handler in `vulnera-cli/src/commands/{command_name}.rs`; add `pub mod {command_name};` to `commands/mod.rs`
+3. Implement `async fn run(ctx: &CliContext, cli: &Cli, args: &Args) -> Result<i32>`
+4. For offline execution: use embedded module (e.g., `SecretDetectionModule::new()`)
+5. For server calls: use `ctx.api_client` (pre-authenticated with credentials)
+6. Output via `ctx.output.*` methods (never direct `println!`); return exit codes from `exit_codes` module
+
 ### New Config Section
 
 1. Add struct in `vulnera-core/src/config/mod.rs` with `#[serde(default)]`
@@ -96,13 +113,44 @@ cargo test --test datatest_*               # Data-driven tests
 
 ## Code Patterns (Project-Specific)
 
-- **Service injection**: All fields in `OrchestratorState` must be `Arc<dyn Trait + Send + Sync>`; use dependency injection, not singletons
-- **Concurrency**: Reference `Config.analysis.*` limits (e.g., `max_concurrent_packages`), never hardcode thread pools or max requests
-- **Async/await**: Use `tokio` primitives; wrap long-running work in `tokio::spawn` for non-blocking
-- **Error handling**: Domain errors in `domain/`, infrastructure errors wrapped in use cases; OpenAPI errors use `ErrorResponse` DTO
-- **DB queries**: All SQLx queries in `infrastructure/` with compile-time validation via `sqlx::query!` macros
-- **External APIs**: Reuse circuit-breaker-wrapped clients from `vulnera-core/infrastructure/api_clients`; leverage existing retry/timeout config
-- **Cache**: Use `CacheServiceImpl` wrapper (never raw Redis/Dragonfly calls); configure TTL via `Config.cache.ttl_hours`
+### Async/Job Architecture
+
+- **Job lifecycle**: HTTP handler → `CreateAnalysisJobUseCase` → `JobQueueHandle.push_job()` → Dragonfly queue → worker pool dequeues → `ExecuteAnalysisJobUseCase` → module execution → result persistence
+- **Concurrency**: Reference `Config.analysis.max_concurrent_packages` and `Config.analysis.max_job_workers` (set in `config/default.toml`), never hardcode thread pools
+- **Worker pool**: Spawned in `src/app.rs` via `spawn_job_worker_pool()`; respects `max_job_workers` from config
+
+### CLI Structure (in `vulnera-cli/`)
+
+- **Entry point**: `src/lib.rs::CliApp::run()` → command dispatch → individual command handler
+- **Offline modules**: SAST, Secrets, API use embedded analyzers (no server needed); Deps requires server
+- **Context**: `CliContext` (lightweight) vs `OrchestratorState` (full HTTP server); CLI initializes only needed services
+- **Output**: `OutputWriter` wraps `OutputFormat` (Table/JSON/Plain/SARIF); use `ctx.output.*` methods, never direct `println!`
+- **Credentials**: Stored via `CredentialManager` (macOS Keychain / Linux Secret Service / Windows Credential Manager, falls back to encrypted file)
+- **Config**: Searched in order: `.vulnera.toml` (project), `$XDG_CONFIG_HOME/vulnera/config.toml`, `~/.config/vulnera/config.toml`
+
+### Service Injection & Traits
+
+- **All services**: `Arc<dyn Trait + Send + Sync>` in `OrchestratorState` or `CliContext`, never bare structs
+- **Trait pattern**: `Irepository`, `IService`, `IClient` prefixes for traits; implementation structs in `infrastructure/`
+- **Error handling**: Domain errors in `domain/errors.rs`; infrastructure errors wrapped in use cases; HTTP responses use `ErrorResponse` DTO
+
+### Database & Queries
+
+- **All SQLx queries**: In `infrastructure/` module with `sqlx::query!` or `sqlx::query_as!` macros (compile-time validated)
+- **Migrations**: In `migrations/` numbered sequentially; run `make migrate` before tests
+- **Repositories**: All DB access abstracted via repository traits (`IUserRepository`, `IOrganizationRepository`, etc.)
+
+### External APIs
+
+- **Circuit breaker pattern**: Use existing `crate::infrastructure::api_clients` wrappers (HTTP clients pre-configured with retry/timeout)
+- **Resilience config**: `CircuitBreakerConfigSerializable` and `RetryConfigSerializable` in config; never instantiate ad-hoc clients
+- **Cache layer**: Use `CacheServiceImpl` wrapper; configure TTL via `Config.cache.ttl_hours`; backend is Dragonfly/Redis only
+
+### Module System
+
+- Each analysis module (Deps, SAST, Secrets, API, LLM) implements `AnalysisModule` trait defined in `vulnera-core::domain::module`
+- Module registration: `ModuleRegistry` in `vulnera-orchestrator/src/infrastructure/`
+- Module selection: `RuleBasedModuleSelector` auto-picks by `ModuleType` and source file detection (e.g., `requirements.txt` → PyPI module)
 
 ## Testing Patterns
 
@@ -117,9 +165,13 @@ cargo test --test datatest_*               # Data-driven tests
 ## Testing & Pre-Commit Checklist
 
 - [ ] `make quick-check` passes (fmt + clippy + fast tests)
-- [ ] New public APIs annotated with `#[openapi(...)]`
+- [ ] New public APIs annotated with `#[openapi(...)]` and `#[derive(ToSchema)]`
 - [ ] Snapshot tests updated: `cargo insta review` if API responses changed
-- [ ] Config changes merged into `config/default.toml` with defaults
-- [ ] Migrations tested: `make migrate-reset && make migrate`
+- [ ] Config changes merged into `config/default.toml` with sensible defaults
+- [ ] Database migrations tested: `make migrate-reset && make migrate` for integration tests
 - [ ] Concurrency limits use `Config.*`, not hardcoded values
-- [ ] External API calls wrapped with existing circuit breaker clients
+- [ ] External API calls wrapped with existing circuit breaker clients from `vulnera-core/infrastructure/api_clients`
+- [ ] Service injection: all dependencies `Arc<dyn Trait + Send + Sync>` in `OrchestratorState`
+- [ ] CLI output uses `ctx.output.*` methods (no direct `println!`)
+- [ ] All SQLx queries use `sqlx::query!` or `sqlx::query_as!` for compile-time validation
+- [ ] New repositories implement `I{Entity}Repository` trait abstraction

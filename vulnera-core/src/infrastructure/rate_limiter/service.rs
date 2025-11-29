@@ -30,18 +30,19 @@ pub struct RateLimiterService {
 }
 
 impl RateLimiterService {
-    /// Create a new rate limiter service
-    pub async fn new(config: TieredRateLimitConfig) -> Result<Self, String> {
+    /// Create a new rate limiter service with explicit Dragonfly URL
+    pub async fn new_with_url(
+        config: TieredRateLimitConfig,
+        dragonfly_url: &str,
+    ) -> Result<Self, String> {
         let storage: Arc<dyn RateLimitStorage> = match config.storage_backend {
             RateLimitStorageBackend::Dragonfly => {
-                // Get Dragonfly URL from cache config (reuse existing connection)
-                // For now, use a default URL - this should be passed from app.rs
-                let url = std::env::var("DRAGONFLY_URL")
-                    .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-
-                match DragonflyRateLimitStorage::new(&url).await {
+                match DragonflyRateLimitStorage::new(dragonfly_url).await {
                     Ok(storage) => {
-                        info!("Rate limiter using Dragonfly storage backend");
+                        info!(
+                            "Rate limiter using Dragonfly storage backend at {}",
+                            dragonfly_url
+                        );
                         Arc::new(storage)
                     }
                     Err(e) => {
