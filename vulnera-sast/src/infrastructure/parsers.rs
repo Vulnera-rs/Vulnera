@@ -460,3 +460,67 @@ fn convert_tree_sitter_node(node: tree_sitter::Node, source: &str) -> AstNode {
         source: source[start_byte..end_byte].to_string(),
     }
 }
+
+/// Find a nested call node (call or call_expression) inside the provided AST node (DFS).
+/// This is a language-agnostic helper used to locate a call site when a pattern matched at
+/// a parent node. Returns the first `call` or `call_expression` node found.
+pub fn find_call_node(node: &AstNode) -> Option<&AstNode> {
+    if node.node_type == "call"
+        || node.node_type == "call_expression"
+        || node.node_type == "call_expression_statement"
+    {
+        return Some(node);
+    }
+    for child in &node.children {
+        if let Some(found) = find_call_node(child) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Simple heuristic to determine if the provided call `node` has a literal argument.
+/// It inspects AST child node types for string/integer/floating literal kinds, and then
+/// safely inspects the node source to look for a literal as the first argument.
+/// Returns true if the first argument is a fixed literal (string/char/int) - i.e., not a variable/expression.
+pub fn node_has_literal_argument(node: &AstNode) -> bool {
+    // We're primarily interested in call or call_expression nodes.
+    if node.node_type != "call"
+        && node.node_type != "call_expression"
+        && node.node_type != "call_expression_statement"
+    {
+        return false;
+    }
+
+    // Check children for literal node types
+    for child in &node.children {
+        let nt = child.node_type.as_str();
+        // These are common literal node kinds across languages/grammars
+        if nt.contains("string")
+            || nt.contains("string_literal")
+            || nt.contains("char")
+            || nt.contains("literal")
+            || nt.contains("number")
+            || nt == "integer"
+            || nt == "float"
+        {
+            return true;
+        }
+
+        // Also check if the child's source begins with a string char (fallback)
+        let trimmed = child.source.trim_start();
+        if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+            return true;
+        }
+    }
+
+    // Fallback (best effort): find the first '(' and check if the first non-space char is a quote
+    if let Some(idx) = node.source.find('(') {
+        let after = node.source[idx + 1..].trim_start();
+        if after.starts_with('"') || after.starts_with('\'') {
+            return true;
+        }
+    }
+
+    false
+}

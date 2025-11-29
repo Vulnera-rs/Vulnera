@@ -7,7 +7,7 @@ use vulnera_core::config::SastConfig;
 
 use crate::domain::entities::{Finding as SastFinding, RulePattern};
 use crate::domain::value_objects::Confidence;
-use crate::infrastructure::parsers::ParserFactory;
+use crate::infrastructure::parsers::{ParserFactory, find_call_node, node_has_literal_argument};
 use crate::infrastructure::rules::{RuleEngine, RuleRepository};
 use crate::infrastructure::scanner::DirectoryScanner;
 
@@ -162,13 +162,34 @@ fn calculate_confidence(
     match pattern {
         // Regex patterns are most specific - high confidence
         RulePattern::Regex(_) => Confidence::High,
-        // Function call patterns are specific - medium-high confidence
+        // Function call patterns are specific - use AST context (call node + argument heuristics)
         RulePattern::FunctionCall(_) => {
-            // Check if the node type matches "call" exactly for higher confidence
-            if node.node_type == "call" {
-                Confidence::High
+            // Determine the call node (either the node itself, or a nested child call node)
+            let call_node_opt = find_call_node(node);
+
+            // If we found a call node, inspect its arguments to see if the first argument is a literal.
+            // If the argument is a literal (e.g., setTimeout("literal", ...)), decrease confidence to reduce false positives.
+            // Otherwise, if the call exists and arguments are non-literal, treat as high confidence.
+            if let Some(call_node) = call_node_opt {
+                if node_has_literal_argument(call_node) {
+                    Confidence::Low
+                } else {
+                    // Call node found and arguments are not purely literal → likely dynamic/unsafe
+                    Confidence::High
+                }
             } else {
-                Confidence::Medium
+                // No call node found — fallback heuristics based on the node source to detect literals
+                // Basic heuristic: if there's an opening '(' followed by a quote, treat as literal.
+                if let Some(idx) = node.source.find('(') {
+                    let after = node.source[idx + 1..].trim_start();
+                    if after.starts_with('"') || after.starts_with('\'') {
+                        Confidence::Low
+                    } else {
+                        Confidence::Medium
+                    }
+                } else {
+                    Confidence::Medium
+                }
             }
         }
         // AST node type patterns are less specific - medium confidence
