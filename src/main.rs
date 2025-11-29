@@ -12,6 +12,9 @@ use vulnera_rust::{Config, create_app, init_tracing};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize rustls crypto provider before any TLS operations
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     run_server().await
 }
 
