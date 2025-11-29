@@ -7,7 +7,6 @@ members = [
     "vulnera-secrets",
     "vulnera-api",
     "vulnera-llm",
-    "vulnera-cli",
 ]
 resolver = "2"
 
