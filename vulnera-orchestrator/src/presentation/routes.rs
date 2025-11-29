@@ -212,16 +212,16 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         refresh_cookie_path: config.auth.refresh_cookie_path.clone(),
     };
 
-    // Auth routes (login/register don't need CSRF, refresh/logout do)
-    // Public auth routes (no CSRF required - these establish the session)
+    // Auth routes
+    // Public auth routes (no CSRF required - these establish or maintain the session)
     let public_auth_routes = Router::new()
         .route("/auth/login", post(login))
         .route("/auth/register", post(register))
+        .route("/auth/refresh", post(refresh_token))
         .with_state(auth_app_state.clone());
 
-    // Protected auth routes (CSRF required for state-changing operations)
+    // Protected auth routes (CSRF required for explicit user actions)
     let protected_auth_routes = Router::new()
-        .route("/auth/refresh", post(refresh_token))
         .route("/auth/logout", post(logout))
         .route("/auth/api-keys", post(create_api_key).get(list_api_keys))
         .route(

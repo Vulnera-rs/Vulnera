@@ -8,7 +8,7 @@
 //! - **HTTP API** — RESTful API with OpenAPI/Swagger documentation
 //! - **Job Orchestration** — Async job queue with parallel module execution
 //! - **Module Registry** — Centralized registration of analysis modules
-//! - **Authentication** — JWT tokens and API key management
+//! - **Authentication** — HttpOnly cookie-based auth (browser) with CSRF protection, and API keys (CLI)
 //! - **Rate Limiting** — Tier-based rate limiting with Dragonfly backend
 //!
 //! # Architecture
