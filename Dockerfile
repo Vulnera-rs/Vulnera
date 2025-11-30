@@ -122,7 +122,6 @@ FROM debian:sid-slim
 
 # Install runtime dependencies
 # Note: Semgrep requires CLI invocation (no native Rust implementation available)
-# Using pipx for isolated Python app installation - ensures binary is in a predictable location
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
@@ -133,17 +132,25 @@ RUN apt-get update && apt-get install -y \
     pipx \
     && rm -rf /var/lib/apt/lists/*
 
-# Install semgrep via pipx (isolated environment, predictable PATH)
-# pipx installs to /root/.local/bin by default
+# Install semgrep via pipx with proper permissions for all users
+# Set PIPX directories to system-wide locations accessible by all users
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin
-RUN pipx install semgrep && semgrep --version
+RUN pipx install semgrep \
+    && chmod -R a+rX /opt/pipx \
+    && semgrep --version
 
-# Create app user
-RUN useradd -r -s /bin/false vulnera
+# Verify semgrep is executable by non-root users
+RUN which semgrep && ls -la /usr/local/bin/semgrep && ls -la /opt/pipx/venvs/semgrep/bin/semgrep
+
+# Create app user with home directory (needed for semgrep config)
+RUN useradd -r -s /bin/false -m -d /app/home vulnera
 
 # Create app directory
 WORKDIR /app
+
+# Create semgrep cache directory with proper permissions
+RUN mkdir -p /app/home/.semgrep && chown -R vulnera:vulnera /app/home
 
 # Copy the binary and sqlx-cli from builder stage
 COPY --from=builder /app/bin/vulnera-rust /usr/local/bin/vulnera-rust
@@ -161,6 +168,15 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create NVD data directory (for SQLite database)
 RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
+
+# Set explicit semgrep path for Rust subprocess calls (can be overridden via VULNERA__SAST__SEMGREP_PATH env var)
+ENV VULNERA__SAST__SEMGREP_PATH="/usr/local/bin/semgrep"
+
+# Configure semgrep cache directory (prevents permission errors when semgrep creates ~/.semgrep)
+ENV SEMGREP_USER_CONFIG_DIR="/app/home/.semgrep"
+
+# Ensure PATH includes /usr/local/bin for any other subprocess calls
+ENV PATH="/usr/local/bin:/usr/bin:/bin"
 
 # Switch to app user
 USER vulnera
