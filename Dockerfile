@@ -126,7 +126,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     libssl3 \
     python3-pip \
-    && pip install semgrep \
+    && pip install --break-system-packages semgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app user
