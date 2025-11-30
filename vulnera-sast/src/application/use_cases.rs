@@ -24,7 +24,8 @@ use crate::infrastructure::rules::{
 };
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::semgrep::SemgrepExecutor;
+use crate::infrastructure::semgrep::{SemgrepConfig, SemgrepExecutor};
+use std::time::Duration;
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -121,7 +122,14 @@ impl ScanProjectUseCase {
         };
 
         let semgrep_executor = if analysis_config.use_semgrep {
-            Some(SemgrepExecutor::new())
+            let mut semgrep_config = SemgrepConfig::default();
+            // Use semgrep_path from AnalysisConfig if provided, otherwise use default ("semgrep" in PATH)
+            if let Some(ref path) = analysis_config.semgrep_path {
+                semgrep_config.executable = path.clone();
+            }
+            // Use timeout from AnalysisConfig if provided
+            semgrep_config.timeout = Duration::from_secs(analysis_config.semgrep_timeout_secs);
+            Some(SemgrepExecutor::with_config(semgrep_config))
         } else {
             None
         };
