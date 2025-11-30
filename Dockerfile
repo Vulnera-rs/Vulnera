@@ -125,9 +125,15 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
     libssl3 \
+    python3 \
     python3-pip \
+    python3-venv \
     && pip install --break-system-packages semgrep \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && semgrep --version
+
+# Ensure semgrep is in PATH (pip installs to /usr/local/bin which should be in PATH)
+ENV PATH="/usr/local/bin:${PATH}"
 
 # Create app user
 RUN useradd -r -s /bin/false vulnera
