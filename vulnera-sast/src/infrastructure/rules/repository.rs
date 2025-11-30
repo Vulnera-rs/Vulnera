@@ -337,8 +337,8 @@ impl SastRuleRepository for PostgresRuleRepository {
         // Query database
         let rows = sqlx::query_as::<_, SastRuleRow>(
             r#"
-            SELECT id, rule_id, name, description, severity, languages, 
-                   pattern_type, query, options, cwe_ids, owasp_categories, 
+            SELECT id, rule_id, name, description, severity, languages,
+                   pattern_type, query, options, cwe_ids, owasp_categories,
                    tags, enabled, created_at, updated_at
             FROM sast_rules
             WHERE enabled = true
@@ -379,8 +379,8 @@ impl SastRuleRepository for PostgresRuleRepository {
 
         let rows = sqlx::query_as::<_, SastRuleRow>(
             r#"
-            SELECT id, rule_id, name, description, severity, languages, 
-                   pattern_type, query, options, cwe_ids, owasp_categories, 
+            SELECT id, rule_id, name, description, severity, languages,
+                   pattern_type, query, options, cwe_ids, owasp_categories,
                    tags, enabled, created_at, updated_at
             FROM sast_rules
             WHERE enabled = true AND $1 = ANY(languages)
@@ -418,9 +418,9 @@ impl SastRuleRepository for PostgresRuleRepository {
         let rows = sqlx::query_as::<_, SastSemgrepRuleRow>(
             r#"
             SELECT id, rule_id, name, message, languages, severity, mode,
-                   pattern, patterns, taint_sources, taint_sinks, 
+                   pattern, patterns, taint_sources, taint_sinks,
                    taint_sanitizers, taint_propagators, fix, cwe_ids,
-                   owasp_categories, tags, metadata, enabled, 
+                   owasp_categories, tags, metadata, enabled,
                    created_at, updated_at
             FROM sast_semgrep_rules
             WHERE enabled = true
@@ -462,9 +462,9 @@ impl SastRuleRepository for PostgresRuleRepository {
         let rows = sqlx::query_as::<_, SastSemgrepRuleRow>(
             r#"
             SELECT id, rule_id, name, message, languages, severity, mode,
-                   pattern, patterns, taint_sources, taint_sinks, 
+                   pattern, patterns, taint_sources, taint_sinks,
                    taint_sanitizers, taint_propagators, fix, cwe_ids,
-                   owasp_categories, tags, metadata, enabled, 
+                   owasp_categories, tags, metadata, enabled,
                    created_at, updated_at
             FROM sast_semgrep_rules
             WHERE enabled = true AND $1 = ANY(languages)
@@ -495,8 +495,8 @@ impl SastRuleRepository for PostgresRuleRepository {
     ) -> Result<Option<Rule>, RuleRepositoryError> {
         let row = sqlx::query_as::<_, SastRuleRow>(
             r#"
-            SELECT id, rule_id, name, description, severity, languages, 
-                   pattern_type, query, options, cwe_ids, owasp_categories, 
+            SELECT id, rule_id, name, description, severity, languages,
+                   pattern_type, query, options, cwe_ids, owasp_categories,
                    tags, enabled, created_at, updated_at
             FROM sast_rules
             WHERE rule_id = $1
@@ -517,9 +517,9 @@ impl SastRuleRepository for PostgresRuleRepository {
         let row = sqlx::query_as::<_, SastSemgrepRuleRow>(
             r#"
             SELECT id, rule_id, name, message, languages, severity, mode,
-                   pattern, patterns, taint_sources, taint_sinks, 
+                   pattern, patterns, taint_sources, taint_sinks,
                    taint_sanitizers, taint_propagators, fix, cwe_ids,
-                   owasp_categories, tags, metadata, enabled, 
+                   owasp_categories, tags, metadata, enabled,
                    created_at, updated_at
             FROM sast_semgrep_rules
             WHERE rule_id = $1
@@ -544,7 +544,7 @@ impl SastRuleRepository for PostgresRuleRepository {
         sqlx::query(
             r#"
             INSERT INTO sast_rules (
-                rule_id, name, description, severity, languages, 
+                rule_id, name, description, severity, languages,
                 pattern_type, query, options, cwe_ids, owasp_categories, tags
             )
             VALUES ($1, $2, $3, $4, $5, 'tree_sitter_query', $6, $7, $8, $9, $10)
@@ -711,8 +711,8 @@ impl SastRuleRepository for PostgresRuleRepository {
     ) -> Result<(Vec<Rule>, Vec<SemgrepRule>), RuleRepositoryError> {
         let ts_rows = sqlx::query_as::<_, SastRuleRow>(
             r#"
-            SELECT id, rule_id, name, description, severity, languages, 
-                   pattern_type, query, options, cwe_ids, owasp_categories, 
+            SELECT id, rule_id, name, description, severity, languages,
+                   pattern_type, query, options, cwe_ids, owasp_categories,
                    tags, enabled, created_at, updated_at
             FROM sast_rules
             WHERE updated_at > $1 AND enabled = true
@@ -730,9 +730,9 @@ impl SastRuleRepository for PostgresRuleRepository {
         let sg_rows = sqlx::query_as::<_, SastSemgrepRuleRow>(
             r#"
             SELECT id, rule_id, name, message, languages, severity, mode,
-                   pattern, patterns, taint_sources, taint_sinks, 
+                   pattern, patterns, taint_sources, taint_sinks,
                    taint_sanitizers, taint_propagators, fix, cwe_ids,
-                   owasp_categories, tags, metadata, enabled, 
+                   owasp_categories, tags, metadata, enabled,
                    created_at, updated_at
             FROM sast_semgrep_rules
             WHERE updated_at > $1 AND enabled = true
