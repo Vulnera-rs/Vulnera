@@ -124,6 +124,17 @@ impl SemgrepExecutor {
             return Ok(Vec::new());
         }
 
+        // Check that semgrep binary is available before attempting execution
+        self.check_installation().await?;
+
+        // Validate target path exists (file or directory)
+        if !target_path.exists() {
+            return Err(SemgrepError::ExecutionFailed(format!(
+                "Target path does not exist: {}",
+                target_path.display()
+            )));
+        }
+
         // Generate YAML rules file
         let rules_yaml = self.generate_rules_yaml(rules)?;
         let temp_dir = tempfile::tempdir()?;
@@ -168,7 +179,19 @@ impl SemgrepExecutor {
         )
         .await
         .map_err(|_| SemgrepError::Timeout(self.config.timeout.as_secs()))?
-        .map_err(|e| SemgrepError::ExecutionFailed(e.to_string()))?;
+        .map_err(|e| {
+            // Enhanced error handling: detect ENOENT (os error 2) which indicates missing binary
+            let error_msg = e.to_string();
+            if error_msg.contains("No such file or directory") || error_msg.contains("ENOENT") {
+                error!(
+                    executable = %self.config.executable,
+                    "Semgrep binary not found. Install with: pip install semgrep"
+                );
+                SemgrepError::NotInstalled
+            } else {
+                SemgrepError::ExecutionFailed(error_msg)
+            }
+        })?;
 
         // Parse output
         let stdout = String::from_utf8_lossy(&output.stdout);
