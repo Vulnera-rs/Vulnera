@@ -121,6 +121,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:sid-slim
 
 # Install runtime dependencies
+# Note: Semgrep requires CLI invocation (no native Rust implementation available)
+# Using pipx for isolated Python app installation - ensures binary is in a predictable location
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     curl \
@@ -128,12 +130,14 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    && pip install --break-system-packages semgrep \
-    && rm -rf /var/lib/apt/lists/* \
-    && semgrep --version
+    pipx \
+    && rm -rf /var/lib/apt/lists/*
 
-# Ensure semgrep is in PATH (pip installs to /usr/local/bin which should be in PATH)
-ENV PATH="/usr/local/bin:${PATH}"
+# Install semgrep via pipx (isolated environment, predictable PATH)
+# pipx installs to /root/.local/bin by default
+ENV PIPX_HOME=/opt/pipx
+ENV PIPX_BIN_DIR=/usr/local/bin
+RUN pipx install semgrep && semgrep --version
 
 # Create app user
 RUN useradd -r -s /bin/false vulnera
