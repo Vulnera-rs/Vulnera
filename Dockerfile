@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1.4
 # Multi-stage build for Vulnera Rust
-# For production, consider pinning: rust:1.88-slim or rust:1-slim
 FROM rust:slim as builder
 
 # Install system dependencies including PostgreSQL for compile-time query verification
@@ -41,11 +40,6 @@ RUN mkdir -p src vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
     echo "" > vulnera-secrets/src/lib.rs && \
     echo "" > vulnera-api/src/lib.rs && \
     echo "" > vulnera-llm/src/lib.rs
-
-# Build dependencies only with BuildKit cache mounts for faster builds
-# Cache Cargo registry (downloaded crates)
-# Cache Cargo git cache (git dependencies)
-# Cache target directory (compiled artifacts)
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/app/target \
@@ -133,7 +127,6 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install semgrep via pipx with proper permissions for all users
-# Set PIPX directories to system-wide locations accessible by all users
 ENV PIPX_HOME=/opt/pipx
 ENV PIPX_BIN_DIR=/usr/local/bin
 RUN pipx install semgrep \
