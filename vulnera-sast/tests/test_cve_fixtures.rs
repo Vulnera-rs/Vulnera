@@ -188,20 +188,17 @@ async fn run_single_test(
 
     // For vulnerable code, check that expected findings are present
     if test_case.vulnerable {
-        let found_rules: HashSet<String> = analysis_result
+        let _found_rules: HashSet<String> = analysis_result
             .findings
             .iter()
             .filter_map(|f| f.rule_id.clone())
             .collect();
 
         for expected in &test_case.expected_findings {
-            // Check if a finding with matching rule category exists
-            // We use partial matching since rule IDs may vary (e.g., "sql_injection" vs "VULN-SQLI-001")
             let rule_category = expected.rule_id.to_lowercase();
             let found = analysis_result.findings.iter().any(|f| {
                 if let Some(ref rule_id) = f.rule_id {
                     let rule_lower = rule_id.to_lowercase();
-                    // Match by category or exact ID
                     rule_lower.contains(&rule_category)
                         || rule_category.contains(&rule_lower)
                         || matches_vulnerability_type(&rule_lower, &rule_category)

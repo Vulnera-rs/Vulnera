@@ -38,6 +38,10 @@ impl LlmProvider for HuaweiLlmProvider {
         let api_key = self.get_api_key()?;
         let url = &self.config.huawei_api_url;
 
+        // Ensure stream is false for non-streaming generation
+        let mut request = request;
+        request.stream = Some(false);
+
         debug!("Sending LLM request to {}", url);
 
         let response = self
