@@ -47,8 +47,6 @@ Choose your path:
 | **Cloud/Infrastructure Engineer** | [Cloud Engineer Quick Start](getting-started/personas/cloud-engineer-quickstart.md) |
 | **IDE/Tool Developer**            | [Integrator Quick Start](getting-started/personas/integrator-quickstart.md)         |
 
-Or start with [General Quick Start](getting-started/quick-start.md) for a broad overview.
-
 ## Why Choose Vulnera?
 
 | Benefit                      | Impact                                                          |
@@ -75,7 +73,6 @@ Or start with [General Quick Start](getting-started/quick-start.md) for a broad 
 
 ### For Users
 
-- **[Getting Started](getting-started/quick-start.md)** — Installation and first scan
 - **[Analysis Capabilities](analysis/overview.md)** — Learn what each analysis module does
 - **[AI-Powered Features](user-guide/llm-features.md)** — Explanations, code fixes, and natural language queries
 - **[Quota & Pricing](user-guide/quota-pricing.md)** — Understand rate limits and cost weighting
@@ -108,5 +105,3 @@ chmod +x vulnera
 # See AI-powered explanations for findings
 ./vulnera analyze /path/to/your/project --format json | jq '.findings[] | .llm_explanation'
 ```
-
-**Prefer video or guided tour?** Start with the [Quick Start Guide](getting-started/quick-start.md).

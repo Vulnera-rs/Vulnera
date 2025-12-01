@@ -4,11 +4,6 @@
 
 ---
 
-## Getting Started
-
-- [Quick Start Guide](getting-started/quick-start.md)
-- [Setup & Installation](getting-started/database-setup.md)
-
 ## For Individual Developers
 
 - [Developer Quick Start](getting-started/personas/developer-quickstart.md)
