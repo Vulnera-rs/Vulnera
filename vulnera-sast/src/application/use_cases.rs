@@ -9,6 +9,7 @@
 
 use std::path::Path;
 use std::sync::{Arc, RwLock as StdRwLock};
+use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -28,6 +29,7 @@ use crate::infrastructure::rules::{
 };
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
+use crate::infrastructure::taint_queries::get_propagation_queries;
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -241,7 +243,7 @@ impl ScanProjectUseCase {
             )
             .await?;
 
-            // Phase 3: Data flow analysis (if enabled and Standard/Deep mode)
+            // Phase 3: Data flow analysis
             if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
                 self.execute_data_flow_analysis(
                     &file.path,
@@ -372,7 +374,7 @@ impl ScanProjectUseCase {
 
         // Detect sources, sinks, and sanitizers using tree-sitter queries
         // Acquire lock, do detection, release lock before any await
-        let (sources, sinks, sanitizers, sanitizer_confidence) = {
+        let (sources, sinks, sanitizers, sanitizer_confidence, assignments) = {
             let mut taint_engine = match self.taint_query_engine.write() {
                 Ok(guard) => guard,
                 Err(e) => {
@@ -384,6 +386,7 @@ impl ScanProjectUseCase {
             let sources = taint_engine.detect_sources(&tree, source_bytes, language);
             let sinks = taint_engine.detect_sinks(&tree, source_bytes, language);
             let sanitizers = taint_engine.detect_sanitizers(&tree, source_bytes, language);
+            let assignments = Self::extract_assignments(&tree, source_bytes, language);
 
             // Collect confidence values for sanitizers
             let sanitizer_confidence: Vec<Option<f32>> = sanitizers
@@ -391,7 +394,13 @@ impl ScanProjectUseCase {
                 .map(|s| taint_engine.get_sanitizer_confidence(s))
                 .collect();
 
-            (sources, sinks, sanitizers, sanitizer_confidence)
+            (
+                sources,
+                sinks,
+                sanitizers,
+                sanitizer_confidence,
+                assignments,
+            )
         }; // Lock released here
 
         debug!(
@@ -429,6 +438,90 @@ impl ScanProjectUseCase {
                 line = source.line + 1,
                 "Marked tainted from AST pattern"
             );
+        }
+
+        // Propagate taint through assignments
+        // If a tainted variable is assigned to another variable, mark the target as tainted
+        // We iterate multiple times to handle transitive propagation (a = b; c = a)
+        let mut changed = true;
+        let max_iterations = 10; // Prevent infinite loops
+        let mut iteration = 0;
+
+        while changed && iteration < max_iterations {
+            changed = false;
+            iteration += 1;
+
+            for (target, source_expr, line, column) in &assignments {
+                // Skip if target is already tainted
+                if analyzer.is_tainted(target) {
+                    continue;
+                }
+
+                // Check if the source expression contains any tainted source
+                // This handles both direct source references and method chain results
+                for source in &sources {
+                    // Check both variable_name and matched_text
+                    let source_var = source
+                        .variable_name
+                        .as_deref()
+                        .unwrap_or(&source.matched_text);
+
+                    // The source expression should contain some part of the tainted source
+                    // This handles cases like:
+                    // - Direct: targetURL := r.URL.Query().Get("url")
+                    // - Indirect: targetURL := someVar (where someVar was tainted)
+                    let source_in_expr = source_expr.contains(source_var)
+                        || source_expr.contains(&source.matched_text);
+
+                    if source_in_expr {
+                        analyzer.mark_tainted(
+                            target,
+                            &format!("propagated from {}", source_var),
+                            &file_str,
+                            *line as u32 + 1,
+                            *column as u32,
+                        );
+                        debug!(
+                            target = %target,
+                            source_var = %source_var,
+                            source_expr = %source_expr,
+                            line = line + 1,
+                            "Propagated taint through assignment"
+                        );
+                        changed = true;
+                        break;
+                    }
+                }
+
+                // Also check if the source_expr contains any already-tainted variable
+                // This handles transitive propagation
+                if !changed {
+                    // Check each previously tainted variable (from sources and propagation)
+                    for prev_source in &sources {
+                        let prev_var = prev_source
+                            .variable_name
+                            .as_deref()
+                            .unwrap_or(&prev_source.matched_text);
+                        if source_expr.contains(prev_var) && analyzer.is_tainted(prev_var) {
+                            analyzer.mark_tainted(
+                                target,
+                                &format!("propagated from {}", prev_var),
+                                &file_str,
+                                *line as u32 + 1,
+                                *column as u32,
+                            );
+                            debug!(
+                                target = %target,
+                                prev_var = %prev_var,
+                                line = line + 1,
+                                "Propagated taint transitively"
+                            );
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         // Apply sanitizers - either clear taint or reduce confidence
@@ -475,10 +568,12 @@ impl ScanProjectUseCase {
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
             // Check if any of our tracked tainted variables appear in this sink
-            // This is a simplified check - a full implementation would do proper data flow
+            // CRITICAL: Only consider variables that are STILL tainted (not sanitized)
+            // This filters out variables that have been cleared by sanitizers
             let potential_taints: Vec<&str> = sources
                 .iter()
                 .filter_map(|s| s.variable_name.as_deref())
+                .filter(|var| analyzer.is_tainted(var))
                 .collect();
 
             for tainted_var in potential_taints {
@@ -602,6 +697,81 @@ impl ScanProjectUseCase {
                 seen.insert(key)
             })
             .collect()
+    }
+
+    /// Extract assignment statements from AST for taint propagation
+    /// Returns tuples of (target_variable, source_expression, line, column)
+    fn extract_assignments(
+        tree: &tree_sitter::Tree,
+        source_code: &[u8],
+        language: &Language,
+    ) -> Vec<(String, String, usize, usize)> {
+        let mut assignments = Vec::new();
+        let queries = get_propagation_queries(language);
+
+        // Get tree-sitter language
+        let ts_language = match language {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript | Language::TypeScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        };
+
+        for query_str in queries {
+            let query = match tree_sitter::Query::new(&ts_language, query_str) {
+                Ok(q) => q,
+                Err(e) => {
+                    debug!(
+                        language = %language,
+                        error = %e,
+                        "Failed to compile propagation query"
+                    );
+                    continue;
+                }
+            };
+
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), source_code);
+
+            while let Some(m) = {
+                matches.advance();
+                matches.get()
+            } {
+                let mut target: Option<String> = None;
+                let mut source: Option<String> = None;
+                let mut line = 0;
+                let mut column = 0;
+
+                for capture in m.captures {
+                    let capture_name = query.capture_names()[capture.index as usize];
+                    let text = capture
+                        .node
+                        .utf8_text(source_code)
+                        .unwrap_or_default()
+                        .to_string();
+
+                    match capture_name {
+                        "target" => {
+                            target = Some(text);
+                            line = capture.node.start_position().row;
+                            column = capture.node.start_position().column;
+                        }
+                        "source" => {
+                            source = Some(text);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let (Some(t), Some(s)) = (target, source) {
+                    assignments.push((t, s, line, column));
+                }
+            }
+        }
+
+        assignments
     }
 
     fn is_test_file(path: &Path, content: &str) -> bool {

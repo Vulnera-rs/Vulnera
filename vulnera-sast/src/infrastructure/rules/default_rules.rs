@@ -237,6 +237,8 @@ pub fn get_default_rules() -> Vec<Rule> {
         python_xxe_rule(),
         // JavaScript/TypeScript
         js_child_process_rule(),
+        js_ssti_rule(),
+        js_path_traversal_rule(),
         js_xss_rule(),
         js_eval_rule(),
         js_eval_direct_rule(),
@@ -385,10 +387,10 @@ pub fn python_yaml_load_rule() -> Rule {
     Rule {
         id: "python-yaml-load".to_string(),
         name: "Unsafe YAML Load".to_string(),
-        description: "Unsafe deserialization using yaml.load without safe_load".to_string(),
+        description: "Unsafe deserialization using yaml.load or yaml.unsafe_load".to_string(),
         severity: Severity::Critical,
         languages: vec![Language::Python],
-        // Matches: yaml.load(...) but not yaml.safe_load(...)
+        // Matches: yaml.load(...), yaml.unsafe_load(...)
         pattern: Pattern::TreeSitterQuery(
             r#"(call
               function: (attribute
@@ -396,7 +398,7 @@ pub fn python_yaml_load_rule() -> Rule {
                 attribute: (identifier) @fn
               )
               (#eq? @obj "yaml")
-              (#eq? @fn "load")
+              (#match? @fn "^(load|unsafe_load)$")
             ) @call"#
                 .to_string(),
         ),
@@ -404,7 +406,7 @@ pub fn python_yaml_load_rule() -> Rule {
         cwe_ids: vec!["CWE-502".to_string()],
         owasp_categories: vec!["A08:2021 - Software and Data Integrity Failures".to_string()],
         tags: vec!["deserialization".to_string(), "python".to_string()],
-        message: None,
+        message: Some("Use yaml.safe_load() instead of yaml.load() or yaml.unsafe_load() to prevent arbitrary code execution.".to_string()),
         fix: None,
     }
 }
@@ -457,6 +459,70 @@ pub fn js_child_process_rule() -> Rule {
         owasp_categories: vec!["A03:2021 - Injection".to_string()],
         tags: vec!["injection".to_string(), "javascript".to_string()],
         message: None,
+        fix: None,
+    }
+}
+
+/// Server-Side Template Injection (SSTI) rule for JavaScript
+/// Detects dangerous template engine usage that could lead to RCE
+pub fn js_ssti_rule() -> Rule {
+    Rule {
+        id: "js-ssti".to_string(),
+        name: "Server-Side Template Injection".to_string(),
+        description: "Potential SSTI vulnerability - template engine may execute untrusted input".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::JavaScript],
+        // Matches: pug.compile(), pug.render(), ejs.render(), nunjucks.render(), etc.
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              (#match? @lib "^(pug|jade|ejs|nunjucks|handlebars|Handlebars|doT|mustache|Mustache|underscore|_)$")
+              (#match? @method "^(compile|compileFile|compileClient|render|renderFile|renderString|template|precompile|parse)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-94".to_string(), "CWE-1336".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["ssti".to_string(), "injection".to_string(), "rce".to_string(), "javascript".to_string()],
+        message: Some("Template engines should not compile untrusted user input. Use pre-compiled templates or escape user data.".to_string()),
+        fix: None,
+    }
+}
+
+/// Zip Slip / Path Traversal rule for JavaScript
+/// Detects unsafe archive extraction that could allow writing files outside target directory
+pub fn js_path_traversal_rule() -> Rule {
+    Rule {
+        id: "js-path-traversal".to_string(),
+        name: "Path Traversal / Zip Slip".to_string(),
+        description: "Archive extraction without path validation may allow writing files outside target directory".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::JavaScript],
+        // Matches: path.join with entry.path/fileName/entryName without prior validation
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (_)*
+                (member_expression
+                  object: (identifier) @entry
+                  property: (property_identifier) @prop))
+              (#eq? @lib "path")
+              (#match? @method "^(join|resolve)$")
+              (#match? @prop "^(path|fileName|entryName|name|fullPath)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-22".to_string(), "CWE-73".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec!["path-traversal".to_string(), "zip-slip".to_string(), "javascript".to_string()],
+        message: Some("Validate that archive entry paths don't escape the target directory using path.resolve() and startsWith() check.".to_string()),
         fix: None,
     }
 }

@@ -507,7 +507,7 @@ pub fn python_sanitizer_queries() -> Vec<TaintPattern> {
 /// JavaScript taint source queries
 pub fn javascript_source_queries() -> Vec<TaintPattern> {
     vec![
-        // Express request properties
+        // Express request properties (direct access like req.body, req.query)
         TaintPattern::source(
             r#"(member_expression
               object: (identifier) @req
@@ -516,6 +516,33 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
               (#match? @prop "^(body|query|params|cookies|headers|files)$")
             ) @source"#,
             "Express request data",
+            "user_input",
+            vec!["user_input", "web_request"],
+        ),
+        // Express request nested properties (like req.query.id, req.body.name)
+        TaintPattern::source(
+            r#"(member_expression
+              object: (member_expression
+                object: (identifier) @req
+                property: (property_identifier) @container)
+              property: (property_identifier) @prop
+              (#match? @req "^(req|request)$")
+              (#match? @container "^(body|query|params|cookies|headers|files)$")
+            ) @source"#,
+            "Express request property",
+            "user_input",
+            vec!["user_input", "web_request"],
+        ),
+        // Express request subscript access (like req.query['id'], req.body['name'])
+        TaintPattern::source(
+            r#"(subscript_expression
+              object: (member_expression
+                object: (identifier) @req
+                property: (property_identifier) @container)
+              (#match? @req "^(req|request)$")
+              (#match? @container "^(body|query|params|cookies|headers|files)$")
+            ) @source"#,
+            "Express request subscript",
             "user_input",
             vec!["user_input", "web_request"],
         ),
@@ -579,6 +606,45 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
             "File read",
             "file_io",
             vec!["file_input"],
+        ),
+        // ===== Archive Entry Sources (Zip Slip) =====
+        // entry.path, entry.fileName, entry.entryName - archive entry paths
+        TaintPattern::source(
+            r#"(member_expression
+              object: (identifier) @entry
+              property: (property_identifier) @prop
+              (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+              (#match? @prop "^(path|fileName|entryName|name|fullPath)$")
+            ) @source"#,
+            "Archive entry path",
+            "archive_data",
+            vec!["archive_data", "path_traversal_risk"],
+        ),
+        // Nested archive entry access (e.g., entry.header.name)
+        TaintPattern::source(
+            r#"(member_expression
+              object: (member_expression
+                object: (identifier) @entry
+                property: (property_identifier) @container)
+              property: (property_identifier) @prop
+              (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+              (#match? @container "^(header|attrs|stat)$")
+              (#match? @prop "^(name|path|linkpath)$")
+            ) @source"#,
+            "Archive entry header path",
+            "archive_data",
+            vec!["archive_data", "path_traversal_risk"],
+        ),
+        // yauzl/adm-zip entry names via callback
+        TaintPattern::source(
+            r#"(member_expression
+              object: (identifier) @entry
+              property: (property_identifier) @prop
+              (#match? @prop "^(fileName|entryName|path|name)$")
+            ) @source"#,
+            "Zip entry name",
+            "archive_data",
+            vec!["archive_data", "path_traversal_risk"],
         ),
     ]
 }
@@ -679,6 +745,313 @@ pub fn javascript_sink_queries() -> Vec<TaintPattern> {
             "Location href assignment",
             "open_redirect",
         ),
+        // ===== SSTI - Server-Side Template Injection =====
+        // Pug (formerly Jade) template compilation - CVE-2019-10747
+        // Matches any argument type (identifier, member_expression, etc.)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                  (subscript_expression) @arg
+                  (call_expression) @arg
+                ])
+              (#eq? @lib "pug")
+              (#match? @method "^(compile|compileFile|compileClient|render|renderFile)$")
+            ) @sink"#,
+            "Pug template compilation",
+            "ssti",
+        ),
+        // Pug with require - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (call_expression
+                  function: (identifier) @req
+                  arguments: (arguments
+                    (string) @mod))
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @req "require")
+              (#match? @method "^(compile|compileFile|render|renderFile)$")
+            ) @sink"#,
+            "Pug template via require",
+            "ssti",
+        ),
+        // EJS template rendering - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                  (subscript_expression) @arg
+                  (call_expression) @arg
+                ])
+              (#eq? @lib "ejs")
+              (#match? @method "^(render|renderFile|compile)$")
+            ) @sink"#,
+            "EJS template rendering",
+            "ssti",
+        ),
+        // Nunjucks template rendering - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                  (subscript_expression) @arg
+                ])
+              (#match? @lib "^(nunjucks|env)$")
+              (#match? @method "^(render|renderString|compile)$")
+            ) @sink"#,
+            "Nunjucks template rendering",
+            "ssti",
+        ),
+        // Handlebars template compilation - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                  (subscript_expression) @arg
+                ])
+              (#eq? @lib "Handlebars")
+              (#match? @method "^(compile|precompile|registerPartial)$")
+            ) @sink"#,
+            "Handlebars template compilation",
+            "ssti",
+        ),
+        // Mustache template rendering - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @lib "Mustache")
+              (#match? @method "^(render|parse|compile)$")
+            ) @sink"#,
+            "Mustache template rendering",
+            "ssti",
+        ),
+        // doT template compilation - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @lib "doT")
+              (#match? @method "^(template|compile)$")
+            ) @sink"#,
+            "doT template compilation",
+            "ssti",
+        ),
+        // Lodash template (_.template) - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @lib "_")
+              (#eq? @method "template")
+            ) @sink"#,
+            "Lodash template",
+            "ssti",
+        ),
+        // underscore template - flexible argument matching
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @lib "underscore")
+              (#eq? @method "template")
+            ) @sink"#,
+            "underscore template",
+            "ssti",
+        ),
+        // Generic vm.runInContext/runInNewContext - sandbox escape
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (identifier) @arg
+                  (member_expression) @arg
+                ])
+              (#eq? @lib "vm")
+              (#match? @method "^(runInContext|runInNewContext|runInThisContext|compileFunction)$")
+            ) @sink"#,
+            "vm context execution",
+            "code_injection",
+        ),
+        // ===== Path Traversal / Zip Slip =====
+        // fs.createWriteStream with identifier
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (identifier) @path)
+              (#eq? @lib "fs")
+              (#match? @method "^(createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync)$")
+            ) @sink"#,
+            "fs write operations",
+            "path_traversal",
+        ),
+        // fs write operations with any expression (call result, member access)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                [
+                  (call_expression) @path
+                  (member_expression) @path
+                ])
+              (#eq? @lib "fs")
+              (#match? @method "^(createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync|open|openSync)$")
+            ) @sink"#,
+            "fs write with dynamic path",
+            "path_traversal",
+        ),
+        // path.join/resolve with archive entry path
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (_)*
+                (member_expression
+                  property: (property_identifier) @prop
+                  (#match? @prop "^(path|name|fileName|entryName)$")))
+              (#eq? @lib "path")
+              (#match? @method "^(join|resolve)$")
+            ) @sink"#,
+            "path.join with entry path",
+            "path_traversal",
+        ),
+        // path.join with identifier (potentially tainted)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (_)*
+                (identifier) @path)
+              (#eq? @lib "path")
+              (#match? @method "^(join|resolve)$")
+            ) @sink"#,
+            "path operations with user input",
+            "path_traversal",
+        ),
+        // ===== SSRF - Server-Side Request Forgery =====
+        // fetch with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (identifier) @url)
+              (#eq? @fn "fetch")
+            ) @sink"#,
+            "fetch with user input",
+            "ssrf",
+        ),
+        // axios requests
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (identifier) @url)
+              (#eq? @lib "axios")
+              (#match? @method "^(get|post|put|delete|patch|head|options|request)$")
+            ) @sink"#,
+            "axios HTTP request",
+            "ssrf",
+        ),
+        // http/https request
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              arguments: (arguments
+                (identifier) @url)
+              (#match? @lib "^(http|https)$")
+              (#match? @method "^(get|request)$")
+            ) @sink"#,
+            "http/https request",
+            "ssrf",
+        ),
+        // got HTTP client
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (identifier) @url)
+              (#eq? @fn "got")
+            ) @sink"#,
+            "got HTTP request",
+            "ssrf",
+        ),
+        // request library
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (identifier) @url)
+              (#eq? @fn "request")
+            ) @sink"#,
+            "request HTTP call",
+            "ssrf",
+        ),
     ]
 }
 
@@ -752,6 +1125,76 @@ pub fn go_source_queries() -> Vec<TaintPattern> {
               (#match? @field "^(Body|Form|PostForm|URL|Header|Cookie)$")
             ) @source"#,
             "HTTP request data",
+            "user_input",
+            vec!["user_input", "web_request"],
+        ),
+        // r.URL.Query().Get() - common SSRF pattern
+        TaintPattern::source(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (call_expression
+                  function: (selector_expression
+                    operand: (selector_expression
+                      operand: (identifier) @req
+                      field: (field_identifier) @url_field)
+                    field: (field_identifier) @query_method))
+                field: (field_identifier) @get_method)
+              (#match? @url_field "^URL$")
+              (#match? @query_method "^Query$")
+              (#match? @get_method "^Get$")
+            ) @source"#,
+            "URL query parameter",
+            "user_input",
+            vec!["user_input", "web_request", "url_param"],
+        ),
+        // r.FormValue() / r.PostFormValue()
+        TaintPattern::source(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @req
+                field: (field_identifier) @method)
+              (#match? @method "^(FormValue|PostFormValue)$")
+            ) @source"#,
+            "Form value",
+            "user_input",
+            vec!["user_input", "web_request", "form_data"],
+        ),
+        // Gin framework: c.Query(), c.Param(), c.PostForm()
+        TaintPattern::source(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @ctx
+                field: (field_identifier) @method)
+              (#match? @ctx "^c$")
+              (#match? @method "^(Query|Param|PostForm|DefaultQuery|DefaultPostForm|GetHeader|Cookie)$")
+            ) @source"#,
+            "Gin context input",
+            "user_input",
+            vec!["user_input", "web_request"],
+        ),
+        // Echo framework: c.QueryParam(), c.Param(), c.FormValue()
+        TaintPattern::source(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @ctx
+                field: (field_identifier) @method)
+              (#match? @ctx "^c$")
+              (#match? @method "^(QueryParam|Param|FormValue|QueryParams)$")
+            ) @source"#,
+            "Echo context input",
+            "user_input",
+            vec!["user_input", "web_request"],
+        ),
+        // Fiber framework: c.Query(), c.Params(), c.Body()
+        TaintPattern::source(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @ctx
+                field: (field_identifier) @method)
+              (#match? @ctx "^c$")
+              (#match? @method "^(Query|Params|FormValue|Body|BodyParser)$")
+            ) @source"#,
+            "Fiber context input",
             "user_input",
             vec!["user_input", "web_request"],
         ),
@@ -864,6 +1307,183 @@ pub fn go_sink_queries() -> Vec<TaintPattern> {
             ) @sink"#,
             "File open with variable",
             "path_traversal",
+        ),
+        // ===== SSRF - Server-Side Request Forgery =====
+        // http.Get with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (identifier) @url)
+              (#eq? @pkg "http")
+              (#eq? @fn "Get")
+            ) @sink"#,
+            "http.Get with user input",
+            "ssrf",
+        ),
+        // http.Post with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (identifier) @url
+                (_)*)
+              (#eq? @pkg "http")
+              (#eq? @fn "Post")
+            ) @sink"#,
+            "http.Post with user input",
+            "ssrf",
+        ),
+        // http.PostForm with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (identifier) @url
+                (_)*)
+              (#eq? @pkg "http")
+              (#eq? @fn "PostForm")
+            ) @sink"#,
+            "http.PostForm with user input",
+            "ssrf",
+        ),
+        // http.NewRequest with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (_)
+                (identifier) @url
+                (_)*)
+              (#eq? @pkg "http")
+              (#eq? @fn "NewRequest")
+            ) @sink"#,
+            "http.NewRequest with user input",
+            "ssrf",
+        ),
+        // http.NewRequestWithContext with user-controlled URL
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (_)
+                (_)
+                (identifier) @url
+                (_)*)
+              (#eq? @pkg "http")
+              (#eq? @fn "NewRequestWithContext")
+            ) @sink"#,
+            "http.NewRequestWithContext with user input",
+            "ssrf",
+        ),
+        // client.Do with potentially tainted request
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                field: (field_identifier) @method)
+              arguments: (argument_list
+                (identifier) @req)
+              (#eq? @method "Do")
+            ) @sink"#,
+            "HTTP client.Do",
+            "ssrf",
+        ),
+        // url.Parse with user input (often precedes SSRF)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (identifier) @url)
+              (#eq? @pkg "url")
+              (#eq? @fn "Parse")
+            ) @sink"#,
+            "url.Parse with user input",
+            "ssrf",
+        ),
+        // net.Dial with user-controlled address
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (_)
+                (identifier) @addr)
+              (#eq? @pkg "net")
+              (#match? @fn "^(Dial|DialTimeout)$")
+            ) @sink"#,
+            "net.Dial with user input",
+            "ssrf",
+        ),
+        // resty client requests
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                field: (field_identifier) @method)
+              arguments: (argument_list
+                (identifier) @url)
+              (#match? @method "^(Get|Post|Put|Delete|Patch|Head|Options|R|SetBaseURL)$")
+            ) @sink"#,
+            "HTTP client method with user input",
+            "ssrf",
+        ),
+        // http.Get with call expression result (e.g., fmt.Sprintf result)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (call_expression) @url_expr)
+              (#eq? @pkg "http")
+              (#eq? @fn "Get")
+            ) @sink"#,
+            "http.Get with dynamic URL",
+            "ssrf",
+        ),
+        // client.Get with any expression (handles method chain results)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @client
+                field: (field_identifier) @method)
+              arguments: (argument_list
+                [
+                  (identifier) @url
+                  (call_expression) @url
+                ])
+              (#eq? @method "Get")
+            ) @sink"#,
+            "HTTP client.Get with user input",
+            "ssrf",
+        ),
+        // fmt.Sprintf used to construct URLs (commonly followed by http calls)
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              arguments: (argument_list
+                (interpreted_string_literal) @format
+                (_)+ @args)
+              (#eq? @pkg "fmt")
+              (#eq? @fn "Sprintf")
+              (#match? @format "(http|https|://)")
+            ) @sink"#,
+            "fmt.Sprintf URL construction",
+            "ssrf",
         ),
     ]
 }
@@ -1248,6 +1868,68 @@ pub fn get_sink_queries(language: &Language, config: &TaintConfig) -> Vec<TaintP
     }
 
     queries
+}
+
+/// Get assignment propagation queries for a language
+/// These patterns detect when tainted data is assigned to new variables
+pub fn get_propagation_queries(language: &Language) -> Vec<&'static str> {
+    match language {
+        Language::Python => vec![
+            // Variable assignment: x = tainted_expr
+            r#"(assignment
+              left: (identifier) @target
+              right: (_) @source
+            )"#,
+            // Augmented assignment: x += tainted_expr
+            r#"(augmented_assignment
+              left: (identifier) @target
+              right: (_) @source
+            )"#,
+        ],
+        Language::JavaScript | Language::TypeScript => vec![
+            // Variable declaration with initialization: const x = tainted_expr
+            r#"(variable_declarator
+              name: (identifier) @target
+              value: (_) @source
+            )"#,
+            // Assignment expression: x = tainted_expr
+            r#"(assignment_expression
+              left: (identifier) @target
+              right: (_) @source
+            )"#,
+        ],
+        Language::Go => vec![
+            // Short variable declaration: x := tainted_expr
+            r#"(short_var_declaration
+              left: (expression_list (identifier) @target)
+              right: (expression_list (_) @source)
+            )"#,
+            // Assignment: x = tainted_expr
+            r#"(assignment_statement
+              left: (expression_list (identifier) @target)
+              right: (expression_list (_) @source)
+            )"#,
+        ],
+        Language::Rust => vec![
+            // Let binding: let x = tainted_expr
+            r#"(let_declaration
+              pattern: (identifier) @target
+              value: (_) @source
+            )"#,
+        ],
+        Language::C | Language::Cpp => vec![
+            // Variable declaration: int x = tainted_expr
+            r#"(init_declarator
+              declarator: (identifier) @target
+              value: (_) @source
+            )"#,
+            // Assignment: x = tainted_expr
+            r#"(assignment_expression
+              left: (identifier) @target
+              right: (_) @source
+            )"#,
+        ],
+    }
 }
 
 /// Get all sanitizer queries for a language (built-in + custom)

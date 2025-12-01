@@ -72,3 +72,5 @@ rstest = { workspace = true }
 tempfile = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
+serde_yml = { workspace = true }
+insta = { version = "1.42", features = ["yaml"] }

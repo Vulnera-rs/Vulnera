@@ -511,11 +511,25 @@ impl TaintQueryEngine {
             for qm in query_matches {
                 // Extract variable name from captures if available
                 // Captures is HashMap<String, CaptureInfo>
+                // We check multiple common capture names used in taint patterns
                 let variable_name = qm
                     .captures
                     .iter()
                     .find(|(name, _)| {
-                        *name == "name" || *name == "var" || *name == "target" || *name == "source"
+                        matches!(
+                            name.as_str(),
+                            "name"
+                                | "var"
+                                | "target"
+                                | "source"
+                                | "arg"
+                                | "url"
+                                | "path"
+                                | "query"
+                                | "value"
+                                | "addr"
+                                | "req"
+                        )
                     })
                     .map(|(_, info)| info.text.clone());
 

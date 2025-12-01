@@ -57,7 +57,7 @@ flowchart TB
 
 | Module | Capabilities |
 |--------|-------------|
-| **Dependency Analysis** | npm, PyPI, Maven, Cargo, Go, Composer, Ruby, NuGet — CVE aggregation from OSV/NVD/GHSA |
+| **Dependency Analysis** | npm, PyPI, Maven, Cargo, Go, Composer, Ruby, NuGet — CVE aggregation from OSV/NVD/GHSA/CISA /KEV |
 | **SAST** | Python, JavaScript, Rust static analysis with AST parsing and custom rules |
 | **Secrets Detection** | Regex + entropy-based detection for AWS, Azure, GCP, API keys, tokens |
 | **API Security** | OpenAPI 3.x analysis for auth, validation, and security misconfigurations |
@@ -85,13 +85,6 @@ git clone https://github.com/k5602/Vulnera.git && cd Vulnera
 export DATABASE_URL='postgresql://user:pass@localhost:5432/vulnera'
 sqlx migrate run --source migrations
 cargo run
-```
-
-**Docker:**
-
-```bash
-docker build -t vulnera .
-docker run -p 3000:3000 -e DATABASE_URL='postgresql://...' vulnera
 ```
 
 **Verify:** `curl http://localhost:3000/health` • **API Docs:** <http://localhost:3000/docs>
