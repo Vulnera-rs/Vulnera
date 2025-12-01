@@ -513,7 +513,7 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
               object: (identifier) @req
               property: (property_identifier) @prop
               (#match? @req "^(req|request)$")
-              (#match? @prop "^(body|query|params|cookies|headers|files)$")
+              (#match? @prop "^(body|query|params|cookies|headers|files|file)$")
             ) @source"#,
             "Express request data",
             "user_input",
@@ -527,7 +527,7 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
                 property: (property_identifier) @container)
               property: (property_identifier) @prop
               (#match? @req "^(req|request)$")
-              (#match? @container "^(body|query|params|cookies|headers|files)$")
+              (#match? @container "^(body|query|params|cookies|headers|files|file)$")
             ) @source"#,
             "Express request property",
             "user_input",
@@ -540,7 +540,7 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
                 object: (identifier) @req
                 property: (property_identifier) @container)
               (#match? @req "^(req|request)$")
-              (#match? @container "^(body|query|params|cookies|headers|files)$")
+              (#match? @container "^(body|query|params|cookies|headers|files|file)$")
             ) @source"#,
             "Express request subscript",
             "user_input",
@@ -598,14 +598,26 @@ pub fn javascript_source_queries() -> Vec<TaintPattern> {
         TaintPattern::source(
             r#"(call_expression
               function: (member_expression
-                object: (identifier) @mod
+                object: (identifier) @lib
                 property: (property_identifier) @method)
-              (#eq? @mod "fs")
-              (#match? @method "^(readFile|readFileSync|read|readSync)$")
+              (#eq? @lib "fs")
+              (#match? @method "^(readFile|readFileSync)$")
             ) @source"#,
             "File read",
-            "file_io",
-            vec!["file_input"],
+            "file_input",
+            vec!["user_input", "file"],
+        ),
+        // Archive entry properties (heuristic for unzip/adm-zip/yauzl)
+        TaintPattern::source(
+            r#"(member_expression
+              object: (identifier) @entry
+              property: (property_identifier) @prop
+              (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+              (#match? @prop "^(path|name|fileName|entryName)$")
+            ) @source"#,
+            "Archive entry path",
+            "user_input",
+            vec!["user_input", "archive"],
         ),
         // ===== Archive Entry Sources (Zip Slip) =====
         // entry.path, entry.fileName, entry.entryName - archive entry paths
@@ -990,6 +1002,35 @@ pub fn javascript_sink_queries() -> Vec<TaintPattern> {
             "path operations with user input",
             "path_traversal",
         ),
+        // decompress library
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (identifier) @arg)
+              (#eq? @fn "decompress")
+            ) @sink"#,
+            "decompress",
+            "path_traversal",
+        ),
+        // tar.extract().end()
+        TaintPattern::sink(
+            r#"(call_expression
+              function: (member_expression
+                object: (call_expression
+                  function: (member_expression
+                    object: (identifier) @lib
+                    property: (property_identifier) @method)
+                  (#eq? @lib "tar")
+                  (#eq? @method "extract"))
+                property: (property_identifier) @end)
+              arguments: (arguments
+                (_) @arg)
+              (#eq? @end "end")
+            ) @sink"#,
+            "tar extraction",
+            "path_traversal",
+        ),
         // ===== SSRF - Server-Side Request Forgery =====
         // fetch with user-controlled URL
         TaintPattern::sink(
@@ -1106,6 +1147,42 @@ pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> {
             ) @sanitizer"#,
             "Generic validation",
             "generic",
+        ),
+        // path.basename (specific)
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @lib
+                property: (property_identifier) @method)
+              (#eq? @lib "path")
+              (#eq? @method "basename")
+            ) @sanitizer"#,
+            "path.basename",
+            "path_traversal",
+        ),
+        // basename (generic)
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @method)
+              (#eq? @method "basename")
+            ) @sanitizer"#,
+            "basename",
+            "path_traversal",
+        ),
+        // decompress with strip option
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (arguments
+                (object
+                  (pair
+                    key: (property_identifier) @key
+                    (#eq? @key "strip"))))
+              (#eq? @fn "decompress")
+            ) @sanitizer"#,
+            "decompress safe",
+            "path_traversal",
         ),
     ]
 }
@@ -1538,6 +1615,40 @@ pub fn go_sanitizer_queries() -> Vec<TaintPattern> {
             ) @sanitizer"#,
             "Numeric conversion",
             "type_coercion",
+        ),
+        // url.Parse / url.ParseRequestURI
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              (#eq? @pkg "url")
+              (#match? @fn "^(Parse|ParseRequestURI)$")
+            ) @sanitizer"#,
+            "URL parsing",
+            "url",
+        ),
+        // url.Parse (generic/variable)
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (selector_expression
+                field: (field_identifier) @fn)
+              (#match? @fn "^(Parse|ParseRequestURI)$")
+            ) @sanitizer"#,
+            "URL parsing generic",
+            "url",
+        ),
+        // path.Clean
+        TaintPattern::sanitizer(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn)
+              (#eq? @pkg "path")
+              (#eq? @fn "Clean")
+            ) @sanitizer"#,
+            "path.Clean",
+            "path",
         ),
     ]
 }

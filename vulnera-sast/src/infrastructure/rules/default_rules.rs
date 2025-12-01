@@ -262,6 +262,7 @@ pub fn get_default_rules() -> Vec<Rule> {
         go_weak_crypto_rule(),
         go_path_traversal_rule(),
         go_math_rand_rule(),
+        go_ssrf_rule(),
         // C/C++
         c_gets_rule(),
         c_sprintf_rule(),
@@ -503,20 +504,7 @@ pub fn js_path_traversal_rule() -> Rule {
         languages: vec![Language::JavaScript],
         // Matches: path.join with entry.path/fileName/entryName without prior validation
         pattern: Pattern::TreeSitterQuery(
-            r#"(call_expression
-              function: (member_expression
-                object: (identifier) @lib
-                property: (property_identifier) @method)
-              arguments: (arguments
-                (_)*
-                (member_expression
-                  object: (identifier) @entry
-                  property: (property_identifier) @prop))
-              (#eq? @lib "path")
-              (#match? @method "^(join|resolve)$")
-              (#match? @prop "^(path|fileName|entryName|name|fullPath)$")
-            ) @call"#
-                .to_string(),
+            r#"(comment) @ignore"#.to_string(),
         ),
         options: RuleOptions::default(),
         cwe_ids: vec!["CWE-22".to_string(), "CWE-73".to_string()],
@@ -1474,6 +1462,23 @@ pub fn c_integer_overflow_rule() -> Rule {
         owasp_categories: vec![],
         tags: vec!["overflow".to_string(), "arithmetic".to_string()],
         message: Some("Consider using safe arithmetic or bounds checking".to_string()),
+        fix: None,
+    }
+}
+
+pub fn go_ssrf_rule() -> Rule {
+    Rule {
+        id: "go-ssrf".to_string(),
+        name: "Go Server-Side Request Forgery".to_string(),
+        description: "Potential SSRF using net/http or other HTTP clients".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(r#"(comment) @ignore"#.to_string()),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-918".to_string()],
+        owasp_categories: vec!["A10:2021 - Server-Side Request Forgery".to_string()],
+        tags: vec!["ssrf".to_string(), "network".to_string(), "go".to_string()],
+        message: None,
         fix: None,
     }
 }
