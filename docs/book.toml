@@ -1,11 +1,6 @@
 [book]
 title = "Vulnera Documentation"
-authors = [
-    "Khaled Mahmoud",
-    "Abd El-Rahman Mossad",
-    "Amr Medhat",
-    "Gasser Mohammed",
-]
+authors = ["Khaled Mahmoud", "Abd El-Rahman Mossad", "Amr Medhat", "Gasser Mohammed"]
 description = "Documentation for Vulnera - High-Performance Vulnerability Analysis Platform"
 src = "src"
 language = "en"
@@ -22,7 +17,6 @@ default-theme = "rust"
 preferred-dark-theme = "ayu"
 smart-punctuation = true
 git-repository-url = "https://github.com/k5602/Vulnera"
-git-repository-icon = "fa-github"
 edit-url-template = "https://github.com/k5602/Vulnera/edit/main/docs/{path}"
 site-url = "/Vulnera/"
 no-section-label = false

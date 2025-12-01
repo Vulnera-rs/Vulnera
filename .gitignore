@@ -25,9 +25,8 @@ share/python-wheels/
 *.egg
 MANIFEST
 # Claude Code agents and configuration
-.claude/agents/
-CLAUDE.md
 
+docs/book
 # PyInstaller
 *.manifest
 *.spec
