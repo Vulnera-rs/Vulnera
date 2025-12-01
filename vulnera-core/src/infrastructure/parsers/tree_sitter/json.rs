@@ -181,7 +181,7 @@ impl TreeSitterJsonParser {
 
 impl TreeSitterParser for TreeSitterJsonParser {
     fn language(&self) -> tree_sitter::Language {
-        tree_sitter_json::language()
+        tree_sitter_json::LANGUAGE.into()
     }
 
     fn parse_with_tree_sitter(

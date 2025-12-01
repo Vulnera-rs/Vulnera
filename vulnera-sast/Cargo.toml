@@ -41,7 +41,7 @@ walkdir = { workspace = true }
 regex = { workspace = true }
 
 # Streaming iterator for tree-sitter queries
-streaming-iterator = "0.1"
+streaming-iterator = { workspace = true }
 
 # Database
 sqlx = { workspace = true }
