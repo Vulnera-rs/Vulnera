@@ -10,15 +10,45 @@
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://hub.docker.com/)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-green.svg?logo=openapi-initiative)](https://swagger.io/)
 
-*Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets detection, and API security auditing*
+_Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets detection, and API security auditing_
 
-[Quick Start](#-quick-start) • [Documentation](https://k5602.github.io/Vulnera/) • [API Reference](http://localhost:3000/docs)
+[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/)
 
 </div>
 
 ---
 
+## 🌐 Web Dashboard & Team Collaboration
+
+**[Vulnera Studio](https://vulnera.studio)** — Central web platform for team collaboration, security insights, and reporting:
+
+| Feature                     | Description                                                                        |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| **Organization Management** | Create teams, manage members with role-based access (Owner, Admin, Member, Viewer) |
+| **Shared Quota Pools**      | Team members share token allocations; no per-user limits                           |
+| **API Key Management**      | Generate and rotate keys for CLI and CI/CD integration                             |
+| **Integrations**            | Connect GitHub, GitLab, Slack, webhooks for automated workflows                    |
+| **Team Analytics**          | Track usage by member, module, and project; export reports                         |
+| **Compliance Reports**      | Generate SOC2, ISO27001, GDPR, HIPAA-aligned reports                               |
+| **Audit Logs**              | Full history of member actions, configuration changes, and scans                   |
+| **Webhooks**                | Real-time notifications for scan events and findings                               |
+
+**Get started:** Visit [vulnera.studio](https://vulnera.studio) → Sign up → Create organization → Invite team.
+
+---
+
 ## Architecture
+
+</text>
+
+<old_text line=73>
+| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan |
+| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html) | Command-line usage |
+| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html) | Environment variables and TOML config |
+| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html) | JWT and API key setup |
+| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html) | Module-specific documentation |
+| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html) | System design and DDD patterns |
+| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html) | GitHub Actions, GitLab CI, Azure DevOps |
 
 ```mermaid
 flowchart TB
@@ -55,12 +85,12 @@ flowchart TB
 
 ## ✨ Features
 
-| Module | Capabilities |
-|--------|-------------|
+| Module                  | Capabilities                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
 | **Dependency Analysis** | npm, PyPI, Maven, Cargo, Go, Composer, Ruby, NuGet — CVE aggregation from OSV/NVD/GHSA/CISA /KEV |
-| **SAST** | Python, JavaScript, Rust static analysis with AST parsing and custom rules |
-| **Secrets Detection** | Regex + entropy-based detection for AWS, Azure, GCP, API keys, tokens |
-| **API Security** | OpenAPI 3.x analysis for auth, validation, and security misconfigurations |
+| **SAST**                | Python, JavaScript, Rust static analysis with AST parsing and custom rules                       |
+| **Secrets Detection**   | Regex + entropy-based detection for AWS, Azure, GCP, API keys, tokens                            |
+| **API Security**        | OpenAPI 3.x analysis for auth, validation, and security misconfigurations                        |
 
 **Core Platform:**
 
@@ -93,15 +123,15 @@ cargo run
 
 ## 📖 Documentation
 
-| Guide | Description |
-|-------|-------------|
-| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan |
-| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html) | Command-line usage |
-| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html) | Environment variables and TOML config |
-| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html) | JWT and API key setup |
-| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html) | Module-specific documentation |
-| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html) | System design and DDD patterns |
-| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html) | GitHub Actions, GitLab CI, Azure DevOps |
+| Guide                                                                           | Description                             |
+| ------------------------------------------------------------------------------- | --------------------------------------- |
+| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan             |
+| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html)       | Command-line usage                      |
+| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html)       | Environment variables and TOML config   |
+| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html)     | JWT and API key setup                   |
+| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html)       | Module-specific documentation           |
+| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html)      | System design and DDD patterns          |
+| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html)      | GitHub Actions, GitLab CI, Azure DevOps |
 
 ---
 
@@ -121,6 +151,33 @@ Config files: `config/development.toml`, `config/production.toml`
 
 ---
 
+## 🌍 Web Platform Access
+
+**No setup required:**
+
+```bash
+# Option 1: Use web dashboard (SaaS)
+# 1. Visit https://vulnera.studio
+# 2. Sign up → Create organization
+# 3. Get API key from Settings → API Keys
+# 4. Use key with CLI or CI/CD
+
+vulnera auth login --api-key YOUR_API_KEY
+vulnera analyze .
+```
+
+**For teams:**
+
+```bash
+# Organization admin creates team via web dashboard
+# 1. https://vulnera.studio → Create Organization
+# 2. Settings → Members → Invite team members
+# 3. Share organization API key for CI/CD
+# 4. All members share token quota, view shared scans
+```
+
+---
+
 ## 🔐 Authentication
 
 ```bash
@@ -135,7 +192,7 @@ curl -X POST http://localhost:3000/api/v1/analyze/job \
   -b cookies.txt \
   -H "X-CSRF-Token: <csrf_token>" \
   -H "Content-Type: application/json" \
-  -d '{"source": {"type": "directory", "path": "."}}'  
+  -d '{"source": {"type": "directory", "path": "."}}'
 ```
 
 ---
@@ -189,14 +246,21 @@ Azure Front Door → API Management → App Service/Container Apps
 
 ---
 
-## 👥 Team
+## 👥 Team & Community
 
-| Name | Role |
-|------|------|
-| **Khaled Mahmoud** | Project Lead, Backend Developer |
-| **Abd El-Rahman Mossad** | Frontend, LSP Server Maintainer|
-| **Amr Medhat** | Cloud Engineer |
-| **Gasser Mohammed** | Frontend Engineer |
+| Name                     | Role                            |
+| ------------------------ | ------------------------------- |
+| **Khaled Mahmoud**       | Project Lead, Backend Developer |
+| **Abd El-Rahman Mossad** | Frontend, LSP Server Maintainer |
+| **Amr Medhat**           | Cloud Engineer                  |
+| **Gasser Mohammed**      | Frontend Engineer               |
+
+**Resources:**
+
+- **Web Dashboard:** [vulnera.studio](https://vulnera.studio) — Full-featured team collaboration platform
+- **Documentation:** [k5602.github.io/Vulnera](https://k5602.github.io/Vulnera/) — Complete guides and tutorials
+- **GitHub:** [k5602/Vulnera](https://github.com/k5602/Vulnera) — Source code and issues
+- **Community:** [GitHub Discussions](https://github.com/k5602/Vulnera/discussions) — Q&A and feedback
 
 ---
 
@@ -208,4 +272,6 @@ Azure Front Door → API Management → App Service/Container Apps
 
 <div align="center">
 
-**[Documentation](https://k5602.github.io/Vulnera/)** • **[API Reference](http://localhost:3000/docs)** • **[Contributing](CONTRIBUTING.md)** • **[Changelog](CHANGELOG.md)**
+**[Web Dashboard](https://vulnera.studio)** • **[Documentation](https://k5602.github.io/Vulnera/)** • **[API Reference](http://localhost:3000/docs)** • **[Contributing](CONTRIBUTING.md)** • **[Changelog](CHANGELOG.md)**
+
+</div>

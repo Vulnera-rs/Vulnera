@@ -403,6 +403,242 @@ vulnera auth status   # Check authentication
 
 ---
 
+## Dashboard & Web Platform
+
+### What is vulnera.studio?
+
+**Vulnera Studio** ([vulnera.studio](https://vulnera.studio)) is the central web dashboard for managing vulnerability analysis, team collaboration, and security insights. It provides:
+
+- **Personal Dashboard** — View your scans and findings
+- **Organization Management** — Team collaboration with shared quotas
+- **API Key Management** — Generate keys for CLI and API access
+- **Integrations** — Connect GitHub, GitLab, Slack, webhooks
+- **Analytics & Reporting** — Track team metrics and generate compliance reports
+- **Billing Management** — Upgrade plans and manage subscriptions
+
+**Access:** Visit [https://vulnera.studio](https://vulnera.studio) and sign in with your email.
+
+**Reference:** [Dashboard Guide](../user-guide/dashboard/guide.md)
+
+### How do I create an organization?
+
+**Step-by-step:**
+
+1. Log in to [vulnera.studio](https://vulnera.studio)
+2. Click **+ New Organization** in sidebar
+3. Enter organization name, description, and logo (optional)
+4. Select plan tier (Free, Pro, Enterprise)
+5. Click **Create** — you're now the owner
+
+**What you get:**
+
+- Shared quota pool (e.g., 48 tokens/month for Free, 1000 for Pro)
+- Team member management (invite/remove members)
+- Centralized reporting and analytics
+- Organization API keys for CI/CD
+
+**Reference:** [Organization Management](../user-guide/dashboard/organization-management.md)
+
+### How do I invite team members?
+
+**Invite members to your organization:**
+
+1. Go to **Settings → Members**
+2. Click **Invite Member**
+3. Enter email address(es) and select role:
+   - **Admin** — Manage team, integrations, settings
+   - **Member** — Create scans, resolve findings
+   - **Viewer** — Read-only access (good for executives)
+4. Click **Send Invitations**
+5. Members receive email with join link
+
+**Roles & Permissions:**
+
+- **Owner** — Full access, billing, delete organization
+- **Admin** — Members, settings, integrations (no billing)
+- **Member** — Create/view scans, resolve findings
+- **Viewer** — Read-only access to scans and reports
+
+**Reference:** [Team Collaboration](../user-guide/dashboard/team-collaboration.md)
+
+### How do I generate an API key for the CLI?
+
+**Generate API key:**
+
+1. Log in to [vulnera.studio](https://vulnera.studio)
+2. Go to **Settings → API Keys**
+3. Click **Generate New Key**
+4. Name the key (e.g., "GitHub Actions", "Local Dev")
+5. Set expiration (Never, 30 days, 90 days, 1 year)
+6. Click **Create** and **copy immediately** (not shown again)
+7. Store securely in your credential manager or CI/CD secrets
+
+**Use in CLI:**
+
+```bash
+vulnera auth login --api-key YOUR_API_KEY
+```
+
+**Use in GitHub Actions:**
+
+```yaml
+- name: Scan with Vulnera
+  env:
+    VULNERA_API_KEY: ${{ secrets.VULNERA_API_KEY }}
+  run: vulnera analyze . --all-modules
+```
+
+**Security:** Rotate API keys every 90 days. Revoke unused keys immediately.
+
+### What's the difference between personal and organization API keys?
+
+| Aspect           | Personal Key                 | Organization Key                                 |
+| ---------------- | ---------------------------- | ------------------------------------------------ |
+| **Quota**        | 40 tokens/day (your own)     | Shared org quota (48/day for Free, 1000 for Pro) |
+| **Access**       | Your scans only              | All org members' scans                           |
+| **Team**         | Individual                   | Shared across team                               |
+| **Use case**     | Local dev, personal projects | CI/CD, team automation                           |
+| **Generated in** | Settings → API Keys          | Organization → Settings → API Keys               |
+
+**Best practice:** Use organization keys for CI/CD pipelines; personal keys for local testing.
+
+### How do I upgrade my organization's plan?
+
+**Upgrade plan:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Billing**
+2. Current plan and quota displayed
+3. Click **Change Plan** or **Upgrade**
+4. Select new tier (Pro, Enterprise) or add custom tokens
+5. Update payment method if needed
+6. Click **Confirm Upgrade**
+
+**Plan options:**
+
+- **Free** — 48 tokens/month, 5 members, basic integrations
+- **Pro** — 1000 tokens/month, unlimited members, advanced integrations
+- **Enterprise** — Custom tokens, SSO/SAML, custom domains, priority support
+
+**Downgrade:** Available mid-cycle; changes take effect at next billing date.
+
+**Reference:** [Quota & Pricing](../user-guide/quota-pricing.md)
+
+### How do I connect GitHub for automatic scanning?
+
+**GitHub Integration setup:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Integrations → GitHub**
+2. Click **Connect GitHub**
+3. Authorize Vulnera GitHub App (select repos or all repos)
+4. Enable auto-scan triggers:
+   - On push to main/develop
+   - On all pull requests
+   - Scheduled daily scan
+5. Save — scans now run automatically
+
+**What happens:**
+
+- PRs show Vulnera status checks
+- Comments added to PRs with findings
+- Merge blocked if critical issues found (configurable)
+- Results uploaded to GitHub code scanning
+
+**Reference:** [Dashboard Guide - GitHub Integration](../user-guide/dashboard/guide.md#github-integration)
+
+### How do I set up Slack notifications?
+
+**Enable Slack integration:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Integrations → Slack**
+2. Click **Connect Slack Workspace**
+3. Authorize Vulnera app in Slack
+4. Select notification channel
+5. Configure notification types:
+   - Critical findings (immediate)
+   - Daily digest
+   - Weekly summary
+   - Quota alerts
+6. Save
+
+**Example Slack message:**
+
+```
+🚨 Critical Vulnerability Found
+Repo: acme/backend
+Finding: SQL Injection in /api/users.py
+CVSS: 9.2
+→ View Details [Link]
+```
+
+**Reference:** [Dashboard Guide - Slack Integration](../user-guide/dashboard/guide.md#slack-integration)
+
+### How do I view team analytics and usage?
+
+**Organization Analytics:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Organization → Analytics**
+2. View dashboard:
+   - Total quota used vs. remaining
+   - Per-member breakdown (token consumption)
+   - Module usage (pie chart: Dependencies, SAST, Secrets, API)
+   - 6-month usage trend
+   - Top analyzed projects
+
+**Export report:**
+
+1. Click **Export**
+2. Choose format: CSV, JSON, or PDF
+3. Download for spreadsheets or stakeholder reporting
+
+**Reference:** [Dashboard Guide - Quota Management](../user-guide/dashboard/guide.md#quota-management--analytics)
+
+### Can I generate compliance reports from the dashboard?
+
+**Yes, multiple report types:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Reports → Compliance Reports**
+2. Select framework:
+   - SOC2 Type II
+   - ISO 27001
+   - GDPR
+   - HIPAA (Enterprise)
+   - PCI DSS (Enterprise)
+3. Select date range
+4. Click **Generate** → PDF/HTML download
+5. Share with auditors or stakeholders
+
+**Report contents:**
+
+- Security metrics summary
+- Audit log excerpts
+- Member access records
+- Vulnerability remediation status
+- Data handling compliance statements
+
+**Reference:** [Dashboard Guide - Reporting & Export](../user-guide/dashboard/guide.md#reporting--export)
+
+### How do I remove a team member?
+
+**Remove member from organization:**
+
+1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Members**
+2. Find member in list
+3. Click **Remove** (⋯ menu)
+4. Confirm removal — member loses access immediately
+
+**What happens:**
+
+- Member can no longer see organization scans
+- Their scans remain in history (for audit)
+- Their API keys are revoked
+- Activity logged in audit trail
+
+**Reinvite later:** Can re-invite removed members anytime
+
+**Reference:** [Organization Management - Removing Members](../user-guide/dashboard/organization-management.md#removing-members)
+
+---
+
 ## Security & Privacy
 
 ### Is my code scanned securely?
@@ -467,8 +703,8 @@ Set preferences in organization settings > Billing.
 
 - **Documentation:** [Full guide](../README.md)
 - **Community:** [GitHub Discussions](https://github.com/vulnera-dev/vulnera/discussions)
-- **Support:** Vulnera
-- **Enterprise SLA:** Contact Us
+- **Web:** [vulnera.studio](https://vulnera.studio)
+- **Enterprise SLA:** Contact vulnera sales for support plans.
 
 **For bugs:** [GitHub Issues](https://github.com/vulnera-dev/vulnera/issues)
 
@@ -477,6 +713,9 @@ Set preferences in organization settings > Billing.
 ## Quick Links
 
 - [Getting Started](../getting-started/README.md)
+- [Dashboard Guide](../user-guide/dashboard/guide.md)
+- [Organization Management](../user-guide/dashboard/organization-management.md)
+- [Team Collaboration](../user-guide/dashboard/team-collaboration.md)
 - [CLI Guide](../CLI_GUIDE.md)
 - [API Reference](./api-spec.md)
 - [Quota & Pricing](../user-guide/quota-pricing.md)

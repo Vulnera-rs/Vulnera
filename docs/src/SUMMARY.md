@@ -17,6 +17,12 @@
 
 - [Cloud Engineer Quick Start](getting-started/personas/cloud-engineer-quickstart.md)
 
+## Dashboard & Web Platform
+
+- [Dashboard Guide](user-guide/dashboard/guide.md)
+- [Organization Management](user-guide/dashboard/organization-management.md)
+- [Team Collaboration](user-guide/dashboard/team-collaboration.md)
+
 ## Analysis Capabilities
 
 ### AI-Assisted Analysis Overview
@@ -34,7 +40,6 @@
 ## AI-Powered Explanations & Fixes (LLM-Based)
 
 - [Overview](user-guide/llm-features.md)
-
 
 ## Reference
 
