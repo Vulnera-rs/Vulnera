@@ -31,17 +31,6 @@ The API Security Module analyzes OpenAPI 3.x specifications to identify security
 
 API Security analysis is automatically executed when OpenAPI specs are detected:
 
-```bash
-curl -X POST http://localhost:3000/api/v1/analyze/job \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access_token>" \
-  -d '{
-    "source_type": "git",
-    "source_uri": "https://github.com/my-org/api-project.git",
-    "analysis_depth": "full"
-  }'
-```
-
 ## Detected Issues
 
 ### Authentication Issues
@@ -86,59 +75,6 @@ curl -X POST http://localhost:3000/api/v1/analyze/job \
 - Redirect URI issues
 - Scope problems
 
-## Response Format
-
-```json
-{
-  "findings": [
-    {
-      "module": "api_security",
-      "category": "authentication",
-      "severity": "high",
-      "path": "/api/users/{id}",
-      "method": "GET",
-      "message": "Endpoint lacks authentication requirement",
-      "remediation": "Add security scheme requirement to this endpoint"
-    },
-    {
-      "module": "api_security",
-      "category": "input_validation",
-      "severity": "medium",
-      "path": "/api/search",
-      "method": "GET",
-      "parameter": "query",
-      "message": "Query parameter lacks validation schema",
-      "remediation": "Add schema validation for the 'query' parameter"
-    }
-  ]
-}
-```
-
-## Configuration
-
-```bash
-# Enable/disable specific analyzers
-VULNERA__API_SECURITY__ENABLE_AUTH_ANALYSIS=true
-VULNERA__API_SECURITY__ENABLE_INJECTION_ANALYSIS=true
-VULNERA__API_SECURITY__ENABLE_DATA_EXPOSURE_ANALYSIS=true
-
-# Strict mode (more aggressive checks)
-VULNERA__API_SECURITY__STRICT_MODE=false
-
-# Path exclusions (JSON array)
-VULNERA__API_SECURITY__EXCLUDE_PATHS='["/health", "/metrics"]'
-```
-
-## Severity Overrides
-
-Customize severity levels for specific issue types:
-
-```toml
-[api_security.severity_overrides]
-missing_authentication = "critical"
-missing_rate_limiting = "medium"
-verbose_errors = "low"
-```
 
 ## Best Practices Checked
 

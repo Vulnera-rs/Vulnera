@@ -35,17 +35,6 @@ The module includes built-in rules for detecting:
 
 SAST analysis is automatically executed through the orchestrator:
 
-```bash
-curl -X POST http://localhost:3000/api/v1/analyze/job \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access_token>" \
-  -d '{
-    "source_type": "git",
-    "source_uri": "https://github.com/my-org/my-project.git",
-    "analysis_depth": "full"
-  }'
-```
-
 ## Custom Rules
 
 ### TOML Format
@@ -85,69 +74,6 @@ pattern = { FunctionCall = "eval" }
     }
   ]
 }
-```
-
-## Pattern Types
-
-### Function Call Matching
-
-```toml
-pattern = { FunctionCall = "eval" }
-```
-
-Matches calls to specific functions.
-
-### AST Node Type Matching
-
-```toml
-pattern = { NodeType = "string_literal" }
-```
-
-Matches specific AST node types.
-
-### Regular Expression Matching
-
-```toml
-pattern = { Regex = "password\\s*=\\s*['\"][^'\"]+['\"]" }
-```
-
-Matches patterns using regular expressions.
-
-## Response Format
-
-```json
-{
-  "findings": [
-    {
-      "module": "sast",
-      "rule_id": "sql-injection",
-      "severity": "high",
-      "confidence": "high",
-      "file": "src/database.py",
-      "line": 42,
-      "column": 8,
-      "message": "Potential SQL injection vulnerability detected",
-      "code_snippet": "cursor.execute(f\"SELECT * FROM users WHERE id = {user_id}\")",
-      "remediation": "Use parameterized queries instead of string formatting"
-    }
-  ]
-}
-```
-
-## Configuration
-
-```bash
-# Maximum scan depth
-VULNERA__SAST__MAX_SCAN_DEPTH=10
-
-# Exclude patterns (JSON array)
-VULNERA__SAST__EXCLUDE_PATTERNS='["node_modules", ".git", "target", "__pycache__"]'
-
-# Custom rule file path
-VULNERA__SAST__RULE_FILE_PATH=/path/to/custom-rules.toml
-
-# Enable logging
-VULNERA__SAST__ENABLE_LOGGING=true
 ```
 
 ## Confidence Levels

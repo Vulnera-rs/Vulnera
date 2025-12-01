@@ -25,16 +25,6 @@ The orchestrator automatically selects and executes appropriate modules based on
 
 ### Example: Full Repository Analysis
 
-```bash
-curl -X POST http://localhost:3000/api/v1/analyze/job \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <access_token>" \
-  -d '{
-    "source_type": "git",
-    "source_uri": "https://github.com/my-org/my-project.git",
-    "analysis_depth": "full"
-  }'
-```
 
 This automatically:
 
@@ -45,39 +35,6 @@ This automatically:
 5. Runs API Security if OpenAPI specs are detected
 6. Aggregates all findings into a unified report
 
-### Response Format
-
-```json
-{
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "completed",
-  "summary": {
-    "total_findings": 42,
-    "critical": 1,
-    "high": 5,
-    "medium": 15,
-    "low": 21
-  },
-  "findings": [
-    {
-      "module": "dependency_analysis",
-      "type": "vulnerability",
-      "severity": "high",
-      "package": "lodash",
-      "version": "4.17.20",
-      "vulnerability": "CVE-2021-23337"
-    },
-    {
-      "module": "sast",
-      "type": "code_issue",
-      "severity": "medium",
-      "file": "src/api.js",
-      "line": 42,
-      "rule": "sql-injection"
-    }
-  ]
-}
-```
 
 ## Data Sources
 
