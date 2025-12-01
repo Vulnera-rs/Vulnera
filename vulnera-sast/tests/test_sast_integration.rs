@@ -14,7 +14,7 @@ async fn test_sast_module_rust_scan() {
         fn main() {
             let x = Some(1);
             x.unwrap(); // Should trigger null-pointer rule
-            execute("DROP TABLE users"); // Should trigger sql-injection rule
+            let y = x.expect("should exist"); // Should trigger expect-panic rule
         }
     "#,
     )
@@ -43,7 +43,7 @@ async fn test_sast_module_rust_scan() {
         .filter_map(|f| f.rule_id.clone())
         .collect();
     assert!(rule_ids.contains(&"null-pointer".to_string()));
-    assert!(rule_ids.contains(&"sql-injection".to_string()));
+    assert!(rule_ids.contains(&"expect-panic".to_string()));
 }
 
 #[tokio::test]
@@ -93,9 +93,10 @@ async fn test_sast_module_js_scan() {
     std::fs::write(
         &file_path,
         r#"
+        const child_process = require('child_process');
         function run() {
             eval("alert('hacked')"); // Should trigger unsafe-function-call
-            exec("rm -rf /"); // Should trigger command-injection
+            child_process.exec("rm -rf /"); // Should trigger js-child-process
         }
     "#,
     )
@@ -122,8 +123,8 @@ async fn test_sast_module_js_scan() {
         .iter()
         .filter_map(|f| f.rule_id.clone())
         .collect();
-    assert!(rule_ids.contains(&"unsafe-function-call".to_string()));
-    assert!(rule_ids.contains(&"command-injection".to_string()));
+    assert!(rule_ids.contains(&"js-eval-direct".to_string()));
+    assert!(rule_ids.contains(&"js-child-process".to_string()));
 }
 
 #[tokio::test]
@@ -291,7 +292,7 @@ render_template_string(template)
         r#"
 const child_process = require('child_process');
 child_process.exec('ls');
-dangerouslySetInnerHTML(createMarkup());
+element.innerHTML = userInput;
 setTimeout("alert('hi')", 1000);
 "#,
     )

@@ -166,12 +166,12 @@ exclude_patterns = [
 ]
 # rule_file_path = "/path/to/custom/rules.toml"  # Optional custom rule file
 enable_logging = true
-enable_semgrep = false           # Enable Semgrep for taint analysis
-semgrep_path = "/usr/local/bin/semgrep"  # Full path to Semgrep binary (can be overridden via VULNERA__SAST__SEMGREP_PATH env var)
-semgrep_timeout_secs = 60       # Timeout for Semgrep execution
-enable_ast_cache = true         # Enable AST caching via Dragonfly
-ast_cache_ttl_hours = 4         # AST cache TTL in hours
-max_concurrent_files = 4        # Maximum concurrent file analysis
+enable_data_flow = true          # Enable data flow / taint analysis
+enable_call_graph = true         # Enable call graph for inter-procedural analysis
+analysis_depth = "standard"      # quick | standard | deep
+enable_ast_cache = true          # Enable AST caching via Dragonfly
+ast_cache_ttl_hours = 4          # AST cache TTL in hours
+max_concurrent_files = 4         # Maximum concurrent file analysis
 
 
 # Cache TTL for popular package vulnerability listings (in hours)

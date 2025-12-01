@@ -592,6 +592,19 @@ impl Default for SyncConfig {
     }
 }
 
+/// Analysis depth for SAST - controls trade-off between speed and thoroughness
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AnalysisDepth {
+    /// Fast pattern matching only - no data flow analysis
+    Quick,
+    /// Pattern matching + intra-procedural data flow (default)
+    #[default]
+    Standard,
+    /// Full analysis: patterns + data flow + call graph + inter-procedural
+    Deep,
+}
+
 /// SAST (Static Application Security Testing) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -604,12 +617,12 @@ pub struct SastConfig {
     pub rule_file_path: Option<PathBuf>,
     /// Whether to enable logging for SAST operations
     pub enable_logging: bool,
-    /// Enable Semgrep for taint analysis (default: true)
-    pub enable_semgrep: Option<bool>,
-    /// Path to Semgrep binary (default: "semgrep" in PATH)
-    pub semgrep_path: Option<String>,
-    /// Semgrep execution timeout in seconds (default: 60)
-    pub semgrep_timeout_secs: Option<u64>,
+    /// Enable data flow / taint analysis (default: true)
+    pub enable_data_flow: bool,
+    /// Enable call graph construction for inter-procedural analysis (default: true)
+    pub enable_call_graph: bool,
+    /// Analysis depth: quick, standard, or deep
+    pub analysis_depth: AnalysisDepth,
     /// Enable AST caching via Dragonfly (default: true)
     pub enable_ast_cache: Option<bool>,
     /// AST cache TTL in hours (default: 4)
@@ -643,9 +656,9 @@ impl Default for SastConfig {
             ],
             rule_file_path: None,
             enable_logging: true,
-            enable_semgrep: Some(true),
-            semgrep_path: None,
-            semgrep_timeout_secs: Some(60),
+            enable_data_flow: true,
+            enable_call_graph: true,
+            analysis_depth: AnalysisDepth::Standard,
             enable_ast_cache: Some(true),
             ast_cache_ttl_hours: Some(4),
             max_concurrent_files: Some(4),

@@ -10,9 +10,8 @@ use crate::domain::entities::{
     Finding, Rule, SarifArtifactChange, SarifArtifactLocation, SarifDefaultConfiguration, SarifFix,
     SarifInsertedContent, SarifInvocation, SarifLevel, SarifLocation, SarifMessage,
     SarifPhysicalLocation, SarifRegion, SarifReplacement, SarifReport, SarifResult, SarifRule,
-    SarifRuleProperties, SarifRun, SarifSnippet, SarifTool, SarifToolDriver, SemgrepRule, Severity,
+    SarifRuleProperties, SarifRun, SarifSnippet, SarifTool, SarifToolDriver, Severity,
 };
-use crate::infrastructure::semgrep::output::SemgrepResult;
 use std::collections::HashMap;
 use tracing::{debug, instrument};
 
@@ -105,51 +104,6 @@ impl SarifExporter {
         }
     }
 
-    /// Export findings with Semgrep rules to SARIF
-    #[instrument(skip(self, findings, semgrep_rules), fields(finding_count = findings.len()))]
-    pub fn export_with_semgrep(
-        &self,
-        findings: &[Finding],
-        semgrep_rules: &[SemgrepRule],
-    ) -> SarifReport {
-        let rule_map: HashMap<&str, &SemgrepRule> =
-            semgrep_rules.iter().map(|r| (r.id.as_str(), r)).collect();
-
-        // Build SARIF rules from Semgrep rules
-        let sarif_rules: Vec<SarifRule> = semgrep_rules
-            .iter()
-            .map(|r| self.semgrep_rule_to_sarif(r))
-            .collect();
-
-        // Build SARIF results
-        let results: Vec<SarifResult> = findings
-            .iter()
-            .map(|f| {
-                self.finding_to_sarif_result_semgrep(f, rule_map.get(f.rule_id.as_str()).copied())
-            })
-            .collect();
-
-        let run = SarifRun {
-            tool: SarifTool {
-                driver: SarifToolDriver {
-                    name: self.config.tool_name.clone(),
-                    semantic_version: self.config.tool_version.clone(),
-                    rules: sarif_rules,
-                },
-            },
-            results,
-            invocations: vec![SarifInvocation {
-                execution_successful: true,
-                tool_execution_notifications: vec![],
-            }],
-        };
-
-        SarifReport {
-            runs: vec![run],
-            ..Default::default()
-        }
-    }
-
     /// Convert a Rule to SarifRule
     fn rule_to_sarif(&self, rule: &Rule) -> SarifRule {
         let mut tags = rule.tags.clone();
@@ -188,115 +142,20 @@ impl SarifExporter {
         }
     }
 
-    /// Convert a SemgrepRule to SarifRule
-    fn semgrep_rule_to_sarif(&self, rule: &SemgrepRule) -> SarifRule {
-        let mut tags = rule.tags.clone();
-        tags.extend(rule.cwe_ids.iter().cloned());
-        tags.extend(rule.owasp_categories.iter().cloned());
-
-        SarifRule {
-            id: rule.id.clone(),
-            name: Some(rule.name.clone()),
-            short_description: Some(SarifMessage {
-                text: rule.name.clone(),
-                markdown: None,
-            }),
-            full_description: Some(SarifMessage {
-                text: rule.message.clone(),
-                markdown: None,
-            }),
-            help: Some(SarifMessage {
-                text: rule.message.clone(),
-                markdown: Some(format!(
-                    "## {}\n\n{}\n\n### CWE\n{}\n\n### OWASP\n{}",
-                    rule.name,
-                    rule.message,
-                    rule.cwe_ids.join(", "),
-                    rule.owasp_categories.join(", ")
-                )),
-            }),
-            help_uri: self.config.information_uri.clone(),
-            default_configuration: Some(SarifDefaultConfiguration {
-                level: SarifLevel::from(&rule.severity),
-            }),
-            properties: Some(SarifRuleProperties {
-                tags,
-                precision: Some(self.severity_to_precision(&rule.severity)),
-            }),
-        }
-    }
-
     /// Convert a Finding to SarifResult
     fn finding_to_sarif_result(&self, finding: &Finding, rule: Option<&Rule>) -> SarifResult {
         let snippet = if self.config.include_snippets {
-            // Extract snippet from description if present
-            self.extract_snippet_from_description(&finding.description)
+            // Use the snippet from finding if available, otherwise extract from description
+            finding
+                .snippet
+                .clone()
+                .or_else(|| self.extract_snippet_from_description(&finding.description))
         } else {
             None
         };
 
         let fix = if self.config.include_fixes {
-            finding.recommendation.as_ref().map(|rec| {
-                vec![SarifFix {
-                    description: SarifMessage {
-                        text: rec.clone(),
-                        markdown: None,
-                    },
-                    artifact_changes: vec![],
-                }]
-            })
-        } else {
-            None
-        };
-
-        let level = rule
-            .map(|r| SarifLevel::from(&r.severity))
-            .unwrap_or(SarifLevel::from(&finding.severity));
-
-        SarifResult {
-            rule_id: finding.rule_id.clone(),
-            level,
-            message: SarifMessage {
-                text: finding.description.clone(),
-                markdown: None,
-            },
-            locations: vec![SarifLocation {
-                physical_location: SarifPhysicalLocation {
-                    artifact_location: SarifArtifactLocation {
-                        uri: finding.location.file_path.clone(),
-                        uri_base_id: self.config.uri_base_id.clone(),
-                    },
-                    region: Some(SarifRegion {
-                        start_line: finding.location.line,
-                        start_column: finding.location.column,
-                        end_line: finding.location.end_line,
-                        end_column: finding.location.end_column,
-                        snippet: snippet.map(|s| SarifSnippet { text: s }),
-                    }),
-                },
-            }],
-            fingerprints: Some(HashMap::from([(
-                "primaryLocationLineHash".to_string(),
-                finding.id.clone(),
-            )])),
-            fixes: fix,
-        }
-    }
-
-    /// Convert a Finding with Semgrep context to SarifResult
-    fn finding_to_sarif_result_semgrep(
-        &self,
-        finding: &Finding,
-        rule: Option<&SemgrepRule>,
-    ) -> SarifResult {
-        let snippet = if self.config.include_snippets {
-            self.extract_snippet_from_description(&finding.description)
-        } else {
-            None
-        };
-
-        // Include fix from rule if available
-        let fix = if self.config.include_fixes {
+            // Use rule fix if available, otherwise use recommendation
             rule.and_then(|r| r.fix.as_ref())
                 .map(|f| {
                     vec![SarifFix {
@@ -341,6 +200,37 @@ impl SarifExporter {
             .map(|r| SarifLevel::from(&r.severity))
             .unwrap_or(SarifLevel::from(&finding.severity));
 
+        // Build code flows from data flow path if available
+        let code_flows = finding.data_flow_path.as_ref().map(|path| {
+            vec![crate::domain::entities::SarifCodeFlow {
+                thread_flows: vec![crate::domain::entities::SarifThreadFlow {
+                    locations: path
+                        .steps
+                        .iter()
+                        .map(|step| crate::domain::entities::SarifThreadFlowLocation {
+                            location: SarifLocation {
+                                physical_location: SarifPhysicalLocation {
+                                    artifact_location: SarifArtifactLocation {
+                                        uri: step.location.file_path.clone(),
+                                        uri_base_id: self.config.uri_base_id.clone(),
+                                    },
+                                    region: Some(SarifRegion {
+                                        start_line: step.location.line,
+                                        start_column: step.location.column,
+                                        end_line: step.location.end_line,
+                                        end_column: step.location.end_column,
+                                        snippet: Some(SarifSnippet {
+                                            text: step.expression.clone(),
+                                        }),
+                                    }),
+                                },
+                            },
+                        })
+                        .collect(),
+                }],
+            }]
+        });
+
         SarifResult {
             rule_id: finding.rule_id.clone(),
             level,
@@ -368,6 +258,7 @@ impl SarifExporter {
                 finding.id.clone(),
             )])),
             fixes: fix,
+            code_flows,
         }
     }
 
@@ -427,127 +318,6 @@ impl Default for SarifExporter {
     }
 }
 
-/// Convert Semgrep output directly to SARIF
-pub fn semgrep_output_to_sarif(
-    semgrep_results: &[SemgrepResult],
-    rules: &[SemgrepRule],
-    tool_name: &str,
-    tool_version: Option<&str>,
-) -> SarifReport {
-    let rule_map: HashMap<&str, &SemgrepRule> = rules.iter().map(|r| (r.id.as_str(), r)).collect();
-
-    let exporter = SarifExporter::with_config(SarifExporterConfig {
-        tool_name: tool_name.to_string(),
-        tool_version: tool_version.map(|s| s.to_string()),
-        ..Default::default()
-    });
-
-    // Build SARIF rules
-    let sarif_rules: Vec<SarifRule> = rules
-        .iter()
-        .map(|r| exporter.semgrep_rule_to_sarif(r))
-        .collect();
-
-    // Build SARIF results from Semgrep results
-    let results: Vec<SarifResult> = semgrep_results
-        .iter()
-        .map(|r| semgrep_result_to_sarif(r, rule_map.get(r.check_id.as_str()).copied()))
-        .collect();
-
-    SarifReport {
-        runs: vec![SarifRun {
-            tool: SarifTool {
-                driver: SarifToolDriver {
-                    name: tool_name.to_string(),
-                    semantic_version: tool_version.map(|s| s.to_string()),
-                    rules: sarif_rules,
-                },
-            },
-            results,
-            invocations: vec![SarifInvocation {
-                execution_successful: true,
-                tool_execution_notifications: vec![],
-            }],
-        }],
-        ..Default::default()
-    }
-}
-
-/// Convert a single Semgrep result to SARIF result
-fn semgrep_result_to_sarif(result: &SemgrepResult, _rule: Option<&SemgrepRule>) -> SarifResult {
-    let level = match result.extra.severity.to_uppercase().as_str() {
-        "ERROR" => SarifLevel::Error,
-        "WARNING" => SarifLevel::Warning,
-        _ => SarifLevel::Note,
-    };
-
-    let snippet = if !result.extra.lines.is_empty() {
-        Some(SarifSnippet {
-            text: result.extra.lines.clone(),
-        })
-    } else {
-        None
-    };
-
-    // Build fix if available
-    let fixes = result.extra.fix.as_ref().map(|fix_text| {
-        vec![SarifFix {
-            description: SarifMessage {
-                text: "Apply suggested fix".to_string(),
-                markdown: None,
-            },
-            artifact_changes: vec![SarifArtifactChange {
-                artifact_location: SarifArtifactLocation {
-                    uri: result.path.clone(),
-                    uri_base_id: Some("%SRCROOT%".to_string()),
-                },
-                replacements: vec![SarifReplacement {
-                    deleted_region: SarifRegion {
-                        start_line: result.start.line,
-                        start_column: Some(result.start.col),
-                        end_line: Some(result.end.line),
-                        end_column: Some(result.end.col),
-                        snippet: None,
-                    },
-                    inserted_content: SarifInsertedContent {
-                        text: fix_text.clone(),
-                    },
-                }],
-            }],
-        }]
-    });
-
-    SarifResult {
-        rule_id: result.check_id.clone(),
-        level,
-        message: SarifMessage {
-            text: result.extra.message.clone(),
-            markdown: None,
-        },
-        locations: vec![SarifLocation {
-            physical_location: SarifPhysicalLocation {
-                artifact_location: SarifArtifactLocation {
-                    uri: result.path.clone(),
-                    uri_base_id: Some("%SRCROOT%".to_string()),
-                },
-                region: Some(SarifRegion {
-                    start_line: result.start.line,
-                    start_column: Some(result.start.col),
-                    end_line: Some(result.end.line),
-                    end_column: Some(result.end.col),
-                    snippet,
-                }),
-            },
-        }],
-        fingerprints: result
-            .extra
-            .fingerprint
-            .as_ref()
-            .map(|fp| HashMap::from([("primaryLocationLineHash".to_string(), fp.clone())])),
-        fixes,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -570,6 +340,8 @@ mod tests {
             description: "SQL injection vulnerability.\n\nMatched code:\ncursor.execute(query)"
                 .to_string(),
             recommendation: Some("Use parameterized queries".to_string()),
+            data_flow_path: None,
+            snippet: None,
         }
     }
 
@@ -580,13 +352,13 @@ mod tests {
             description: "Detects potential SQL injection vulnerabilities".to_string(),
             severity: Severity::Critical,
             languages: vec![crate::domain::value_objects::Language::Python],
-            pattern: crate::domain::entities::RulePattern::TreeSitterQuery(
-                "(call) @call".to_string(),
-            ),
+            pattern: crate::domain::entities::Pattern::TreeSitterQuery("(call) @call".to_string()),
             options: Default::default(),
             cwe_ids: vec!["CWE-89".to_string()],
             owasp_categories: vec!["A03:2021 - Injection".to_string()],
             tags: vec!["security".to_string()],
+            message: None,
+            fix: None,
         }
     }
 
