@@ -16,13 +16,13 @@ use tracing::{debug, error, info, instrument, warn};
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
 use crate::domain::entities::{
-    DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding, Location, Pattern, Rule,
-    Severity,
+    DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
+    Location, Pattern, Rule, Severity,
 };
 use crate::domain::value_objects::{AnalysisEngine, Language};
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
-use crate::infrastructure::data_flow::{InterProceduralContext, TaintQueryEngine};
+use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch, TaintQueryEngine};
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 use crate::infrastructure::rules::{
     PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
@@ -441,11 +441,20 @@ impl ScanProjectUseCase {
         }
 
         // Propagate taint through assignments
-        // If a tainted variable is assigned to another variable, mark the target as tainted
-        // We iterate multiple times to handle transitive propagation (a = b; c = a)
         let mut changed = true;
         let max_iterations = 10; // Prevent infinite loops
         let mut iteration = 0;
+
+        // Create a set of sanitized variables to block propagation
+        let sanitized_vars: std::collections::HashSet<&str> = sanitizers
+            .iter()
+            .filter_map(|s| s.variable_name.as_deref().or(Some(&s.matched_text)))
+            .collect();
+
+        println!(
+            "DEBUG: Sanitized variables blocking propagation: {:?}",
+            sanitized_vars
+        );
 
         while changed && iteration < max_iterations {
             changed = false;
@@ -454,6 +463,15 @@ impl ScanProjectUseCase {
             for (target, source_expr, line, column) in &assignments {
                 // Skip if target is already tainted
                 if analyzer.is_tainted(target) {
+                    continue;
+                }
+
+                // Skip if target is a sanitized variable (prevent re-tainting)
+                if sanitized_vars.contains(target.as_str()) {
+                    println!(
+                        "DEBUG: Skipping propagation to sanitized variable: {}",
+                        target
+                    );
                     continue;
                 }
 
@@ -481,13 +499,6 @@ impl ScanProjectUseCase {
                             *line as u32 + 1,
                             *column as u32,
                         );
-                        debug!(
-                            target = %target,
-                            source_var = %source_var,
-                            source_expr = %source_expr,
-                            line = line + 1,
-                            "Propagated taint through assignment"
-                        );
                         changed = true;
                         break;
                     }
@@ -509,12 +520,6 @@ impl ScanProjectUseCase {
                                 &file_str,
                                 *line as u32 + 1,
                                 *column as u32,
-                            );
-                            debug!(
-                                target = %target,
-                                prev_var = %prev_var,
-                                line = line + 1,
-                                "Propagated taint transitively"
                             );
                             changed = true;
                             break;
@@ -567,17 +572,43 @@ impl ScanProjectUseCase {
             // Try to find a tainted variable in the sink expression
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
-            // Check if any of our tracked tainted variables appear in this sink
+            // Strategy 1: Check if the sink variable itself is tainted (Direct Propagation)
+            // This handles cases like: x = source; y = x; sink(y)
+            if analyzer.is_tainted(sink_var) {
+                if let Some(data_flow_finding) = analyzer.check_sink(
+                    sink_var,
+                    &sink.pattern_name,
+                    &file_str,
+                    sink.line as u32 + 1,
+                    sink.column as u32,
+                ) {
+                    Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                    continue; // Found a match, move to next sink
+                }
+            }
+
+            // Strategy 2: Check if any active tainted variable is part of the sink expression
+            // This handles cases like: sink("prefix" + source)
             // CRITICAL: Only consider variables that are STILL tainted (not sanitized)
-            // This filters out variables that have been cleared by sanitizers
-            let potential_taints: Vec<&str> = sources
+            let active_taints: Vec<&str> = sources
                 .iter()
                 .filter_map(|s| s.variable_name.as_deref())
                 .filter(|var| analyzer.is_tainted(var))
                 .collect();
 
-            for tainted_var in potential_taints {
-                if sink.matched_text.contains(tainted_var) || sink_var == tainted_var {
+            for tainted_var in active_taints {
+                // Skip if we already checked this var as sink_var
+                if tainted_var == sink_var {
+                    continue;
+                }
+
+                // Use regex to check for whole word match to avoid false positives with short var names
+                // e.g. "r" matching in "u.String()"
+                let pattern = format!(r"\b{}\b", regex::escape(tainted_var));
+                let re = regex::Regex::new(&pattern)
+                    .unwrap_or_else(|_| regex::Regex::new(tainted_var).unwrap());
+
+                if re.is_match(&sink.matched_text) {
                     if let Some(data_flow_finding) = analyzer.check_sink(
                         tainted_var,
                         &sink.pattern_name,
@@ -585,91 +616,101 @@ impl ScanProjectUseCase {
                         sink.line as u32 + 1,
                         sink.column as u32,
                     ) {
-                        // Build the finding with data flow path
-                        let source_node = DataFlowNode {
-                            location: Location {
-                                file_path: data_flow_finding.source.file.clone(),
-                                line: data_flow_finding.source.line,
-                                column: Some(data_flow_finding.source.column),
-                                end_line: Some(data_flow_finding.source.line),
-                                end_column: None,
-                            },
-                            description: data_flow_finding
-                                .source
-                                .note
-                                .unwrap_or_else(|| "Taint source".to_string()),
-                            expression: data_flow_finding.source.expression.clone(),
-                        };
-
-                        let sink_node = DataFlowNode {
-                            location: Location {
-                                file_path: data_flow_finding.sink.file.clone(),
-                                line: data_flow_finding.sink.line,
-                                column: Some(data_flow_finding.sink.column),
-                                end_line: Some(data_flow_finding.sink.line),
-                                end_column: None,
-                            },
-                            description: data_flow_finding
-                                .sink
-                                .note
-                                .unwrap_or_else(|| "Taint sink".to_string()),
-                            expression: data_flow_finding.sink.expression.clone(),
-                        };
-
-                        let steps: Vec<DataFlowNode> = data_flow_finding
-                            .intermediate_steps
-                            .iter()
-                            .map(|step| DataFlowNode {
-                                location: Location {
-                                    file_path: step.file.clone(),
-                                    line: step.line,
-                                    column: Some(step.column),
-                                    end_line: Some(step.line),
-                                    end_column: None,
-                                },
-                                description: step
-                                    .note
-                                    .clone()
-                                    .unwrap_or_else(|| "Propagation".to_string()),
-                                expression: step.expression.clone(),
-                            })
-                            .collect();
-
-                        let finding = SastFinding {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            rule_id: format!("data-flow-{}", sink.category),
-                            location: Location {
-                                file_path: file_str.clone(),
-                                line: sink.line as u32 + 1,
-                                column: Some(sink.column as u32),
-                                end_line: Some(sink.end_line as u32 + 1),
-                                end_column: Some(sink.end_column as u32),
-                            },
-                            severity: Severity::High,
-                            confidence: crate::domain::value_objects::Confidence::High,
-                            description: format!(
-                                "Tainted data from {} flows to {}: {}",
-                                data_flow_finding.source.expression,
-                                sink.category,
-                                sink.pattern_name
-                            ),
-                            recommendation: Some(format!(
-                                "Sanitize or validate the data before passing to {}. \
-                                 Consider using appropriate escaping for {} context.",
-                                sink.pattern_name, sink.category
-                            )),
-                            data_flow_path: Some(DataFlowPath {
-                                source: source_node,
-                                sink: sink_node,
-                                steps,
-                            }),
-                            snippet: Some(sink.matched_text.clone()),
-                        };
-                        findings.push(finding);
+                        Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                        // Don't break here, there might be multiple taints in one sink
                     }
                 }
             }
         }
+    }
+
+    fn add_finding(
+        findings: &mut Vec<SastFinding>,
+        data_flow_finding: &DataFlowFinding,
+        sink: &TaintMatch,
+        file_str: &str,
+    ) {
+        // Build the finding with data flow path
+        let source_node = DataFlowNode {
+            location: Location {
+                file_path: data_flow_finding.source.file.clone(),
+                line: data_flow_finding.source.line,
+                column: Some(data_flow_finding.source.column),
+                end_line: Some(data_flow_finding.source.line),
+                end_column: None,
+            },
+            description: data_flow_finding
+                .source
+                .note
+                .clone()
+                .unwrap_or_else(|| "Taint source".to_string()),
+            expression: data_flow_finding.source.expression.clone(),
+        };
+
+        let sink_node = DataFlowNode {
+            location: Location {
+                file_path: data_flow_finding.sink.file.clone(),
+                line: data_flow_finding.sink.line,
+                column: Some(data_flow_finding.sink.column),
+                end_line: Some(data_flow_finding.sink.line),
+                end_column: None,
+            },
+            description: data_flow_finding
+                .sink
+                .note
+                .clone()
+                .unwrap_or_else(|| "Taint sink".to_string()),
+            expression: data_flow_finding.sink.expression.clone(),
+        };
+
+        let steps: Vec<DataFlowNode> = data_flow_finding
+            .intermediate_steps
+            .iter()
+            .map(|step| DataFlowNode {
+                location: Location {
+                    file_path: step.file.clone(),
+                    line: step.line,
+                    column: Some(step.column),
+                    end_line: Some(step.line),
+                    end_column: None,
+                },
+                description: step
+                    .note
+                    .clone()
+                    .unwrap_or_else(|| "Propagation".to_string()),
+                expression: step.expression.clone(),
+            })
+            .collect();
+
+        let finding = SastFinding {
+            id: uuid::Uuid::new_v4().to_string(),
+            rule_id: format!("data-flow-{}", sink.category),
+            location: Location {
+                file_path: file_str.to_string(),
+                line: sink.line as u32 + 1,
+                column: Some(sink.column as u32),
+                end_line: Some(sink.end_line as u32 + 1),
+                end_column: Some(sink.end_column as u32),
+            },
+            severity: Severity::High,
+            confidence: crate::domain::value_objects::Confidence::High,
+            description: format!(
+                "Tainted data from {} flows to {}: {}",
+                data_flow_finding.source.expression, sink.category, sink.pattern_name
+            ),
+            recommendation: Some(format!(
+                "Sanitize or validate the data before passing to {}. \
+                 Consider using appropriate escaping for {} context.",
+                sink.pattern_name, sink.category
+            )),
+            data_flow_path: Some(DataFlowPath {
+                source: source_node,
+                sink: sink_node,
+                steps,
+            }),
+            snippet: Some(sink.matched_text.clone()),
+        };
+        findings.push(finding);
     }
 
     /// Adjust severity for findings confirmed by data flow analysis

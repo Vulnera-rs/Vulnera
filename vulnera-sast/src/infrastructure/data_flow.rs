@@ -548,8 +548,8 @@ impl TaintQueryEngine {
                     column: qm.start_position.1,
                     end_line: qm.end_position.0,
                     end_column: qm.end_position.1,
-                    matched_text,
-                    variable_name,
+                    matched_text: matched_text.clone(),
+                    variable_name: variable_name.clone(),
                     labels: if pattern_type == TaintPatternType::Source {
                         pattern.labels.clone()
                     } else {
@@ -562,6 +562,7 @@ impl TaintQueryEngine {
                     },
                     is_known: pattern.is_known,
                 };
+
                 matches.push(taint_match);
             }
         }

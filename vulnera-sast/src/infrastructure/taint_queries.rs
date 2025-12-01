@@ -1150,23 +1150,54 @@ pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> {
         ),
         // path.basename (specific)
         TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (member_expression
-                object: (identifier) @lib
-                property: (property_identifier) @method)
-              (#eq? @lib "path")
-              (#eq? @method "basename")
-            ) @sanitizer"#,
+            r#"[
+              (variable_declarator
+                name: (identifier) @var
+                value: (call_expression
+                  function: (member_expression
+                    object: (identifier) @lib
+                    property: (property_identifier) @method)
+                  (#eq? @lib "path")
+                  (#eq? @method "basename"))
+              )
+              (assignment_expression
+                left: (identifier) @var
+                right: (call_expression
+                  function: (member_expression
+                    object: (identifier) @lib
+                    property: (property_identifier) @method)
+                  (#eq? @lib "path")
+                  (#eq? @method "basename"))
+              )
+              (call_expression
+                  function: (member_expression
+                    object: (identifier) @lib
+                    property: (property_identifier) @method)
+                  (#eq? @lib "path")
+                  (#eq? @method "basename")
+              ) @sanitizer
+            ] @sanitizer"#,
             "path.basename",
             "path_traversal",
         ),
         // basename (generic)
         TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (member_expression
-                property: (property_identifier) @method)
-              (#eq? @method "basename")
-            ) @sanitizer"#,
+            r#"[
+              (variable_declarator
+                name: (identifier) @var
+                value: (call_expression
+                  function: (member_expression
+                    property: (property_identifier) @method)
+                  (#eq? @method "basename"))
+              )
+              (assignment_expression
+                left: (identifier) @var
+                right: (call_expression
+                  function: (member_expression
+                    property: (property_identifier) @method)
+                  (#eq? @method "basename"))
+              )
+            ] @sanitizer"#,
             "basename",
             "path_traversal",
         ),
@@ -1175,10 +1206,12 @@ pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> {
             r#"(call_expression
               function: (identifier) @fn
               arguments: (arguments
+                (_)*
                 (object
                   (pair
                     key: (property_identifier) @key
-                    (#eq? @key "strip"))))
+                    (#eq? @key "strip")))
+                (_)*)
               (#eq? @fn "decompress")
             ) @sanitizer"#,
             "decompress safe",
@@ -1475,20 +1508,6 @@ pub fn go_sink_queries() -> Vec<TaintPattern> {
             "HTTP client.Do",
             "ssrf",
         ),
-        // url.Parse with user input (often precedes SSRF)
-        TaintPattern::sink(
-            r#"(call_expression
-              function: (selector_expression
-                operand: (identifier) @pkg
-                field: (field_identifier) @fn)
-              arguments: (argument_list
-                (identifier) @url)
-              (#eq? @pkg "url")
-              (#eq? @fn "Parse")
-            ) @sink"#,
-            "url.Parse with user input",
-            "ssrf",
-        ),
         // net.Dial with user-controlled address
         TaintPattern::sink(
             r#"(call_expression
@@ -1593,61 +1612,86 @@ pub fn go_sanitizer_queries() -> Vec<TaintPattern> {
             "url",
         ),
         // filepath.Clean
+        // url.Parse / url.ParseRequestURI (assignment)
         TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (selector_expression
-                operand: (identifier) @pkg
-                field: (field_identifier) @fn)
-              (#eq? @pkg "filepath")
-              (#eq? @fn "Clean")
-            ) @sanitizer"#,
-            "filepath.Clean",
-            "path",
-        ),
-        // strconv.Atoi
-        TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (selector_expression
-                operand: (identifier) @pkg
-                field: (field_identifier) @fn)
-              (#eq? @pkg "strconv")
-              (#match? @fn "^(Atoi|ParseInt|ParseFloat|ParseUint)$")
-            ) @sanitizer"#,
-            "Numeric conversion",
-            "type_coercion",
-        ),
-        // url.Parse / url.ParseRequestURI
-        TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (selector_expression
-                operand: (identifier) @pkg
-                field: (field_identifier) @fn)
-              (#eq? @pkg "url")
-              (#match? @fn "^(Parse|ParseRequestURI)$")
-            ) @sanitizer"#,
+            r#"[
+              (short_var_declaration
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "url")
+                  (#match? @fn "^(Parse|ParseRequestURI)$")))
+              )
+              (assignment_statement
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "url")
+                  (#match? @fn "^(Parse|ParseRequestURI)$")))
+              )
+            ] @sanitizer"#,
             "URL parsing",
             "url",
         ),
-        // url.Parse (generic/variable)
+        // path.Clean (assignment)
         TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (selector_expression
-                field: (field_identifier) @fn)
-              (#match? @fn "^(Parse|ParseRequestURI)$")
-            ) @sanitizer"#,
-            "URL parsing generic",
-            "url",
-        ),
-        // path.Clean
-        TaintPattern::sanitizer(
-            r#"(call_expression
-              function: (selector_expression
-                operand: (identifier) @pkg
-                field: (field_identifier) @fn)
-              (#eq? @pkg "path")
-              (#eq? @fn "Clean")
-            ) @sanitizer"#,
+            r#"[
+              (short_var_declaration
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "path")
+                  (#eq? @fn "Clean")))
+              )
+              (assignment_statement
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "path")
+                  (#eq? @fn "Clean")))
+              )
+              (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "path")
+                  (#eq? @fn "Clean")
+              ) @sanitizer
+            ] @sanitizer"#,
             "path.Clean",
+            "path",
+        ),
+        // filepath.Clean (assignment)
+        TaintPattern::sanitizer(
+            r#"[
+              (short_var_declaration
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "filepath")
+                  (#eq? @fn "Clean")))
+              )
+              (assignment_statement
+                left: (expression_list (identifier) @var)
+                right: (expression_list (call_expression
+                  function: (selector_expression
+                    operand: (identifier) @pkg
+                    field: (field_identifier) @fn)
+                  (#eq? @pkg "filepath")
+                  (#eq? @fn "Clean")))
+              )
+            ] @sanitizer"#,
+            "filepath.Clean",
             "path",
         ),
     ]
