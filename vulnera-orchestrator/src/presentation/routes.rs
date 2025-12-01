@@ -374,10 +374,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             .max_age(Duration::from_secs(3600))
     } else {
         // Specific origins with credentials enabled
-        tracing::info!(
-            origins = ?config.server.allowed_origins,
-            "CORS: Configured with specific origins and credentials enabled"
-        );
+        tracing::debug!("CORS: Configured with specific origins and credentials enabled");
 
         let origins: Vec<axum::http::HeaderValue> = config
             .server

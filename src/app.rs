@@ -97,13 +97,13 @@ fn spawn_sync_worker(
             }
 
             is_syncing_startup.store(true, Ordering::SeqCst);
-            tracing::info!("Starting initial vulnerability source sync...");
+            tracing::debug!("Starting initial vulnerability source sync...");
 
             tokio::select! {
                 result = vuln_repo.sync_all() => {
                     match result {
                         Ok(()) => {
-                            tracing::info!("Initial vulnerability source sync completed successfully");
+                            tracing::debug!("Initial vulnerability source sync completed successfully");
                         }
                         Err(e) => {
                             tracing::warn!("Initial vulnerability sync failed (non-fatal): {}", e);
@@ -111,7 +111,7 @@ fn spawn_sync_worker(
                     }
                 }
                 _ = token.cancelled() => {
-                    tracing::info!("Initial sync cancelled due to shutdown");
+                    tracing::debug!("Initial sync cancelled due to shutdown");
                 }
             }
 
@@ -138,13 +138,13 @@ fn spawn_sync_worker(
                             continue;
                         }
 
-                        tracing::info!("Starting periodic vulnerability source sync...");
+                        tracing::debug!("Starting periodic vulnerability source sync...");
 
                         tokio::select! {
                             result = vulnerability_repository.sync_all() => {
                                 match result {
                                     Ok(()) => {
-                                        tracing::info!("Periodic vulnerability source sync completed successfully");
+                                        tracing::debug!("Periodic vulnerability source sync completed successfully");
                                     }
                                     Err(e) => {
                                         tracing::warn!("Periodic vulnerability sync failed (non-fatal): {}", e);
@@ -152,7 +152,7 @@ fn spawn_sync_worker(
                                 }
                             }
                             _ = token.cancelled() => {
-                                tracing::info!("Periodic sync cancelled due to shutdown");
+                                tracing::debug!("Periodic sync cancelled due to shutdown");
                                 is_syncing.store(false, Ordering::SeqCst);
                                 return;
                             }
@@ -161,7 +161,7 @@ fn spawn_sync_worker(
                         is_syncing.store(false, Ordering::SeqCst);
                     }
                     _ = token.cancelled() => {
-                        tracing::info!("Sync worker shutting down gracefully");
+                        tracing::debug!("Sync worker shutting down gracefully");
                         return;
                     }
                 }
@@ -292,7 +292,7 @@ pub async fn create_app(
         ));
 
     // Initialize vulnerability repository using vulnera-advisor
-    tracing::info!("Initializing vulnerability intelligence via vulnera-advisor");
+    tracing::debug!("Initializing vulnerability intelligence via vulnera-advisor");
     let vulnerability_repository = Arc::new(
         VulneraAdvisorRepository::from_config(&config)
             .await
@@ -391,7 +391,8 @@ pub async fn create_app(
         };
 
         // Create AST cache backed by Dragonfly
-        let ast_cache_ttl = Duration::from_secs(config.sast.ast_cache_ttl_hours.unwrap_or(4) * 3600);
+        let ast_cache_ttl =
+            Duration::from_secs(config.sast.ast_cache_ttl_hours.unwrap_or(4) * 3600);
         let ast_cache = Arc::new(DragonflyAstCache::with_ttl(
             dragonfly_cache.clone(),
             ast_cache_ttl,
@@ -416,7 +417,7 @@ pub async fn create_app(
         // Load database rules if available (non-blocking, fallback to defaults)
         let use_case = match use_case.with_database_rules(&rule_repository).await {
             Ok(uc) => {
-                tracing::info!("Loaded SAST rules from database");
+                tracing::debug!("Loaded SAST rules from database");
                 uc
             }
             Err(e) => {
@@ -642,7 +643,7 @@ pub async fn create_app(
         .await
         {
             Ok(service) => {
-                tracing::info!("Rate limiter service initialized");
+                tracing::debug!("Rate limiter service initialized");
                 Some(Arc::new(service))
             }
             Err(e) => {
