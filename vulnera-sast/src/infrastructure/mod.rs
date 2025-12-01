@@ -15,6 +15,7 @@ pub mod query_engine;
 pub mod rules;
 pub mod sarif;
 pub mod scanner;
+pub mod taint_queries;
 
 pub use ast_cache::*;
 pub use call_graph::*;
@@ -23,3 +24,4 @@ pub use query_engine::*;
 pub use rules::{RuleEngine, RuleRepository};
 pub use sarif::*;
 pub use scanner::*;
+pub use taint_queries::*;

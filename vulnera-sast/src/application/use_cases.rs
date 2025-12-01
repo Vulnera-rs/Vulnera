@@ -8,7 +8,7 @@
 //! - SARIF v2.1.0 export
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -21,7 +21,8 @@ use crate::domain::entities::{
 use crate::domain::value_objects::{AnalysisEngine, Language};
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
-use crate::infrastructure::data_flow::InterProceduralContext;
+use crate::infrastructure::data_flow::{InterProceduralContext, TaintQueryEngine};
+use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 use crate::infrastructure::rules::{
     PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
 };
@@ -113,6 +114,8 @@ pub struct ScanProjectUseCase {
     data_flow_context: Arc<RwLock<InterProceduralContext>>,
     /// Call graph builder
     call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
+    /// Taint query engine for AST-aware taint detection (uses std::sync::RwLock internally)
+    taint_query_engine: Arc<StdRwLock<TaintQueryEngine>>,
     /// Analysis configuration
     config: AnalysisConfig,
 }
@@ -139,6 +142,7 @@ impl ScanProjectUseCase {
             ast_cache: None,
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
+            taint_query_engine: Arc::new(StdRwLock::new(TaintQueryEngine::new_owned())),
             config: analysis_config,
         }
     }
@@ -334,7 +338,7 @@ impl ScanProjectUseCase {
     }
 
     /// Execute data flow analysis on a file to detect taint vulnerabilities
-    #[allow(unused_variables)]
+    /// Uses tree-sitter queries for AST-aware source/sink/sanitizer detection
     async fn execute_data_flow_analysis(
         &self,
         file_path: &Path,
@@ -349,238 +353,228 @@ impl ScanProjectUseCase {
 
         debug!(file = %file_path.display(), "Running data flow analysis");
 
-        let mut ctx = self.data_flow_context.write().await;
-        let file_str = file_path.display().to_string();
-        ctx.enter_function(&file_str);
+        // Parse the file with tree-sitter (outside of any lock)
+        let query_engine = TreeSitterQueryEngine::new();
+        let (tree, _) = match query_engine.parse(content, language) {
+            Ok(t) => t,
+            Err(e) => {
+                warn!(
+                    file = %file_path.display(),
+                    error = %e,
+                    "Failed to parse file for data flow analysis"
+                );
+                return;
+            }
+        };
 
+        let source_bytes = content.as_bytes();
+        let file_str = file_path.display().to_string();
+
+        // Detect sources, sinks, and sanitizers using tree-sitter queries
+        // Acquire lock, do detection, release lock before any await
+        let (sources, sinks, sanitizers, sanitizer_confidence) = {
+            let mut taint_engine = match self.taint_query_engine.write() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!(error = %e, "Failed to acquire taint engine write lock");
+                    return;
+                }
+            };
+
+            let sources = taint_engine.detect_sources(&tree, source_bytes, language);
+            let sinks = taint_engine.detect_sinks(&tree, source_bytes, language);
+            let sanitizers = taint_engine.detect_sanitizers(&tree, source_bytes, language);
+
+            // Collect confidence values for sanitizers
+            let sanitizer_confidence: Vec<Option<f32>> = sanitizers
+                .iter()
+                .map(|s| taint_engine.get_sanitizer_confidence(s))
+                .collect();
+
+            (sources, sinks, sanitizers, sanitizer_confidence)
+        }; // Lock released here
+
+        debug!(
+            file = %file_str,
+            sources = sources.len(),
+            sinks = sinks.len(),
+            sanitizers = sanitizers.len(),
+            "Taint analysis results"
+        );
+
+        // Setup data flow context
+        let mut ctx = self.data_flow_context.write().await;
+        ctx.enter_function(&file_str);
         let analyzer = ctx.get_analyzer(&file_str);
 
-        // Simplified taint source detection for common patterns
-        // A full implementation would use tree-sitter to accurately identify:
-        // - User input sources (request.form, request.args, sys.argv, etc.)
-        // - Dangerous sinks (execute, system, eval, etc.)
-        // - Sanitizers (escape, encode, validate, etc.)
+        // Mark all detected sources as tainted
+        for source in &sources {
+            let var_name = source
+                .variable_name
+                .as_deref()
+                .unwrap_or(&source.matched_text);
 
-        for (line_num, line) in content.lines().enumerate() {
-            let line_num = line_num as u32 + 1;
-            let trimmed = line.trim();
+            analyzer.mark_tainted(
+                var_name,
+                &source.pattern_name,
+                &file_str,
+                source.line as u32 + 1, // Convert to 1-indexed
+                source.column as u32,
+            );
 
-            // Detect taint sources
-            if Self::is_taint_source(trimmed, language) {
-                if let Some(var_name) = Self::extract_assignment_target(trimmed) {
-                    let source_name = Self::get_source_name(trimmed, language);
-                    analyzer.mark_tainted(&var_name, &source_name, &file_str, line_num, 0);
-                    debug!(var = %var_name, source = %source_name, line = line_num, "Marked tainted");
-                }
+            debug!(
+                var = %var_name,
+                source = %source.pattern_name,
+                category = %source.category,
+                line = source.line + 1,
+                "Marked tainted from AST pattern"
+            );
+        }
+
+        // Apply sanitizers - either clear taint or reduce confidence
+        for (idx, sanitizer) in sanitizers.iter().enumerate() {
+            let var_name = sanitizer
+                .variable_name
+                .as_deref()
+                .unwrap_or(&sanitizer.matched_text);
+
+            if sanitizer.is_known {
+                // Known sanitizer - clear taint completely
+                analyzer.sanitize(
+                    var_name,
+                    &sanitizer.pattern_name,
+                    &file_str,
+                    sanitizer.line as u32 + 1,
+                    sanitizer.column as u32,
+                );
+                debug!(
+                    var = %var_name,
+                    sanitizer = %sanitizer.pattern_name,
+                    "Cleared taint (known sanitizer)"
+                );
+            } else {
+                // Generic validation - we still track but note the confidence reduction
+                let confidence = sanitizer_confidence
+                    .get(idx)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(1.0);
+                debug!(
+                    var = %var_name,
+                    sanitizer = %sanitizer.pattern_name,
+                    confidence = confidence,
+                    "Generic validation detected (confidence reduced)"
+                );
+                // Note: For full implementation, we'd store reduced confidence in TaintState
             }
+        }
 
-            // Check for dangerous sinks with tainted data
-            if Self::is_dangerous_sink(trimmed, language) {
-                // Get the argument to the sink
-                if let Some(arg) = Self::extract_sink_argument(trimmed) {
-                    if analyzer.is_tainted(&arg) {
-                        if let Some(data_flow_finding) =
-                            analyzer.check_sink(&arg, trimmed, &file_str, line_num, 0)
-                        {
-                            // Convert FlowStep to DataFlowNode
-                            let source_node = DataFlowNode {
+        // Check sinks for tainted data
+        for sink in &sinks {
+            // Try to find a tainted variable in the sink expression
+            let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
+
+            // Check if any of our tracked tainted variables appear in this sink
+            // This is a simplified check - a full implementation would do proper data flow
+            let potential_taints: Vec<&str> = sources
+                .iter()
+                .filter_map(|s| s.variable_name.as_deref())
+                .collect();
+
+            for tainted_var in potential_taints {
+                if sink.matched_text.contains(tainted_var) || sink_var == tainted_var {
+                    if let Some(data_flow_finding) = analyzer.check_sink(
+                        tainted_var,
+                        &sink.pattern_name,
+                        &file_str,
+                        sink.line as u32 + 1,
+                        sink.column as u32,
+                    ) {
+                        // Build the finding with data flow path
+                        let source_node = DataFlowNode {
+                            location: Location {
+                                file_path: data_flow_finding.source.file.clone(),
+                                line: data_flow_finding.source.line,
+                                column: Some(data_flow_finding.source.column),
+                                end_line: Some(data_flow_finding.source.line),
+                                end_column: None,
+                            },
+                            description: data_flow_finding
+                                .source
+                                .note
+                                .unwrap_or_else(|| "Taint source".to_string()),
+                            expression: data_flow_finding.source.expression.clone(),
+                        };
+
+                        let sink_node = DataFlowNode {
+                            location: Location {
+                                file_path: data_flow_finding.sink.file.clone(),
+                                line: data_flow_finding.sink.line,
+                                column: Some(data_flow_finding.sink.column),
+                                end_line: Some(data_flow_finding.sink.line),
+                                end_column: None,
+                            },
+                            description: data_flow_finding
+                                .sink
+                                .note
+                                .unwrap_or_else(|| "Taint sink".to_string()),
+                            expression: data_flow_finding.sink.expression.clone(),
+                        };
+
+                        let steps: Vec<DataFlowNode> = data_flow_finding
+                            .intermediate_steps
+                            .iter()
+                            .map(|step| DataFlowNode {
                                 location: Location {
-                                    file_path: data_flow_finding.source.file.clone(),
-                                    line: data_flow_finding.source.line,
-                                    column: Some(data_flow_finding.source.column),
-                                    end_line: Some(data_flow_finding.source.line),
+                                    file_path: step.file.clone(),
+                                    line: step.line,
+                                    column: Some(step.column),
+                                    end_line: Some(step.line),
                                     end_column: None,
                                 },
-                                description: data_flow_finding
-                                    .source
+                                description: step
                                     .note
-                                    .unwrap_or_else(|| "Taint source".to_string()),
-                                expression: data_flow_finding.source.expression.clone(),
-                            };
+                                    .clone()
+                                    .unwrap_or_else(|| "Propagation".to_string()),
+                                expression: step.expression.clone(),
+                            })
+                            .collect();
 
-                            let sink_node = DataFlowNode {
-                                location: Location {
-                                    file_path: data_flow_finding.sink.file.clone(),
-                                    line: data_flow_finding.sink.line,
-                                    column: Some(data_flow_finding.sink.column),
-                                    end_line: Some(data_flow_finding.sink.line),
-                                    end_column: None,
-                                },
-                                description: data_flow_finding
-                                    .sink
-                                    .note
-                                    .unwrap_or_else(|| "Taint sink".to_string()),
-                                expression: data_flow_finding.sink.expression.clone(),
-                            };
-
-                            let steps: Vec<DataFlowNode> = data_flow_finding
-                                .intermediate_steps
-                                .iter()
-                                .map(|step| DataFlowNode {
-                                    location: Location {
-                                        file_path: step.file.clone(),
-                                        line: step.line,
-                                        column: Some(step.column),
-                                        end_line: Some(step.line),
-                                        end_column: None,
-                                    },
-                                    description: step
-                                        .note
-                                        .clone()
-                                        .unwrap_or_else(|| "Propagation".to_string()),
-                                    expression: step.expression.clone(),
-                                })
-                                .collect();
-
-                            // Convert to a regular Finding with data flow path
-                            let finding = SastFinding {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                rule_id: "data-flow-taint".to_string(),
-                                location: Location {
-                                    file_path: file_str.clone(),
-                                    line: line_num,
-                                    column: Some(0),
-                                    end_line: Some(line_num),
-                                    end_column: None,
-                                },
-                                severity: Severity::High,
-                                confidence: crate::domain::value_objects::Confidence::High,
-                                description: format!(
-                                    "Tainted data flows to dangerous sink: {}",
-                                    trimmed
-                                ),
-                                recommendation: Some(
-                                    "Sanitize or validate the data before passing to this function"
-                                        .to_string(),
-                                ),
-                                data_flow_path: Some(DataFlowPath {
-                                    source: source_node,
-                                    sink: sink_node,
-                                    steps,
-                                }),
-                                snippet: Some(trimmed.to_string()),
-                            };
-                            findings.push(finding);
-                        }
+                        let finding = SastFinding {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            rule_id: format!("data-flow-{}", sink.category),
+                            location: Location {
+                                file_path: file_str.clone(),
+                                line: sink.line as u32 + 1,
+                                column: Some(sink.column as u32),
+                                end_line: Some(sink.end_line as u32 + 1),
+                                end_column: Some(sink.end_column as u32),
+                            },
+                            severity: Severity::High,
+                            confidence: crate::domain::value_objects::Confidence::High,
+                            description: format!(
+                                "Tainted data from {} flows to {}: {}",
+                                data_flow_finding.source.expression,
+                                sink.category,
+                                sink.pattern_name
+                            ),
+                            recommendation: Some(format!(
+                                "Sanitize or validate the data before passing to {}. \
+                                 Consider using appropriate escaping for {} context.",
+                                sink.pattern_name, sink.category
+                            )),
+                            data_flow_path: Some(DataFlowPath {
+                                source: source_node,
+                                sink: sink_node,
+                                steps,
+                            }),
+                            snippet: Some(sink.matched_text.clone()),
+                        };
+                        findings.push(finding);
                     }
                 }
             }
         }
-    }
-
-    /// Check if a line contains a taint source
-    fn is_taint_source(line: &str, language: &Language) -> bool {
-        let sources = match language {
-            Language::Python => &[
-                "request.form",
-                "request.args",
-                "request.get",
-                "request.data",
-                "sys.argv",
-                "input(",
-                "os.environ",
-                "open(",
-            ][..],
-            Language::JavaScript | Language::TypeScript => &[
-                "req.body",
-                "req.query",
-                "req.params",
-                "document.location",
-                "window.location",
-                "process.env",
-                "fs.readFile",
-            ][..],
-            Language::Rust => &["std::env::args", "std::env::var", "stdin().read"][..],
-            Language::Go => &["os.Args", "os.Getenv", "http.Request"][..],
-            Language::C | Language::Cpp => &["getenv", "gets", "scanf", "fgets", "argv"][..],
-        };
-
-        sources.iter().any(|s| line.contains(s))
-    }
-
-    /// Check if a line contains a dangerous sink
-    fn is_dangerous_sink(line: &str, language: &Language) -> bool {
-        let sinks = match language {
-            Language::Python => &[
-                "execute(",
-                "executemany(",
-                "eval(",
-                "exec(",
-                "os.system(",
-                "subprocess.call(",
-                "subprocess.run(",
-                "subprocess.Popen(",
-            ][..],
-            Language::JavaScript | Language::TypeScript => &[
-                "eval(",
-                "innerHTML",
-                "document.write(",
-                "child_process.exec(",
-                "child_process.spawn(",
-                ".query(",
-            ][..],
-            Language::Rust => &["Command::new", "process::Command"][..],
-            Language::Go => &["exec.Command", "db.Exec", "db.Query"][..],
-            Language::C | Language::Cpp => &["system(", "exec", "popen(", "sprintf("][..],
-        };
-
-        sinks.iter().any(|s| line.contains(s))
-    }
-
-    /// Extract the variable name from an assignment
-    fn extract_assignment_target(line: &str) -> Option<String> {
-        // Simple pattern: var = ... or let var = ... or const var = ...
-        let line = line
-            .trim_start_matches("let ")
-            .trim_start_matches("const ")
-            .trim_start_matches("var ");
-
-        if let Some(eq_idx) = line.find('=') {
-            let target = line[..eq_idx].trim();
-            // Handle destructuring and type annotations
-            let target = target.split(':').next().unwrap_or(target).trim();
-            if !target.is_empty() && target.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                return Some(target.to_string());
-            }
-        }
-        None
-    }
-
-    /// Get the source name from a taint source line
-    fn get_source_name(line: &str, _language: &Language) -> String {
-        // Extract the source function/property
-        if line.contains("request") {
-            "user_request".to_string()
-        } else if line.contains("argv") || line.contains("args") {
-            "command_line_args".to_string()
-        } else if line.contains("env") {
-            "environment_variable".to_string()
-        } else if line.contains("input") {
-            "user_input".to_string()
-        } else if line.contains("open") || line.contains("readFile") {
-            "file_input".to_string()
-        } else {
-            "external_input".to_string()
-        }
-    }
-
-    /// Extract the argument passed to a sink function
-    fn extract_sink_argument(line: &str) -> Option<String> {
-        // Find the opening parenthesis and extract the first argument
-        if let Some(paren_idx) = line.find('(') {
-            let args_start = paren_idx + 1;
-            let rest = &line[args_start..];
-            // Find the end of the first argument (comma or closing paren)
-            let end_idx = rest
-                .find(',')
-                .or_else(|| rest.find(')'))
-                .unwrap_or(rest.len());
-            let arg = rest[..end_idx].trim();
-            if !arg.is_empty() {
-                return Some(arg.to_string());
-            }
-        }
-        None
     }
 
     /// Adjust severity for findings confirmed by data flow analysis
