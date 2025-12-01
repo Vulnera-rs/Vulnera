@@ -430,7 +430,7 @@ vulnera auth status   # Check authentication
 
 **NO.** Vulnera doesn't supports self-hosted deployment with plan to support in future.
 
-Contact [Vulnera](mailto:sales@vulnera.studio) for enterprise licenses.
+Contact Vulnera for enterprise licenses.
 
 ---
 
@@ -468,7 +468,7 @@ Set preferences in organization settings > Billing.
 - **Documentation:** [Full guide](../README.md)
 - **Community:** [GitHub Discussions](https://github.com/vulnera-dev/vulnera/discussions)
 - **Support:** Vulnera
-- **Enterprise SLA:** Contact <sales@vulnera.studio>
+- **Enterprise SLA:** Contact Us
 
 **For bugs:** [GitHub Issues](https://github.com/vulnera-dev/vulnera/issues)
 
