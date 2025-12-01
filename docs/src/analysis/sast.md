@@ -385,5 +385,4 @@ A: Use `exclude_patterns` in config or `.vulnera.toml`.
 
 - [Configure analysis rules](../user-guide/configuration.md)
 - [Get AI-powered explanations for findings](../user-guide/llm-features.md)
-- [Integrate into CI/CD](../integration/cicd.md)
 - [View all analysis capabilities](overview.md)

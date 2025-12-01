@@ -325,4 +325,3 @@ CMD ["vulnera"]
 - [Analysis Capabilities](../analysis/overview.md) — What each module does
 - [API Specification](api-spec.md) — Endpoint reference
 - [Configuration Guide](../user-guide/configuration.md) — Tuning parameters
-- [Deployment Guide](../integration/cicd.md) — Containers and cloud

@@ -385,8 +385,6 @@ vulnera analyze-cloud \
 
 1. **Setup organization for team coordination** → [DevSecOps Quick Start](devsecops-quickstart.md)
 2. **Understand quota for large-scale scans** → [Quota & Pricing](../../user-guide/quota-pricing.md)
-3. **Integrate with monitoring systems** → [Integration Guide](../../integration/api-integration.md)
-4. **Create automated workflows** → [CI/CD Integration](../../integration/cicd.md)
 
 ---
 

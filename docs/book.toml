@@ -34,7 +34,6 @@ level = 1
 [output.html.search]
 enable = true
 limit-results = 20
-use-hierarchical-structure = true
 teaser-word-count = 30
 copy-js = true
 

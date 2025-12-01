@@ -45,7 +45,6 @@ Choose your path:
 | **Individual Developer**          | [Developer Quick Start](getting-started/personas/developer-quickstart.md)           |
 | **Security Team Lead**            | [DevSecOps Quick Start](getting-started/personas/devsecops-quickstart.md)           |
 | **Cloud/Infrastructure Engineer** | [Cloud Engineer Quick Start](getting-started/personas/cloud-engineer-quickstart.md) |
-| **IDE/Tool Developer**            | [Integrator Quick Start](getting-started/personas/integrator-quickstart.md)         |
 
 ## Why Choose Vulnera?
 
@@ -80,15 +79,6 @@ Choose your path:
 ### For Integrators
 
 - **[API Reference](user-guide/api-reference.md)** — Complete endpoint documentation
-- **[CI/CD Integration](integration/cicd.md)** — GitHub, GitLab, Azure Pipelines examples
-- **[IDE Extensions](integration/extensions.md)** — Build integrations for VS Code, JetBrains, etc.
-
-### For Team Leads
-
-- **[Team Management](team/organizations.md)** — Multi-team setup and member management
-- **[Analytics & Reporting](team/analytics.md)** — Usage trends and quota tracking
-
----
 
 ## Get Started Now
 
