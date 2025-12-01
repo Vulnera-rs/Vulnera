@@ -38,12 +38,12 @@ vulnera organizations add-member \
 
 ### Roles
 
-| Role | Capabilities |
-|------|-------------|
-| **Owner** | Create/delete org, manage members, billing, analytics |
-| **Admin** | Run scans, manage members, view analytics |
-| **Analyst** | Run scans, view results, comment on findings |
-| **Viewer** | View-only access to results and analytics |
+| Role        | Capabilities                                          |
+| ----------- | ----------------------------------------------------- |
+| **Owner**   | Create/delete org, manage members, billing, analytics |
+| **Admin**   | Run scans, manage members, view analytics             |
+| **Analyst** | Run scans, view results, comment on findings          |
+| **Viewer**  | View-only access to results and analytics             |
 
 ## Step 3: Setup Continuous Scanning
 
@@ -67,7 +67,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM
+    - cron: "0 2 * * *" # Daily at 2 AM
 
 jobs:
   vulnera:
@@ -246,7 +246,7 @@ Typical usage:
   Monday (high activity):    45 tokens
   Tuesday (low activity):     8 tokens
   Wednesday-Friday (average): 20 tokens each
-  
+
 Weekly pattern: Usually peaks Monday, dips on weekends
 Recommendation: Schedule large scans Monday morning
 ```
@@ -337,9 +337,7 @@ vulnera organizations alerts create \
 ## Next Steps
 
 1. **Understand quota costs** → [Quota & Pricing](../../user-guide/quota-pricing.md)
-2. **Setup CI/CD pipelines** → [CI/CD Integration](../../integration/cicd.md)
-3. **Create custom analysis policies** → [Policy Configuration](../../user-guide/configuration.md)
-4. **Review team analytics** → [Analytics Dashboard](../team/analytics.md)
+2. **Create custom analysis policies** → [Policy Configuration](../../user-guide/configuration.md)
 
 ---
 

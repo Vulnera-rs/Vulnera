@@ -363,5 +363,4 @@ A: Add to `exclude_patterns` in config. Examples: `test-*`, `vendor/*`
 
 - [Configure secret detection thresholds](../user-guide/configuration.md)
 - [Get AI-powered explanations for secrets found](../user-guide/llm-features.md)
-- [Integrate into CI/CD](../integration/cicd.md)
 - [View all analysis capabilities](overview.md)

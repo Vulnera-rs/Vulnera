@@ -34,7 +34,7 @@ Each operation consumes tokens from your daily quota:
 **Yes.** Options:
 
 1. **Organization tier** — Upgrade to shared team quota (100 tokens/day)
-2. **Premium plan** — Contact <vulnera> for higher limits
+2. **Premium plan** — Contact vulnera for higher limits
 3. **On-premise** — Deploy Vulnera privately with unlimited quota
 
 ### What happens when I exceed my quota?
@@ -430,7 +430,7 @@ vulnera auth status   # Check authentication
 
 **NO.** Vulnera doesn't supports self-hosted deployment with plan to support in future.
 
-Contact <vulnera> for enterprise licenses.
+Contact [Vulnera](mailto:sales@vulnera.studio) for enterprise licenses.
 
 ---
 
