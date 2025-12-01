@@ -543,6 +543,10 @@ pub async fn create_app(
         api_key_generator.clone(),
     ));
 
+    // Initialize organization member repository early (needed for auth extractors)
+    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
+        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
+
     // Create auth state for extractors
     let auth_state = vulnera_orchestrator::presentation::auth::extractors::AuthState {
         validate_token: validate_token_use_case.clone(),
@@ -550,6 +554,7 @@ pub async fn create_app(
         user_repository: user_repository.clone(),
         api_key_repository: api_key_repository.clone(),
         api_key_generator: api_key_generator.clone(),
+        organization_member_repository: Some(organization_member_repository.clone()),
     };
 
     // Initialize LLM provider and use cases
@@ -574,8 +579,6 @@ pub async fn create_app(
     // Initialize organization repositories
     let organization_repository: Arc<dyn IOrganizationRepository> =
         Arc::new(SqlxOrganizationRepository::new(db_pool.clone()));
-    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
-        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
     let subscription_limits_repository: Arc<dyn ISubscriptionLimitsRepository> =
         Arc::new(SqlxSubscriptionLimitsRepository::new(db_pool.clone()));
     let persisted_job_repository: Arc<dyn IPersistedJobResultRepository> =
