@@ -1,31 +1,35 @@
 //! SAST use cases
 //!
-//! Production-ready SAST analysis pipeline with:
-//! - Tree-sitter as primary analysis engine (S-expression pattern queries)
-//! - Semgrep OSS for taint analysis (subprocess execution)
+//! Native SAST analysis pipeline with:
+//! - Tree-sitter as the primary analysis engine (S-expression pattern queries)
+//! - Inter-procedural data flow analysis (taint tracking)
+//! - Call graph analysis for cross-function vulnerability detection
 //! - PostgreSQL rule storage with hot-reload
 //! - SARIF v2.1.0 export
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock};
+use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 
-use vulnera_core::config::SastConfig;
+use vulnera_core::config::{AnalysisDepth, SastConfig};
 
 use crate::domain::entities::{
-    FileSuppressions, Finding as SastFinding, Rule, RulePattern, SemgrepRule,
+    DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
+    Location, Pattern, Rule, Severity,
 };
 use crate::domain::value_objects::{AnalysisEngine, Language};
-use crate::infrastructure::analysis_selector::AnalysisSelector;
 use crate::infrastructure::ast_cache::AstCacheService;
+use crate::infrastructure::call_graph::CallGraphBuilder;
+use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch, TaintQueryEngine};
+use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 use crate::infrastructure::rules::{
     PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
 };
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::semgrep::{SemgrepConfig, SemgrepExecutor};
-use std::time::Duration;
+use crate::infrastructure::taint_queries::get_propagation_queries;
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -61,32 +65,42 @@ impl ScanResult {
 /// Configuration for the analysis pipeline
 #[derive(Debug, Clone)]
 pub struct AnalysisConfig {
-    /// Use tree-sitter as primary engine (recommended)
-    pub use_tree_sitter: bool,
-    /// Use Semgrep for taint analysis
-    pub use_semgrep: bool,
-    /// Path to Semgrep binary (defaults to "semgrep" in PATH)
-    pub semgrep_path: Option<String>,
-    /// Semgrep execution timeout in seconds
-    pub semgrep_timeout_secs: u64,
     /// Enable AST caching via Dragonfly
     pub enable_ast_cache: bool,
     /// AST cache TTL in hours
     pub ast_cache_ttl_hours: u64,
     /// Maximum concurrent file analysis
     pub max_concurrent_files: usize,
+    /// Enable inter-procedural data flow analysis
+    pub enable_data_flow: bool,
+    /// Enable call graph analysis
+    pub enable_call_graph: bool,
+    /// Analysis depth: Quick, Standard, or Deep
+    pub analysis_depth: AnalysisDepth,
 }
 
 impl Default for AnalysisConfig {
     fn default() -> Self {
         Self {
-            use_tree_sitter: true,
-            use_semgrep: true,
-            semgrep_path: None,
-            semgrep_timeout_secs: 60,
             enable_ast_cache: true,
             ast_cache_ttl_hours: 1,
             max_concurrent_files: 4,
+            enable_data_flow: true,
+            enable_call_graph: true,
+            analysis_depth: AnalysisDepth::Standard,
+        }
+    }
+}
+
+impl From<&SastConfig> for AnalysisConfig {
+    fn from(config: &SastConfig) -> Self {
+        Self {
+            enable_ast_cache: config.enable_ast_cache.unwrap_or(true),
+            ast_cache_ttl_hours: config.ast_cache_ttl_hours.unwrap_or(4),
+            max_concurrent_files: config.max_concurrent_files.unwrap_or(4),
+            enable_data_flow: config.enable_data_flow,
+            enable_call_graph: config.enable_call_graph,
+            analysis_depth: config.analysis_depth,
         }
     }
 }
@@ -96,13 +110,15 @@ pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
     rule_repository: Arc<RwLock<RuleRepository>>,
     rule_engine: RuleEngine,
-    analysis_selector: AnalysisSelector,
-    semgrep_executor: Option<SemgrepExecutor>,
-    semgrep_rules: Vec<SemgrepRule>,
     /// AST cache for parsed file caching (Dragonfly-backed)
-    #[allow(dead_code)]
     ast_cache: Option<Arc<dyn AstCacheService>>,
-    #[allow(dead_code)]
+    /// Inter-procedural data flow context
+    data_flow_context: Arc<RwLock<InterProceduralContext>>,
+    /// Call graph builder
+    call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
+    /// Taint query engine for AST-aware taint detection (uses std::sync::RwLock internally)
+    taint_query_engine: Arc<StdRwLock<TaintQueryEngine>>,
+    /// Analysis configuration
     config: AnalysisConfig,
 }
 
@@ -121,42 +137,24 @@ impl ScanProjectUseCase {
             RuleRepository::new()
         };
 
-        let semgrep_executor = if analysis_config.use_semgrep {
-            let mut semgrep_config = SemgrepConfig::default();
-            // Use semgrep_path from AnalysisConfig if provided, otherwise use default ("semgrep" in PATH)
-            if let Some(ref path) = analysis_config.semgrep_path {
-                semgrep_config.executable = path.clone();
-            }
-            // Use timeout from AnalysisConfig if provided
-            semgrep_config.timeout = Duration::from_secs(analysis_config.semgrep_timeout_secs);
-            Some(SemgrepExecutor::with_config(semgrep_config))
-        } else {
-            None
-        };
-
         Self {
             scanner,
             rule_repository: Arc::new(RwLock::new(rule_repository)),
             rule_engine: RuleEngine::new(),
-            analysis_selector: AnalysisSelector::new(),
-            semgrep_executor,
-            semgrep_rules: Vec::new(),
             ast_cache: None,
+            data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
+            call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
+            taint_query_engine: Arc::new(StdRwLock::new(TaintQueryEngine::new_owned())),
             config: analysis_config,
         }
     }
 
     pub async fn with_database_rules(
-        mut self,
+        self,
         db_repository: &PostgresRuleRepository,
     ) -> Result<Self, ScanError> {
         let tree_sitter_rules = db_repository
             .get_tree_sitter_rules()
-            .await
-            .map_err(|e| ScanError::DatabaseError(e.to_string()))?;
-
-        let semgrep_rules = db_repository
-            .get_semgrep_rules()
             .await
             .map_err(|e| ScanError::DatabaseError(e.to_string()))?;
 
@@ -165,13 +163,7 @@ impl ScanProjectUseCase {
             repo.extend_with_rules(tree_sitter_rules);
         }
 
-        self.semgrep_rules = semgrep_rules;
         Ok(self)
-    }
-
-    pub fn with_semgrep_rules(mut self, rules: Vec<SemgrepRule>) -> Self {
-        self.semgrep_rules.extend(rules);
-        self
     }
 
     /// Add AST cache service for parsed file caching
@@ -185,7 +177,7 @@ impl ScanProjectUseCase {
 
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
-        info!("Starting production SAST scan");
+        info!("Starting native SAST scan");
 
         let files = self.scanner.scan(root).map_err(|e| {
             error!(error = %e, "Failed to scan directory");
@@ -193,15 +185,26 @@ impl ScanProjectUseCase {
         })?;
 
         let file_count = files.len();
-        info!(file_count, "Found files to scan");
+        info!(file_count, analysis_depth = ?self.config.analysis_depth, "Found files to scan");
 
         let mut all_findings = Vec::new();
         let mut files_scanned = 0;
-        let mut primary_engine = AnalysisEngine::TreeSitter;
 
         let rules = self.rule_repository.read().await;
         let all_rules = rules.get_all_rules();
 
+        // Phase 1: Build call graph (if enabled and not Quick mode)
+        if self.config.enable_call_graph && self.config.analysis_depth != AnalysisDepth::Quick {
+            debug!("Building call graph for inter-procedural analysis");
+            let mut call_graph = self.call_graph_builder.write().await;
+            for file in &files {
+                if let Ok(content) = std::fs::read_to_string(&file.path) {
+                    call_graph.analyze_file(&file.path.display().to_string(), &content);
+                }
+            }
+        }
+
+        // Phase 2: Analyze each file
         for file in files {
             debug!(file = %file.path.display(), language = ?file.language, "Scanning file");
 
@@ -218,86 +221,56 @@ impl ScanProjectUseCase {
 
             files_scanned += 1;
 
-            let selection = self.analysis_selector.select_for_file(
+            // Get rules applicable to this language
+            let applicable_rules: Vec<&Rule> = all_rules
+                .iter()
+                .filter(|r| r.languages.contains(&file.language))
+                .collect();
+
+            if applicable_rules.is_empty() {
+                continue;
+            }
+
+            // Execute tree-sitter pattern analysis
+            self.execute_tree_sitter_analysis(
                 &file.path,
                 &file.language,
-                all_rules,
-                &self.semgrep_rules,
-            );
+                &content,
+                &applicable_rules,
+                &suppressions,
+                is_test_context,
+                &mut all_findings,
+            )
+            .await?;
 
-            debug!(
-                engine = ?selection.engine,
-                ts_rules = selection.tree_sitter_rules.len(),
-                sg_rules = selection.semgrep_rules.len(),
-                "Engine selection for file"
-            );
-
-            primary_engine = selection.engine.clone();
-
-            match &selection.engine {
-                AnalysisEngine::TreeSitter => {
-                    self.execute_tree_sitter_analysis(
-                        &file.path,
-                        &file.language,
-                        &content,
-                        &selection.tree_sitter_rules,
-                        &suppressions,
-                        is_test_context,
-                        &mut all_findings,
-                    )
-                    .await?;
-                }
-                AnalysisEngine::Semgrep => {
-                    if let Some(ref executor) = self.semgrep_executor {
-                        self.execute_semgrep_analysis(
-                            executor,
-                            &file.path,
-                            &selection.semgrep_rules,
-                            &suppressions,
-                            &mut all_findings,
-                        )
-                        .await?;
-                    }
-                }
-                AnalysisEngine::Hybrid => {
-                    self.execute_tree_sitter_analysis(
-                        &file.path,
-                        &file.language,
-                        &content,
-                        &selection.tree_sitter_rules,
-                        &suppressions,
-                        is_test_context,
-                        &mut all_findings,
-                    )
-                    .await?;
-
-                    if let Some(ref executor) = self.semgrep_executor {
-                        self.execute_semgrep_analysis(
-                            executor,
-                            &file.path,
-                            &selection.semgrep_rules,
-                            &suppressions,
-                            &mut all_findings,
-                        )
-                        .await?;
-                    }
-                }
+            // Phase 3: Data flow analysis
+            if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
+                self.execute_data_flow_analysis(
+                    &file.path,
+                    &file.language,
+                    &content,
+                    &mut all_findings,
+                )
+                .await;
             }
+        }
+
+        // Phase 4: Adjust severity for data-flow confirmed findings
+        if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
+            Self::adjust_severity_for_data_flow(&mut all_findings);
         }
 
         all_findings = Self::deduplicate_findings(all_findings);
 
         info!(
             finding_count = all_findings.len(),
-            files_scanned,
-            engine = ?primary_engine,
-            "SAST scan completed"
+            files_scanned, "SAST scan completed"
         );
 
         Ok(ScanResult {
             findings: all_findings,
             files_scanned,
-            analysis_engine: primary_engine,
+            analysis_engine: AnalysisEngine::TreeSitter,
         })
     }
 
@@ -306,14 +279,16 @@ impl ScanProjectUseCase {
         file_path: &Path,
         language: &Language,
         content: &str,
-        rules: &[Rule],
+        rules: &[&Rule],
         suppressions: &FileSuppressions,
         is_test_context: bool,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
+        // Filter to tree-sitter query rules
         let ts_rules: Vec<&Rule> = rules
             .iter()
-            .filter(|r| matches!(&r.pattern, RulePattern::TreeSitterQuery(_)))
+            .filter(|r| matches!(&r.pattern, Pattern::TreeSitterQuery(_)))
+            .copied()
             .collect();
 
         if ts_rules.is_empty() {
@@ -364,48 +339,393 @@ impl ScanProjectUseCase {
         Ok(())
     }
 
-    async fn execute_semgrep_analysis(
+    /// Execute data flow analysis on a file to detect taint vulnerabilities
+    /// Uses tree-sitter queries for AST-aware source/sink/sanitizer detection
+    async fn execute_data_flow_analysis(
         &self,
-        executor: &SemgrepExecutor,
         file_path: &Path,
-        rules: &[SemgrepRule],
-        suppressions: &FileSuppressions,
+        language: &Language,
+        content: &str,
         findings: &mut Vec<SastFinding>,
-    ) -> Result<(), ScanError> {
-        if rules.is_empty() {
-            return Ok(());
+    ) {
+        // Skip if data flow is disabled
+        if !self.config.enable_data_flow {
+            return;
         }
 
-        debug!(
-            rule_count = rules.len(),
-            file = %file_path.display(),
-            "Executing Semgrep rules"
-        );
+        debug!(file = %file_path.display(), "Running data flow analysis");
 
-        match executor.execute(rules, file_path).await {
-            Ok(semgrep_findings) => {
-                for finding in semgrep_findings {
-                    if suppressions.is_suppressed(finding.location.line, &finding.rule_id) {
-                        debug!(
-                            rule_id = %finding.rule_id,
-                            line = finding.location.line,
-                            "Semgrep finding suppressed by comment"
-                        );
-                        continue;
-                    }
-                    findings.push(finding);
-                }
-            }
+        // Parse the file with tree-sitter (outside of any lock)
+        let query_engine = TreeSitterQueryEngine::new();
+        let (tree, _) = match query_engine.parse(content, language) {
+            Ok(t) => t,
             Err(e) => {
                 warn!(
                     file = %file_path.display(),
                     error = %e,
-                    "Semgrep execution failed"
+                    "Failed to parse file for data flow analysis"
                 );
+                return;
+            }
+        };
+
+        let source_bytes = content.as_bytes();
+        let file_str = file_path.display().to_string();
+
+        // Detect sources, sinks, and sanitizers using tree-sitter queries
+        // Acquire lock, do detection, release lock before any await
+        let (sources, sinks, sanitizers, sanitizer_confidence, assignments) = {
+            let mut taint_engine = match self.taint_query_engine.write() {
+                Ok(guard) => guard,
+                Err(e) => {
+                    error!(error = %e, "Failed to acquire taint engine write lock");
+                    return;
+                }
+            };
+
+            let sources = taint_engine.detect_sources(&tree, source_bytes, language);
+            let sinks = taint_engine.detect_sinks(&tree, source_bytes, language);
+            let sanitizers = taint_engine.detect_sanitizers(&tree, source_bytes, language);
+            let assignments = Self::extract_assignments(&tree, source_bytes, language);
+
+            // Collect confidence values for sanitizers
+            let sanitizer_confidence: Vec<Option<f32>> = sanitizers
+                .iter()
+                .map(|s| taint_engine.get_sanitizer_confidence(s))
+                .collect();
+
+            (
+                sources,
+                sinks,
+                sanitizers,
+                sanitizer_confidence,
+                assignments,
+            )
+        }; // Lock released here
+
+        debug!(
+            file = %file_str,
+            sources = sources.len(),
+            sinks = sinks.len(),
+            sanitizers = sanitizers.len(),
+            "Taint analysis results"
+        );
+
+        // Setup data flow context
+        let mut ctx = self.data_flow_context.write().await;
+        ctx.enter_function(&file_str);
+        let analyzer = ctx.get_analyzer(&file_str);
+
+        // Mark all detected sources as tainted
+        for source in &sources {
+            let var_name = source
+                .variable_name
+                .as_deref()
+                .unwrap_or(&source.matched_text);
+
+            analyzer.mark_tainted(
+                var_name,
+                &source.pattern_name,
+                &file_str,
+                source.line as u32 + 1, // Convert to 1-indexed
+                source.column as u32,
+            );
+
+            debug!(
+                var = %var_name,
+                source = %source.pattern_name,
+                category = %source.category,
+                line = source.line + 1,
+                "Marked tainted from AST pattern"
+            );
+        }
+
+        // Propagate taint through assignments
+        let mut changed = true;
+        let max_iterations = 10; // Prevent infinite loops
+        let mut iteration = 0;
+
+        // Create a set of sanitized variables to block propagation
+        let sanitized_vars: std::collections::HashSet<&str> = sanitizers
+            .iter()
+            .filter_map(|s| s.variable_name.as_deref().or(Some(&s.matched_text)))
+            .collect();
+
+        println!(
+            "DEBUG: Sanitized variables blocking propagation: {:?}",
+            sanitized_vars
+        );
+
+        while changed && iteration < max_iterations {
+            changed = false;
+            iteration += 1;
+
+            for (target, source_expr, line, column) in &assignments {
+                // Skip if target is already tainted
+                if analyzer.is_tainted(target) {
+                    continue;
+                }
+
+                // Skip if target is a sanitized variable (prevent re-tainting)
+                if sanitized_vars.contains(target.as_str()) {
+                    println!(
+                        "DEBUG: Skipping propagation to sanitized variable: {}",
+                        target
+                    );
+                    continue;
+                }
+
+                // Check if the source expression contains any tainted source
+                // This handles both direct source references and method chain results
+                for source in &sources {
+                    // Check both variable_name and matched_text
+                    let source_var = source
+                        .variable_name
+                        .as_deref()
+                        .unwrap_or(&source.matched_text);
+
+                    // The source expression should contain some part of the tainted source
+                    // This handles cases like:
+                    // - Direct: targetURL := r.URL.Query().Get("url")
+                    // - Indirect: targetURL := someVar (where someVar was tainted)
+                    let source_in_expr = source_expr.contains(source_var)
+                        || source_expr.contains(&source.matched_text);
+
+                    if source_in_expr {
+                        analyzer.mark_tainted(
+                            target,
+                            &format!("propagated from {}", source_var),
+                            &file_str,
+                            *line as u32 + 1,
+                            *column as u32,
+                        );
+                        changed = true;
+                        break;
+                    }
+                }
+
+                // Also check if the source_expr contains any already-tainted variable
+                // This handles transitive propagation
+                if !changed {
+                    // Check each previously tainted variable (from sources and propagation)
+                    for prev_source in &sources {
+                        let prev_var = prev_source
+                            .variable_name
+                            .as_deref()
+                            .unwrap_or(&prev_source.matched_text);
+                        if source_expr.contains(prev_var) && analyzer.is_tainted(prev_var) {
+                            analyzer.mark_tainted(
+                                target,
+                                &format!("propagated from {}", prev_var),
+                                &file_str,
+                                *line as u32 + 1,
+                                *column as u32,
+                            );
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
             }
         }
 
-        Ok(())
+        // Apply sanitizers - either clear taint or reduce confidence
+        for (idx, sanitizer) in sanitizers.iter().enumerate() {
+            let var_name = sanitizer
+                .variable_name
+                .as_deref()
+                .unwrap_or(&sanitizer.matched_text);
+
+            if sanitizer.is_known {
+                // Known sanitizer - clear taint completely
+                analyzer.sanitize(
+                    var_name,
+                    &sanitizer.pattern_name,
+                    &file_str,
+                    sanitizer.line as u32 + 1,
+                    sanitizer.column as u32,
+                );
+                debug!(
+                    var = %var_name,
+                    sanitizer = %sanitizer.pattern_name,
+                    "Cleared taint (known sanitizer)"
+                );
+            } else {
+                // Generic validation - we still track but note the confidence reduction
+                let confidence = sanitizer_confidence
+                    .get(idx)
+                    .copied()
+                    .flatten()
+                    .unwrap_or(1.0);
+                debug!(
+                    var = %var_name,
+                    sanitizer = %sanitizer.pattern_name,
+                    confidence = confidence,
+                    "Generic validation detected (confidence reduced)"
+                );
+                // Note: For full implementation, we'd store reduced confidence in TaintState
+            }
+        }
+
+        // Check sinks for tainted data
+        for sink in &sinks {
+            // Try to find a tainted variable in the sink expression
+            let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
+
+            // Strategy 1: Check if the sink variable itself is tainted (Direct Propagation)
+            // This handles cases like: x = source; y = x; sink(y)
+            if analyzer.is_tainted(sink_var) {
+                if let Some(data_flow_finding) = analyzer.check_sink(
+                    sink_var,
+                    &sink.pattern_name,
+                    &file_str,
+                    sink.line as u32 + 1,
+                    sink.column as u32,
+                ) {
+                    Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                    continue; // Found a match, move to next sink
+                }
+            }
+
+            // Strategy 2: Check if any active tainted variable is part of the sink expression
+            // This handles cases like: sink("prefix" + source)
+            // CRITICAL: Only consider variables that are STILL tainted (not sanitized)
+            let active_taints: Vec<&str> = sources
+                .iter()
+                .filter_map(|s| s.variable_name.as_deref())
+                .filter(|var| analyzer.is_tainted(var))
+                .collect();
+
+            for tainted_var in active_taints {
+                // Skip if we already checked this var as sink_var
+                if tainted_var == sink_var {
+                    continue;
+                }
+
+                // Use regex to check for whole word match to avoid false positives with short var names
+                // e.g. "r" matching in "u.String()"
+                let pattern = format!(r"\b{}\b", regex::escape(tainted_var));
+                let re = regex::Regex::new(&pattern)
+                    .unwrap_or_else(|_| regex::Regex::new(tainted_var).unwrap());
+
+                if re.is_match(&sink.matched_text) {
+                    if let Some(data_flow_finding) = analyzer.check_sink(
+                        tainted_var,
+                        &sink.pattern_name,
+                        &file_str,
+                        sink.line as u32 + 1,
+                        sink.column as u32,
+                    ) {
+                        Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                        // Don't break here, there might be multiple taints in one sink
+                    }
+                }
+            }
+        }
+    }
+
+    fn add_finding(
+        findings: &mut Vec<SastFinding>,
+        data_flow_finding: &DataFlowFinding,
+        sink: &TaintMatch,
+        file_str: &str,
+    ) {
+        // Build the finding with data flow path
+        let source_node = DataFlowNode {
+            location: Location {
+                file_path: data_flow_finding.source.file.clone(),
+                line: data_flow_finding.source.line,
+                column: Some(data_flow_finding.source.column),
+                end_line: Some(data_flow_finding.source.line),
+                end_column: None,
+            },
+            description: data_flow_finding
+                .source
+                .note
+                .clone()
+                .unwrap_or_else(|| "Taint source".to_string()),
+            expression: data_flow_finding.source.expression.clone(),
+        };
+
+        let sink_node = DataFlowNode {
+            location: Location {
+                file_path: data_flow_finding.sink.file.clone(),
+                line: data_flow_finding.sink.line,
+                column: Some(data_flow_finding.sink.column),
+                end_line: Some(data_flow_finding.sink.line),
+                end_column: None,
+            },
+            description: data_flow_finding
+                .sink
+                .note
+                .clone()
+                .unwrap_or_else(|| "Taint sink".to_string()),
+            expression: data_flow_finding.sink.expression.clone(),
+        };
+
+        let steps: Vec<DataFlowNode> = data_flow_finding
+            .intermediate_steps
+            .iter()
+            .map(|step| DataFlowNode {
+                location: Location {
+                    file_path: step.file.clone(),
+                    line: step.line,
+                    column: Some(step.column),
+                    end_line: Some(step.line),
+                    end_column: None,
+                },
+                description: step
+                    .note
+                    .clone()
+                    .unwrap_or_else(|| "Propagation".to_string()),
+                expression: step.expression.clone(),
+            })
+            .collect();
+
+        let finding = SastFinding {
+            id: uuid::Uuid::new_v4().to_string(),
+            rule_id: format!("data-flow-{}", sink.category),
+            location: Location {
+                file_path: file_str.to_string(),
+                line: sink.line as u32 + 1,
+                column: Some(sink.column as u32),
+                end_line: Some(sink.end_line as u32 + 1),
+                end_column: Some(sink.end_column as u32),
+            },
+            severity: Severity::High,
+            confidence: crate::domain::value_objects::Confidence::High,
+            description: format!(
+                "Tainted data from {} flows to {}: {}",
+                data_flow_finding.source.expression, sink.category, sink.pattern_name
+            ),
+            recommendation: Some(format!(
+                "Sanitize or validate the data before passing to {}. \
+                 Consider using appropriate escaping for {} context.",
+                sink.pattern_name, sink.category
+            )),
+            data_flow_path: Some(DataFlowPath {
+                source: source_node,
+                sink: sink_node,
+                steps,
+            }),
+            snippet: Some(sink.matched_text.clone()),
+        };
+        findings.push(finding);
+    }
+
+    /// Adjust severity for findings confirmed by data flow analysis
+    fn adjust_severity_for_data_flow(findings: &mut Vec<SastFinding>) {
+        for finding in findings.iter_mut() {
+            if finding.data_flow_path.is_some() {
+                // Escalate severity when data flow confirms the vulnerability
+                match finding.severity {
+                    Severity::Low => finding.severity = Severity::Medium,
+                    Severity::Medium => finding.severity = Severity::High,
+                    Severity::High => finding.severity = Severity::Critical,
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn deduplicate_findings(findings: Vec<SastFinding>) -> Vec<SastFinding> {
@@ -418,6 +738,81 @@ impl ScanProjectUseCase {
                 seen.insert(key)
             })
             .collect()
+    }
+
+    /// Extract assignment statements from AST for taint propagation
+    /// Returns tuples of (target_variable, source_expression, line, column)
+    fn extract_assignments(
+        tree: &tree_sitter::Tree,
+        source_code: &[u8],
+        language: &Language,
+    ) -> Vec<(String, String, usize, usize)> {
+        let mut assignments = Vec::new();
+        let queries = get_propagation_queries(language);
+
+        // Get tree-sitter language
+        let ts_language = match language {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript | Language::TypeScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        };
+
+        for query_str in queries {
+            let query = match tree_sitter::Query::new(&ts_language, query_str) {
+                Ok(q) => q,
+                Err(e) => {
+                    debug!(
+                        language = %language,
+                        error = %e,
+                        "Failed to compile propagation query"
+                    );
+                    continue;
+                }
+            };
+
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), source_code);
+
+            while let Some(m) = {
+                matches.advance();
+                matches.get()
+            } {
+                let mut target: Option<String> = None;
+                let mut source: Option<String> = None;
+                let mut line = 0;
+                let mut column = 0;
+
+                for capture in m.captures {
+                    let capture_name = query.capture_names()[capture.index as usize];
+                    let text = capture
+                        .node
+                        .utf8_text(source_code)
+                        .unwrap_or_default()
+                        .to_string();
+
+                    match capture_name {
+                        "target" => {
+                            target = Some(text);
+                            line = capture.node.start_position().row;
+                            column = capture.node.start_position().column;
+                        }
+                        "source" => {
+                            source = Some(text);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let (Some(t), Some(s)) = (target, source) {
+                    assignments.push((t, s, line, column));
+                }
+            }
+        }
+
+        assignments
     }
 
     fn is_test_file(path: &Path, content: &str) -> bool {
@@ -459,9 +854,6 @@ pub enum ScanError {
 
     #[error("Database error: {0}")]
     DatabaseError(String),
-
-    #[error("Semgrep error: {0}")]
-    SemgrepError(String),
 
     #[error("Query engine error: {0}")]
     QueryEngineError(String),

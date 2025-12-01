@@ -110,6 +110,68 @@ impl Parser for JavaScriptParser {
     }
 }
 
+/// TypeScript parser using tree-sitter-typescript
+pub struct TypeScriptParser {
+    parser: tree_sitter::Parser,
+    is_tsx: bool,
+}
+
+impl TypeScriptParser {
+    pub fn new() -> Result<Self, ParseError> {
+        let mut parser = tree_sitter::Parser::new();
+        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        parser.set_language(&language).map_err(|e| {
+            error!(error = %e, "Failed to load TypeScript grammar");
+            ParseError::ParseFailed(format!("Failed to load TypeScript grammar: {}", e))
+        })?;
+
+        debug!("TypeScript parser initialized");
+        Ok(Self {
+            parser,
+            is_tsx: false,
+        })
+    }
+
+    /// Create a TSX parser for React components
+    pub fn new_tsx() -> Result<Self, ParseError> {
+        let mut parser = tree_sitter::Parser::new();
+        let language = tree_sitter_typescript::LANGUAGE_TSX.into();
+        parser.set_language(&language).map_err(|e| {
+            error!(error = %e, "Failed to load TSX grammar");
+            ParseError::ParseFailed(format!("Failed to load TSX grammar: {}", e))
+        })?;
+
+        debug!("TSX parser initialized");
+        Ok(Self {
+            parser,
+            is_tsx: true,
+        })
+    }
+}
+
+impl Parser for TypeScriptParser {
+    fn language(&self) -> Language {
+        Language::TypeScript
+    }
+
+    #[instrument(skip(self, source), fields(source_len = source.len()))]
+    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
+        let tree = self.parser.parse(source, None).ok_or_else(|| {
+            let lang = if self.is_tsx { "TSX" } else { "TypeScript" };
+            warn!("Failed to parse {} code", lang);
+            ParseError::ParseFailed(format!("Failed to parse {} code", lang))
+        })?;
+
+        let root_node = tree.root_node();
+        let lang = if self.is_tsx { "TSX" } else { "TypeScript" };
+        debug!(
+            node_count = root_node.child_count(),
+            "{} AST parsed successfully", lang
+        );
+        Ok(convert_tree_sitter_node(root_node, source))
+    }
+}
+
 /// Rust parser using tree-sitter-rust (consistent with other language parsers)
 pub struct RustParser {
     parser: tree_sitter::Parser,
@@ -164,11 +226,17 @@ impl ParserFactory {
         match language {
             Language::Python => Ok(Box::new(PythonParser::new()?)),
             Language::JavaScript => Ok(Box::new(JavaScriptParser::new()?)),
+            Language::TypeScript => Ok(Box::new(TypeScriptParser::new()?)),
             Language::Rust => Ok(Box::new(RustParser::new()?)),
             Language::Go => Ok(Box::new(GoParser::new()?)),
             Language::C => Ok(Box::new(CParser::new()?)),
             Language::Cpp => Ok(Box::new(CppParser::new()?)),
         }
+    }
+
+    /// Create a TSX parser specifically for React/JSX files
+    pub fn create_tsx_parser(&self) -> Result<Box<dyn Parser>, ParseError> {
+        Ok(Box::new(TypeScriptParser::new_tsx()?))
     }
 }
 

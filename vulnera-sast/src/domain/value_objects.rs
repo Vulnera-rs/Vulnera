@@ -8,6 +8,7 @@ use std::fmt;
 pub enum Language {
     Python,
     JavaScript,
+    TypeScript,
     Rust,
     Go,
     C,
@@ -19,6 +20,7 @@ impl fmt::Display for Language {
         match self {
             Language::Python => write!(f, "python"),
             Language::JavaScript => write!(f, "javascript"),
+            Language::TypeScript => write!(f, "typescript"),
             Language::Rust => write!(f, "rust"),
             Language::Go => write!(f, "go"),
             Language::C => write!(f, "c"),
@@ -31,11 +33,12 @@ impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
             "py" => Some(Language::Python),
-            "js" | "jsx" | "ts" | "tsx" => Some(Language::JavaScript),
+            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
+            "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
             "c" | "h" => Some(Language::C),
-            "cpp" | "hpp" | "cc" | "cxx" => Some(Language::Cpp),
+            "cpp" | "hpp" | "cc" | "cxx" | "hxx" => Some(Language::Cpp),
             _ => None,
         }
     }
@@ -47,11 +50,12 @@ impl Language {
             .and_then(Self::from_extension)
     }
 
-    /// Convert to Semgrep language identifier
-    pub fn to_semgrep_id(&self) -> &'static str {
+    /// Convert to tree-sitter language name
+    pub fn to_tree_sitter_name(&self) -> &'static str {
         match self {
             Language::Python => "python",
             Language::JavaScript => "javascript",
+            Language::TypeScript => "typescript",
             Language::Rust => "rust",
             Language::Go => "go",
             Language::C => "c",
@@ -59,16 +63,9 @@ impl Language {
         }
     }
 
-    /// Convert to tree-sitter language name
-    pub fn to_tree_sitter_name(&self) -> &'static str {
-        match self {
-            Language::Python => "python",
-            Language::JavaScript => "javascript",
-            Language::Rust => "rust",
-            Language::Go => "go",
-            Language::C => "c",
-            Language::Cpp => "cpp",
-        }
+    /// Whether this language uses JSX/TSX syntax
+    pub fn supports_jsx(&self) -> bool {
+        matches!(self, Language::JavaScript | Language::TypeScript)
     }
 }
 
@@ -80,21 +77,12 @@ pub enum Confidence {
     Low,
 }
 
-/// Analysis engine selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Analysis engine selection - tree-sitter is the only engine
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AnalysisEngine {
-    /// Tree-sitter native query engine (fast pattern matching)
+    /// Tree-sitter native query engine with data flow analysis
+    #[default]
     TreeSitter,
-    /// Semgrep OSS engine (taint tracking, complex patterns)
-    Semgrep,
-    /// Hybrid: use tree-sitter first, Semgrep for taint rules
-    Hybrid,
-}
-
-impl Default for AnalysisEngine {
-    fn default() -> Self {
-        Self::Hybrid
-    }
 }
 
 /// Rule source indicating where rules are loaded from

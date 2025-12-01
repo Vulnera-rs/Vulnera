@@ -162,12 +162,6 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Create NVD data directory (for SQLite database)
 RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
-# Set explicit semgrep path for Rust subprocess calls (can be overridden via VULNERA__SAST__SEMGREP_PATH env var)
-ENV VULNERA__SAST__SEMGREP_PATH="/usr/local/bin/semgrep"
-
-# Configure semgrep cache directory (prevents permission errors when semgrep creates ~/.semgrep)
-ENV SEMGREP_USER_CONFIG_DIR="/app/home/.semgrep"
-
 # Ensure PATH includes /usr/local/bin for any other subprocess calls
 ENV PATH="/usr/local/bin:/usr/bin:/bin"
 

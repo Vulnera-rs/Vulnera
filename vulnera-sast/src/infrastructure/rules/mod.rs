@@ -10,7 +10,7 @@ pub use repository::{
     PostgresRuleRepository, RuleHotReloader, RuleRepositoryError, SastRuleRepository,
 };
 
-use crate::domain::entities::{Rule, RulePattern};
+use crate::domain::entities::{Pattern, Rule};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine::{
     QueryEngineError, QueryMatchResult, TreeSitterQueryEngine,
@@ -47,7 +47,8 @@ impl RuleEngine {
         source_code: &str,
     ) -> Result<Vec<QueryMatchResult>, TreeSitterQueryError> {
         let query_str = match &rule.pattern {
-            RulePattern::TreeSitterQuery(query) => query.as_str(),
+            Pattern::TreeSitterQuery(query) => query.as_str(),
+            _ => return Ok(Vec::new()), // Only tree-sitter queries supported
         };
 
         let mut engine = self.query_engine.write().await;
@@ -71,9 +72,9 @@ impl RuleEngine {
         // Collect queries for batch execution
         let queries: Vec<(String, &str)> = rules
             .iter()
-            .map(|rule| {
-                let RulePattern::TreeSitterQuery(query) = &rule.pattern;
-                (rule.id.clone(), query.as_str())
+            .filter_map(|rule| match &rule.pattern {
+                Pattern::TreeSitterQuery(query) => Some((rule.id.clone(), query.as_str())),
+                _ => None,
             })
             .collect();
 
