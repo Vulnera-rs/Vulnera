@@ -13,8 +13,8 @@ build-dir = "book"
 create-missing = false
 
 [output.html]
-default-theme = "rust"
-preferred-dark-theme = "ayu"
+default-theme = "navy"
+preferred-dark-theme = "navy"
 smart-punctuation = true
 git-repository-url = "https://github.com/k5602/Vulnera"
 edit-url-template = "https://github.com/k5602/Vulnera/edit/main/docs/{path}"
