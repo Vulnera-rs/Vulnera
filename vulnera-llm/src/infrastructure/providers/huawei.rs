@@ -72,7 +72,7 @@ impl LlmProvider for HuaweiLlmProvider {
         let url = &self.config.huawei_api_url;
 
         // Ensure stream is true
-        request.stream = Some(true);
+        request.stream = Some(false);
 
         debug!("Sending streaming LLM request to {}", url);
 
