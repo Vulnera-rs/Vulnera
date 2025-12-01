@@ -10,6 +10,7 @@ use std::sync::Arc;
 use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
+use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
 use vulnera_core::domain::organization::value_objects::OrganizationId;
 
 use crate::presentation::middleware::application_error_to_response;
@@ -59,6 +60,8 @@ pub struct AuthState {
     pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
     pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
     pub api_key_generator: Arc<vulnera_core::infrastructure::auth::ApiKeyGenerator>,
+    /// Optional organization member repository used to resolve org membership
+    pub organization_member_repository: Option<Arc<dyn IOrganizationMemberRepository>>,
 }
 
 /// Helper function to extract a cookie value from request parts
@@ -236,6 +239,22 @@ where
         if let Some(token) = extract_cookie_from_parts(parts, "access_token") {
             match auth_state.validate_token.execute(&token) {
                 Ok((user_id, email, roles)) => {
+                    // Try to resolve organization membership if repository available
+                    let mut organization_id: Option<OrganizationId> = None;
+                    if let Some(ref org_repo) = auth_state.organization_member_repository {
+                        match org_repo.find_organizations_by_user(&user_id).await {
+                            Ok(mut orgs) => {
+                                if !orgs.is_empty() {
+                                    // Pick the first org membership (primary org)
+                                    organization_id = Some(orgs.remove(0));
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(user_id = %user_id.as_str(), error = %e, "Failed to resolve organization membership");
+                            }
+                        }
+                    }
+
                     return Ok(Auth {
                         user_id,
                         email,
@@ -243,7 +262,7 @@ where
                         auth_method: AuthMethod::Cookie,
                         api_key_id: None,
                         is_master_key: false,
-                        organization_id: None, // TODO: Query org membership or include in JWT claims
+                        organization_id,
                     });
                 }
                 Err(_) => {
@@ -301,6 +320,21 @@ where
                             ),
                         })?;
 
+                    // Try to resolve organization membership (prefer orgs owned by user or membership)
+                    let mut organization_id: Option<OrganizationId> = None;
+                    if let Some(ref org_repo) = auth_state.organization_member_repository {
+                        match org_repo.find_organizations_by_user(&user_id).await {
+                            Ok(mut orgs) => {
+                                if !orgs.is_empty() {
+                                    organization_id = Some(orgs.remove(0));
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(user_id = %user_id.as_str(), error = %e, "Failed to resolve organization membership for api key user")
+                            }
+                        }
+                    }
+
                     return Ok(Auth {
                         user_id,
                         email: user.email,
@@ -308,7 +342,7 @@ where
                         auth_method: AuthMethod::ApiKey,
                         api_key_id: Some(validation.api_key_id),
                         is_master_key: false,
-                        organization_id: None, // TODO: Query org membership from api_key or user
+                        organization_id,
                     });
                 }
                 Err(e) => {

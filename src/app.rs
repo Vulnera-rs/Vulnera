@@ -402,14 +402,14 @@ pub async fn create_app(
         let rule_repository = PostgresRuleRepository::new((*db_pool).clone());
 
         // Build the use case with database rules and cache
+        // Native SAST engine with data flow and call graph analysis
         let analysis_config = AnalysisConfig {
-            use_tree_sitter: true,
-            use_semgrep: config.sast.enable_semgrep.unwrap_or(true),
-            semgrep_path: config.sast.semgrep_path.clone(),
-            semgrep_timeout_secs: config.sast.semgrep_timeout_secs.unwrap_or(60),
+            enable_data_flow: config.sast.enable_data_flow,
+            enable_call_graph: config.sast.enable_call_graph,
             enable_ast_cache: config.sast.enable_ast_cache.unwrap_or(true),
             ast_cache_ttl_hours: config.sast.ast_cache_ttl_hours.unwrap_or(4),
             max_concurrent_files: config.sast.max_concurrent_files.unwrap_or(4),
+            analysis_depth: config.sast.analysis_depth,
         };
 
         let use_case = ScanProjectUseCase::with_config(&config.sast, analysis_config);
@@ -543,6 +543,10 @@ pub async fn create_app(
         api_key_generator.clone(),
     ));
 
+    // Initialize organization member repository early (needed for auth extractors)
+    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
+        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
+
     // Create auth state for extractors
     let auth_state = vulnera_orchestrator::presentation::auth::extractors::AuthState {
         validate_token: validate_token_use_case.clone(),
@@ -550,6 +554,7 @@ pub async fn create_app(
         user_repository: user_repository.clone(),
         api_key_repository: api_key_repository.clone(),
         api_key_generator: api_key_generator.clone(),
+        organization_member_repository: Some(organization_member_repository.clone()),
     };
 
     // Initialize LLM provider and use cases
@@ -574,8 +579,6 @@ pub async fn create_app(
     // Initialize organization repositories
     let organization_repository: Arc<dyn IOrganizationRepository> =
         Arc::new(SqlxOrganizationRepository::new(db_pool.clone()));
-    let organization_member_repository: Arc<dyn IOrganizationMemberRepository> =
-        Arc::new(SqlxOrganizationMemberRepository::new(db_pool.clone()));
     let subscription_limits_repository: Arc<dyn ISubscriptionLimitsRepository> =
         Arc::new(SqlxSubscriptionLimitsRepository::new(db_pool.clone()));
     let persisted_job_repository: Arc<dyn IPersistedJobResultRepository> =

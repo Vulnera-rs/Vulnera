@@ -8,7 +8,7 @@
 //! - Multi-language support via grammar selection
 //! - Efficient batch query execution
 
-use crate::domain::entities::{Finding, Location, Rule, RulePattern, Severity};
+use crate::domain::entities::{Finding, Location, Pattern, Rule, Severity};
 use crate::domain::value_objects::{Confidence, Language};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,11 +86,17 @@ impl TreeSitterQueryEngine {
         match language {
             Language::Python => Ok(tree_sitter_python::LANGUAGE.into()),
             Language::JavaScript => Ok(tree_sitter_javascript::LANGUAGE.into()),
+            Language::TypeScript => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
             Language::Rust => Ok(tree_sitter_rust::LANGUAGE.into()),
             Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
             Language::C => Ok(tree_sitter_c::LANGUAGE.into()),
             Language::Cpp => Ok(tree_sitter_cpp::LANGUAGE.into()),
         }
+    }
+
+    /// Get the TSX language for React files
+    pub fn get_tsx_language() -> TsLanguage {
+        tree_sitter_typescript::LANGUAGE_TSX.into()
     }
 
     /// Parse source code and return the tree
@@ -255,6 +261,10 @@ impl TreeSitterQueryEngine {
     }
 
     /// Execute multiple queries in batch (more efficient for multiple rules)
+    ///
+    /// This method is resilient to individual query failures - if a query fails to compile
+    /// for the given language (e.g., using Python syntax for Rust), it will be skipped
+    /// and other queries will still be executed.
     #[instrument(skip(self, source, queries), fields(source_len = source.len(), query_count = queries.len()))]
     pub fn batch_query(
         &mut self,
@@ -266,9 +276,23 @@ impl TreeSitterQueryEngine {
         let mut results = HashMap::new();
 
         for (rule_id, query_str) in queries {
-            let query = self.compile_query(query_str, language)?;
-            let matches = self.execute_query(&query, &tree, source.as_bytes());
-            results.insert(rule_id.clone(), matches);
+            // Skip queries that fail to compile for this language
+            // This allows language-specific queries to coexist without breaking the batch
+            match self.compile_query(query_str, language) {
+                Ok(query) => {
+                    let matches = self.execute_query(&query, &tree, source.as_bytes());
+                    results.insert(rule_id.clone(), matches);
+                }
+                Err(e) => {
+                    // Log but don't fail - the query might be for a different language
+                    warn!(
+                        rule_id = %rule_id,
+                        language = ?language,
+                        error = %e,
+                        "Query failed to compile for language, skipping"
+                    );
+                }
+            }
         }
 
         Ok(results)
@@ -337,6 +361,8 @@ impl TreeSitterQueryEngine {
                 "Review the code at line {} and consider the security implications.",
                 line
             )),
+            data_flow_path: None,
+            snippet: Some(snippet),
         }
     }
 
@@ -391,6 +417,98 @@ impl TreeSitterQueryEngine {
         desc
     }
 
+    /// Match a pattern (including composite patterns) against source code
+    pub fn match_pattern(
+        &mut self,
+        pattern: &Pattern,
+        source: &str,
+        language: &Language,
+        tree: &Tree,
+    ) -> Result<Vec<QueryMatchResult>, QueryEngineError> {
+        match pattern {
+            Pattern::TreeSitterQuery(query_str) => {
+                let query = self.compile_query(query_str, language)?;
+                Ok(self.execute_query(&query, tree, source.as_bytes()))
+            }
+            Pattern::Metavariable(_) => {
+                // Metavariable patterns are handled by tree-sitter captures
+                // This is a placeholder - full implementation would parse the metavariable
+                // syntax and convert to tree-sitter queries
+                Ok(Vec::new())
+            }
+            Pattern::AnyOf(patterns) => {
+                // Union: collect all matches from all sub-patterns
+                let mut all_matches = Vec::new();
+                for sub_pattern in patterns {
+                    let matches = self.match_pattern(sub_pattern, source, language, tree)?;
+                    all_matches.extend(matches);
+                }
+                // Deduplicate by location
+                all_matches.sort_by_key(|m| (m.start_position, m.end_position));
+                all_matches.dedup_by(|a, b| {
+                    a.start_position == b.start_position && a.end_position == b.end_position
+                });
+                Ok(all_matches)
+            }
+            Pattern::AllOf(patterns) => {
+                // Intersection: only matches that appear in ALL sub-patterns
+                if patterns.is_empty() {
+                    return Ok(Vec::new());
+                }
+
+                // Get matches from first pattern
+                let first_matches = self.match_pattern(&patterns[0], source, language, tree)?;
+
+                if first_matches.is_empty() || patterns.len() == 1 {
+                    return Ok(first_matches);
+                }
+
+                // Filter to only matches that also appear in all other patterns
+                let mut result = first_matches;
+                for sub_pattern in patterns.iter().skip(1) {
+                    let other_matches = self.match_pattern(sub_pattern, source, language, tree)?;
+
+                    // Keep only matches that overlap with other_matches
+                    result.retain(|m| {
+                        other_matches.iter().any(|o| {
+                            // Check for overlapping ranges
+                            m.start_byte < o.end_byte && o.start_byte < m.end_byte
+                        })
+                    });
+
+                    if result.is_empty() {
+                        break;
+                    }
+                }
+
+                Ok(result)
+            }
+            Pattern::Not(inner_pattern) => {
+                // Not: used for filtering - this returns empty if pattern matches
+                // In practice, Not is used in AllOf to exclude matches
+                // e.g., AllOf([query, Not(false_positive_query)])
+                let inner_matches = self.match_pattern(inner_pattern, source, language, tree)?;
+
+                // For Not patterns, we return a single "match" at position 0 if the inner
+                // pattern has no matches (meaning the Not condition is satisfied)
+                if inner_matches.is_empty() {
+                    // Not pattern satisfied - return a synthetic match
+                    Ok(vec![QueryMatchResult {
+                        pattern_index: 0,
+                        captures: std::collections::HashMap::new(),
+                        start_byte: 0,
+                        end_byte: 0,
+                        start_position: (0, 0),
+                        end_position: (0, 0),
+                    }])
+                } else {
+                    // Not pattern failed - inner pattern matched
+                    Ok(Vec::new())
+                }
+            }
+        }
+    }
+
     /// Match rules against source code and return findings
     #[instrument(skip(self, source, rules), fields(source_len = source.len(), rule_count = rules.len()))]
     pub fn match_rules(
@@ -400,17 +518,13 @@ impl TreeSitterQueryEngine {
         file_path: &str,
         rules: &[Rule],
     ) -> Result<Vec<Finding>, QueryEngineError> {
-        // Filter rules for this language and extract tree-sitter queries
-        let ts_rules: Vec<(&Rule, &str)> = rules
+        // Filter rules for this language
+        let applicable_rules: Vec<&Rule> = rules
             .iter()
             .filter(|r| r.languages.contains(language))
-            .map(|r| {
-                let RulePattern::TreeSitterQuery(query) = &r.pattern;
-                (r, query.as_str())
-            })
             .collect();
 
-        if ts_rules.is_empty() {
+        if applicable_rules.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -419,11 +533,14 @@ impl TreeSitterQueryEngine {
 
         let mut findings = Vec::new();
 
-        for (rule, query_str) in ts_rules {
-            match self.compile_query(query_str, language) {
-                Ok(query) => {
-                    let matches = self.execute_query(&query, &tree, source.as_bytes());
+        for rule in applicable_rules {
+            match self.match_pattern(&rule.pattern, source, language, &tree) {
+                Ok(matches) => {
                     for m in matches {
+                        // Skip synthetic matches from Not patterns
+                        if m.start_byte == 0 && m.end_byte == 0 && m.captures.is_empty() {
+                            continue;
+                        }
                         findings.push(self.match_to_finding(&m, rule, file_path, source));
                     }
                 }
@@ -431,7 +548,7 @@ impl TreeSitterQueryEngine {
                     warn!(
                         rule_id = %rule.id,
                         error = %e,
-                        "Failed to compile query for rule"
+                        "Failed to match pattern for rule"
                     );
                 }
             }

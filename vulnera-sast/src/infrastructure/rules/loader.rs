@@ -1,8 +1,8 @@
 //! Rule loader for loading rules from configuration files
 
-use crate::domain::entities::{Rule, RulePattern};
+use crate::domain::entities::{Pattern, Rule};
 use std::path::Path;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 /// Trait for loading rules from various sources
 pub trait RuleLoader: Send + Sync {
@@ -89,13 +89,32 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
         return Err("Rule must specify at least one language".to_string());
     }
 
-    // Validate tree-sitter query pattern
-    let RulePattern::TreeSitterQuery(query) = &rule.pattern;
-    if query.is_empty() {
-        return Err("Tree-sitter query pattern cannot be empty".to_string());
+    // Validate pattern based on type
+    match &rule.pattern {
+        Pattern::TreeSitterQuery(query) => {
+            if query.is_empty() {
+                return Err("Tree-sitter query pattern cannot be empty".to_string());
+            }
+        }
+        Pattern::Metavariable(pattern) => {
+            if pattern.is_empty() {
+                return Err("Metavariable pattern cannot be empty".to_string());
+            }
+        }
+        Pattern::AnyOf(patterns) => {
+            if patterns.is_empty() {
+                return Err("AnyOf pattern must contain at least one sub-pattern".to_string());
+            }
+        }
+        Pattern::AllOf(patterns) => {
+            if patterns.is_empty() {
+                return Err("AllOf pattern must contain at least one sub-pattern".to_string());
+            }
+        }
+        Pattern::Not(_) => {
+            // Not pattern is always valid if it has a sub-pattern
+        }
     }
-    // Additional validation could be done here by attempting to compile the query
-    // For now, we trust the query syntax will be validated at execution time
 
     Ok(())
 }

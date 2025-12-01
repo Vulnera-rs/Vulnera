@@ -30,6 +30,7 @@ tracing = { workspace = true }
 tree-sitter = { workspace = true }
 tree-sitter-python = { workspace = true }
 tree-sitter-javascript = { workspace = true }
+tree-sitter-typescript = { workspace = true }
 tree-sitter-go = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
@@ -71,3 +72,5 @@ rstest = { workspace = true }
 tempfile = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
+serde_yml = { workspace = true }
+insta = { version = "1.42", features = ["yaml"] }
