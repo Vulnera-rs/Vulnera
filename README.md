@@ -89,7 +89,7 @@ flowchart TB
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
 | **Dependency Analysis** | npm, PyPI, Maven, Cargo, Go, Composer, Ruby, NuGet — CVE aggregation from OSV/NVD/GHSA/CISA /KEV |
 | **SAST**                | Python, JavaScript, Rust static analysis with AST parsing and custom rules                       |
-| **Secrets Detection**   | Regex + entropy-based detection for AWS, Azure, GCP, API keys, tokens                            |
+| **Secrets Detection**   | ML + entropy-based detection for AWS, Azure, GCP, API keys, tokens                            |
 | **API Security**        | OpenAPI 3.x analysis for auth, validation, and security misconfigurations                        |
 
 **Core Platform:**
@@ -156,7 +156,7 @@ Config files: `config/development.toml`, `config/production.toml`
 **No setup required:**
 
 ```bash
-# Option 1: Use web dashboard (SaaS)
+# Option 1: Use web dashboard 
 # 1. Visit https://vulnera.studio
 # 2. Sign up → Create organization
 # 3. Get API key from Settings → API Keys
