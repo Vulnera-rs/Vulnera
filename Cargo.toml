@@ -272,7 +272,7 @@ codegen-units = 1
 
 # Custom test configurations
 [package.metadata.test]
-timeout = "60s"
+timeout = "90s"
 threads = 4
 coverage = true
 junit = true

@@ -50,21 +50,24 @@ vulnera-rust (binary + CLI)
 ## Essential Developer Commands
 
 ```bash
-# Quick iteration (from repo root or scripts/build_workflow/)
-make quick-check             # fmt + clippy + fast unit tests
-make test-comprehensive      # full suite with coverage + property tests
+# Quick iteration (from repo root, make targets in scripts/build_workflow/Makefile)
+cd scripts/build_workflow && make help    # See all available targets
+make format                  # cargo fmt
+make lint                    # cargo clippy
+make check                   # cargo check
+make pre-commit              # format + lint + test (quick validation)
+make ci-check                # format-check + lint + test
 
 # Database (required for integration tests)
 export DATABASE_URL='postgresql://user:pass@localhost/vulnera'
-make migrate                 # Apply pending migrations
-make migrate-info            # Check migration status
+sqlx migrate run             # Apply pending migrations via sqlx-cli
 
 # Server with hot-reload
 cargo run                    # Load .env via dotenvy
 cargo watch -x run           # Auto-rebuild on file changes
 
 # Testing specifics
-cargo nextest run --workspace              # Run tests (respects nextest.toml retries: 3x, 300s timeout)
+cargo nextest run --workspace              # Run tests (respects nextest.toml: 3x retries, 300s timeout)
 cargo nextest run -p vulnera-deps          # Run single crate tests
 cargo insta review                         # Review snapshot test changes after API updates
 cargo test --test proptest_*               # Property-based tests (version/parser edge cases)
@@ -148,9 +151,9 @@ cargo test --features cli                  # Test CLI commands locally
 
 ### Module System
 
-- Each analysis module (Deps, SAST, Secrets, API, LLM) implements `AnalysisModule` trait defined in `vulnera-core::domain::module`
-- Module registration: `ModuleRegistry` in `vulnera-orchestrator/src/infrastructure/`
-- Module selection: `RuleBasedModuleSelector` auto-picks by `ModuleType` and source file detection (e.g., `requirements.txt` → PyPI module)
+- Each analysis module (Deps, SAST, Secrets, API, LLM) implements `AnalysisModule` trait defined in `vulnera-core/src/domain/module/traits.rs`
+- Module registration: `ModuleRegistry` in `vulnera-orchestrator/src/infrastructure/module_registry.rs`
+- Module selection: `RuleBasedModuleSelector` in `vulnera-orchestrator/src/infrastructure/module_selector.rs` auto-picks by `ModuleType` and source file detection (e.g., `requirements.txt` → PyPI module)
 
 ## Testing Patterns
 
