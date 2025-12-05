@@ -500,3 +500,94 @@ fn severity_meets_minimum_str(severity: &str, minimum: &str) -> bool {
 
     severity_order(severity) >= severity_order(minimum)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_severity() {
+        assert_eq!(parse_severity("critical"), FindingSeverity::Critical);
+        assert_eq!(parse_severity("high"), FindingSeverity::High);
+        assert_eq!(parse_severity("medium"), FindingSeverity::Medium);
+        assert_eq!(parse_severity("low"), FindingSeverity::Low);
+        assert_eq!(parse_severity("info"), FindingSeverity::Low); // Default fallback
+        assert_eq!(parse_severity("unknown"), FindingSeverity::Low); // Default fallback
+        assert_eq!(parse_severity("CRITICAL"), FindingSeverity::Critical); // Case insensitive
+    }
+
+    #[test]
+    fn test_severity_meets_minimum() {
+        // Critical meets everything
+        assert!(severity_meets_minimum(
+            &FindingSeverity::Critical,
+            &FindingSeverity::Critical
+        ));
+        assert!(severity_meets_minimum(
+            &FindingSeverity::Critical,
+            &FindingSeverity::High
+        ));
+        assert!(severity_meets_minimum(
+            &FindingSeverity::Critical,
+            &FindingSeverity::Low
+        ));
+
+        // High meets High and Low, but not Critical
+        assert!(!severity_meets_minimum(
+            &FindingSeverity::High,
+            &FindingSeverity::Critical
+        ));
+        assert!(severity_meets_minimum(
+            &FindingSeverity::High,
+            &FindingSeverity::High
+        ));
+        assert!(severity_meets_minimum(
+            &FindingSeverity::High,
+            &FindingSeverity::Low
+        ));
+
+        // Low meets Low, but not High or Critical
+        assert!(!severity_meets_minimum(
+            &FindingSeverity::Low,
+            &FindingSeverity::Critical
+        ));
+        assert!(!severity_meets_minimum(
+            &FindingSeverity::Low,
+            &FindingSeverity::High
+        ));
+        assert!(severity_meets_minimum(
+            &FindingSeverity::Low,
+            &FindingSeverity::Low
+        ));
+    }
+
+    #[test]
+    fn test_severity_meets_minimum_str() {
+        assert!(severity_meets_minimum_str("critical", "high"));
+        assert!(severity_meets_minimum_str("high", "high"));
+        assert!(!severity_meets_minimum_str("medium", "high"));
+        assert!(!severity_meets_minimum_str("low", "high"));
+    }
+
+    #[test]
+    fn test_vulnerability_display() {
+        let vuln = VulnerabilityInfo {
+            id: "TEST-001".to_string(),
+            severity: "high".to_string(),
+            package: "test-pkg".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Test description".to_string(),
+            module: "test".to_string(),
+            file: Some("test.rs".to_string()),
+            line: Some(10),
+            fix_available: true,
+            fixed_version: Some("1.0.1".to_string()),
+        };
+
+        assert_eq!(vuln.id(), "TEST-001");
+        assert_eq!(vuln.severity(), "high");
+        assert_eq!(vuln.package(), "test-pkg");
+        assert_eq!(vuln.version(), "1.0.0");
+        assert_eq!(vuln.description(), "Test description");
+    }
+}

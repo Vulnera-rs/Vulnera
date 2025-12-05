@@ -11,13 +11,11 @@ use vulnera_core::config::Config;
 
 use crate::Cli;
 use crate::api_client::VulneraClient;
+use crate::constants::DEFAULT_SERVER_URL;
 use crate::credentials::CredentialManager;
 use crate::executor::AnalysisExecutor;
 use crate::output::OutputWriter;
 use crate::quota_tracker::QuotaTracker;
-
-/// Default server URL for API calls
-pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.studio/";
 
 /// Lightweight context for CLI operations
 ///

@@ -82,6 +82,8 @@ tokio-test = "0.4.4"
 tempfile = "3.23.0"
 wiremock = "0.6.0"
 rstest = "0.26.1"
+assert_cmd = "2.0"
+predicates = "3.1"
 
 [features]
 default = []
