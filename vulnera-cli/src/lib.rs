@@ -14,6 +14,7 @@
 
 pub mod api_client;
 pub mod commands;
+pub mod constants;
 pub mod context;
 pub mod credentials;
 pub mod executor;

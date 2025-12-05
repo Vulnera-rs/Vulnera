@@ -11,8 +11,7 @@ use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Default server URL
-pub const DEFAULT_SERVER_URL: &str = "https://api.vulnera.studio/";
+use crate::constants::{DEFAULT_CONNECT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS, USER_AGENT};
 
 /// API client for Vulnera server
 #[derive(Clone)]
@@ -156,9 +155,9 @@ impl VulneraClient {
     /// Create a new API client
     pub fn new(host: String, port: u16, api_key: Option<String>) -> Result<Self> {
         let client = Client::builder()
-            .timeout(Duration::from_secs(600))
-            .connect_timeout(Duration::from_secs(10))
-            .user_agent(format!("vulnera-cli/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+            .user_agent(USER_AGENT)
             .build()
             .context("Failed to create HTTP client")?;
 
