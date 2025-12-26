@@ -22,33 +22,11 @@ impl PasswordHasher {
         Self { cost }
     }
 
-    /// Hash a password
-    pub fn hash(&self, password: &str) -> Result<PasswordHash, AuthError> {
-        hash(password, self.cost)
-            .map(PasswordHash::from)
-            .map_err(|e| {
-                tracing::error!("Failed to hash password: {}", e);
-                AuthError::InvalidPassword {
-                    reason: "Password hashing failed".to_string(),
-                }
-            })
-    }
-
-    /// Verify a password against a hash
-    pub fn verify(&self, password: &str, hash: &PasswordHash) -> Result<bool, AuthError> {
-        verify(password, hash.as_str()).map_err(|e| {
-            tracing::error!("Failed to verify password: {}", e);
-            AuthError::InvalidPassword {
-                reason: "Password verification failed".to_string(),
-            }
-        })
-    }
-
     /// Hash a password asynchronously (non-blocking)
     ///
     /// Uses `spawn_blocking` to offload CPU-intensive bcrypt hashing to the blocking thread pool,
     /// preventing tokio runtime starvation under concurrent load.
-    pub async fn hash_async(&self, password: String) -> Result<PasswordHash, AuthError> {
+    pub async fn hash(&self, password: String) -> Result<PasswordHash, AuthError> {
         let cost = self.cost;
         tokio::task::spawn_blocking(move || hash(password, cost))
             .await
@@ -71,11 +49,7 @@ impl PasswordHasher {
     ///
     /// Uses `spawn_blocking` to offload CPU-intensive bcrypt verification to the blocking thread pool,
     /// preventing tokio runtime starvation under concurrent load.
-    pub async fn verify_async(
-        &self,
-        password: String,
-        hash: PasswordHash,
-    ) -> Result<bool, AuthError> {
+    pub async fn verify(&self, password: String, hash: PasswordHash) -> Result<bool, AuthError> {
         tokio::task::spawn_blocking(move || verify(&password, hash.as_str()))
             .await
             .map_err(|e| {
@@ -103,29 +77,39 @@ impl Default for PasswordHasher {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_password_hashing_and_verification() {
+    #[tokio::test]
+    async fn test_password_hashing_and_verification() {
         let hasher = PasswordHasher::new();
         let password = "test_password_123";
 
-        let hash = hasher.hash(password).unwrap();
-        assert!(hasher.verify(password, &hash).unwrap());
-        assert!(!hasher.verify("wrong_password", &hash).unwrap());
+        let hash = hasher.hash(password.to_string()).await.unwrap();
+        assert!(
+            hasher
+                .verify(password.to_string(), hash.clone())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !hasher
+                .verify("wrong_password".to_string(), hash)
+                .await
+                .unwrap()
+        );
     }
 
-    #[test]
-    fn test_password_hash_uniqueness() {
+    #[tokio::test]
+    async fn test_password_hash_uniqueness() {
         let hasher = PasswordHasher::new();
         let password = "same_password";
 
-        let hash1 = hasher.hash(password).unwrap();
-        let hash2 = hasher.hash(password).unwrap();
+        let hash1 = hasher.hash(password.to_string()).await.unwrap();
+        let hash2 = hasher.hash(password.to_string()).await.unwrap();
 
         // Hashes should be different (bcrypt uses salt)
         assert_ne!(hash1.as_str(), hash2.as_str());
 
         // But both should verify correctly
-        assert!(hasher.verify(password, &hash1).unwrap());
-        assert!(hasher.verify(password, &hash2).unwrap());
+        assert!(hasher.verify(password.to_string(), hash1).await.unwrap());
+        assert!(hasher.verify(password.to_string(), hash2).await.unwrap());
     }
 }
