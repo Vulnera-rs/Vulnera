@@ -16,15 +16,15 @@
 //!
 //! - `domain/` — Core entities and traits for LLM operations
 //! - `application/` — Use cases orchestrating LLM workflows
-//! - `infrastructure/` — Provider implementations (Huawei, etc.)
+//! - `infrastructure/` — Provider implementations (Gemini, etc.)
 //!
 //! # Usage
 //!
 //! ```rust,ignore
-//! use vulnera_llm::{EnrichFindingsUseCase, LlmProvider, HuaweiLlmProvider};
+//! use vulnera_llm::{EnrichFindingsUseCase, LlmProvider, GeminiLlmProvider};
 //!
 //! // Create provider
-//! let provider = HuaweiLlmProvider::new(config);
+//! let provider = GeminiLlmProvider::new(config);
 //!
 //! // Create use case
 //! let use_case = EnrichFindingsUseCase::new(provider);
@@ -37,7 +37,7 @@
 //!
 //! Currently supported LLM providers:
 //!
-//! - **Huawei Cloud Pangu** — Via `HuaweiLlmProvider`
+//! - **Google Gemini** — Via `GeminiLlmProvider`
 //!
 //! Additional providers can be added by implementing the [`LlmProvider`] trait.
 
@@ -51,4 +51,4 @@ pub use application::use_cases::{
 };
 pub use domain::*;
 pub use infrastructure::prompts;
-pub use infrastructure::providers::{HuaweiLlmProvider, LlmProvider};
+pub use infrastructure::providers::{GeminiLlmProvider, LlmProvider};

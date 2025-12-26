@@ -3,7 +3,7 @@
 use crate::domain::value_objects::SecretRule;
 use crate::infrastructure::rules::default_rules::get_default_rules;
 use std::path::Path;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Repository for secret detection rules
 #[derive(Clone)]

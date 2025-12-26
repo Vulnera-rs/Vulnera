@@ -64,7 +64,7 @@ use vulnera_deps::{
     types::VersionResolutionService,
 };
 use vulnera_llm::{
-    EnrichFindingsUseCase, ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, HuaweiLlmProvider,
+    EnrichFindingsUseCase, ExplainVulnerabilityUseCase, GeminiLlmProvider, GenerateCodeFixUseCase,
     NaturalLanguageQueryUseCase,
 };
 
@@ -558,7 +558,7 @@ pub async fn create_app(
     };
 
     // Initialize LLM provider and use cases
-    let llm_provider = Arc::new(HuaweiLlmProvider::new(config.llm.clone()));
+    let llm_provider = Arc::new(GeminiLlmProvider::new(config.llm.clone()));
     let generate_code_fix_use_case = Arc::new(GenerateCodeFixUseCase::new(
         llm_provider.clone(),
         config.llm.clone(),

@@ -2,7 +2,7 @@
 # Multi-stage build for Vulnera Rust
 FROM rust:slim as builder
 
-# Install system dependencies including PostgreSQL for compile-time query verification
+# Install system dependencies including PostgreSQL 
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -114,17 +114,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # This ensures sqlx-cli binary compiled in builder stage is compatible
 FROM debian:sid-slim
 
-# Install runtime dependencies
-# Note: Semgrep requires CLI invocation (no native Rust implementation available)
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    curl \
-    libssl3 \
-    python3 \
-    python3-pip \
-    python3-venv \
-    pipx \
-    && rm -rf /var/lib/apt/lists/*
+
 
 # Install semgrep via pipx with proper permissions for all users
 ENV PIPX_HOME=/opt/pipx
@@ -141,9 +131,6 @@ RUN useradd -r -s /bin/false -m -d /app/home vulnera
 
 # Create app directory
 WORKDIR /app
-
-# Create semgrep cache directory with proper permissions
-RUN mkdir -p /app/home/.semgrep && chown -R vulnera:vulnera /app/home
 
 # Copy the binary and sqlx-cli from builder stage
 COPY --from=builder /app/bin/vulnera-rust /usr/local/bin/vulnera-rust

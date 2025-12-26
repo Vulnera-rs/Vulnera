@@ -66,7 +66,7 @@ impl TreeSitterJsonParser {
             // Add children to stack for processing
             let child_count = node.child_count();
             for i in 0..child_count {
-                if let Some(child) = node.child(i) {
+                if let Some(child) = node.child(i as u32) {
                     stack.push(child);
                 }
             }

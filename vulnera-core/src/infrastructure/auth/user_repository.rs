@@ -26,6 +26,7 @@ impl SqlxUserRepository {
 
 #[async_trait]
 impl IUserRepository for SqlxUserRepository {
+    #[tracing::instrument(skip(self), fields(email = %email.as_str()))]
     async fn find_by_email(&self, email: &Email) -> Result<Option<User>, AuthError> {
         let email_str = email.as_str();
 
@@ -97,6 +98,7 @@ impl IUserRepository for SqlxUserRepository {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(user_id = %user_id.as_str()))]
     async fn find_by_id(&self, user_id: &UserId) -> Result<Option<User>, AuthError> {
         let user_uuid = user_id.as_uuid();
 
@@ -157,6 +159,7 @@ impl IUserRepository for SqlxUserRepository {
         }
     }
 
+    #[tracing::instrument(skip(self, user), fields(user_id = %user.user_id.as_str(), email = %user.email.as_str()))]
     async fn create(&self, user: &User) -> Result<(), AuthError> {
         let user_uuid = user.user_id.as_uuid();
         let email_str = user.email.as_str();
@@ -207,6 +210,7 @@ impl IUserRepository for SqlxUserRepository {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, user), fields(user_id = %user.user_id.as_str()))]
     async fn update(&self, user: &User) -> Result<(), AuthError> {
         let user_uuid = user.user_id.as_uuid();
         let email_str = user.email.as_str();
@@ -260,6 +264,7 @@ impl IUserRepository for SqlxUserRepository {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(user_id = %user_id.as_str()))]
     async fn delete(&self, user_id: &UserId) -> Result<(), AuthError> {
         let user_uuid = user_id.as_uuid();
 

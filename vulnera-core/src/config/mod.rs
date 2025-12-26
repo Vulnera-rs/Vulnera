@@ -888,10 +888,10 @@ impl Default for DatabaseConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// Huawei ModelArts API URL
-    pub huawei_api_url: String,
-    /// Huawei ModelArts API Key
-    pub huawei_api_key: Option<String>,
+    /// Gemini API URL
+    pub gemini_api_url: String,
+    /// Gemini API Key
+    pub gemini_api_key: Option<String>,
     /// Default model to use (qwen3-32b or deepseek-v3.1)
     pub default_model: String,
     /// Model to use for explanations (overrides default)
@@ -916,9 +916,9 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            huawei_api_url: "https://api-ap-southeast-1.modelarts-maas.com/v1/chat/completions"
+            gemini_api_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
                 .to_string(),
-            huawei_api_key: None,
+            gemini_api_key: None,
             default_model: "deepseek-v3.1".to_string(),
             explanation_model: Some("deepseek-v3.1".to_string()),
             code_fix_model: Some("qwen3-32b".to_string()),
