@@ -61,7 +61,7 @@ impl LoginUseCase {
         // Verify password (async to avoid blocking the runtime)
         let is_valid = self
             .password_hasher
-            .verify_async(password, user.password_hash.clone())
+            .verify(password, user.password_hash.clone())
             .await
             .map_err(|_| AuthError::InvalidCredentials)?;
 
@@ -159,7 +159,7 @@ impl RegisterUserUseCase {
         };
 
         // Hash password (async to avoid blocking the runtime)
-        let password_hash = self.password_hasher.hash_async(password).await?;
+        let password_hash = self.password_hasher.hash(password).await?;
 
         // Create user entity
         let user = User::new(UserId::generate(), email.clone(), password_hash, user_roles);
