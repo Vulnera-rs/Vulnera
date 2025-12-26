@@ -9,12 +9,13 @@ use super::LlmProvider;
 use crate::domain::{LlmRequest, LlmResponse};
 use vulnera_core::config::LlmConfig;
 
-pub struct HuaweiLlmProvider {
+/// Google Gemini LLM Provider
+pub struct GeminiLlmProvider {
     client: Client,
     config: LlmConfig,
 }
 
-impl HuaweiLlmProvider {
+impl GeminiLlmProvider {
     pub fn new(config: LlmConfig) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
@@ -26,17 +27,17 @@ impl HuaweiLlmProvider {
 
     fn get_api_key(&self) -> Result<&str, anyhow::Error> {
         self.config
-            .huawei_api_key
+            .gemini_api_key
             .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("Huawei API key not configured"))
+            .ok_or_else(|| anyhow::anyhow!("Gemini API key not configured"))
     }
 }
 
 #[async_trait]
-impl LlmProvider for HuaweiLlmProvider {
+impl LlmProvider for GeminiLlmProvider {
     async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, anyhow::Error> {
         let api_key = self.get_api_key()?;
-        let url = &self.config.huawei_api_url;
+        let url = &self.config.gemini_api_url;
 
         // Ensure stream is false for non-streaming generation
         let mut request = request;
@@ -48,7 +49,7 @@ impl LlmProvider for HuaweiLlmProvider {
             .client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", api_key))
+            .header("x-goog-api-key", api_key)
             .json(&request)
             .send()
             .await?;
@@ -69,10 +70,10 @@ impl LlmProvider for HuaweiLlmProvider {
         mut request: LlmRequest,
     ) -> Result<mpsc::Receiver<Result<LlmResponse, anyhow::Error>>, anyhow::Error> {
         let api_key = self.get_api_key()?;
-        let url = &self.config.huawei_api_url;
+        let url = &self.config.gemini_api_url;
 
-        // Ensure stream is true
-        request.stream = Some(false);
+        // Ensure stream is true for streaming generation
+        request.stream = Some(true);
 
         debug!("Sending streaming LLM request to {}", url);
 
@@ -80,7 +81,7 @@ impl LlmProvider for HuaweiLlmProvider {
             .client
             .post(url)
             .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", api_key))
+            .header("x-goog-api-key", api_key)
             .json(&request)
             .send()
             .await?;

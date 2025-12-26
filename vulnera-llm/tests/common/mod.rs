@@ -121,16 +121,16 @@ pub fn create_streaming_response(content: &str) -> LlmResponse {
 /// Create default test LlmConfig
 pub fn create_test_config() -> vulnera_core::config::LlmConfig {
     vulnera_core::config::LlmConfig {
-        enabled: true,
+        gemini_api_url: "https://test.api.example.com".to_string(),
+        gemini_api_key: Some("test-api-key".to_string()),
         default_model: "test-model".to_string(),
-        code_fix_model: Some("code-fix-model".to_string()),
         explanation_model: Some("explanation-model".to_string()),
-        huawei_api_url: "https://test.api.example.com".to_string(),
-        huawei_api_key: Some("test-api-key".to_string()),
-        max_tokens: 1024,
+        code_fix_model: Some("code-fix-model".to_string()),
+        enrichment_model: None,
         temperature: 0.7,
+        max_tokens: 10240,
         timeout_seconds: 30,
-        rate_limit_requests_per_minute: 60,
-        rate_limit_tokens_per_minute: 100000,
+        enable_streaming: false,
+        enrichment: Default::default(),
     }
 }

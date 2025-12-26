@@ -1,1 +1,1 @@
-pub mod test_huawei_provider;
+pub mod test_gemini_provider;

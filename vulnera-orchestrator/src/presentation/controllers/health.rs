@@ -85,5 +85,24 @@ pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<Strin
     metrics.push_str("# TYPE vulnera_uptime_seconds counter\n");
     metrics.push_str(&format!("vulnera_uptime_seconds {}\n", uptime_seconds));
 
+    // Add database pool metrics
+    let pool_size = app_state.db_pool.size();
+    let pool_idle = app_state.db_pool.num_idle();
+
+    metrics.push_str("# HELP vulnera_db_pool_size Current number of connections in the pool\n");
+    metrics.push_str("# TYPE vulnera_db_pool_size gauge\n");
+    metrics.push_str(&format!("vulnera_db_pool_size {}\n", pool_size));
+
+    metrics.push_str("# HELP vulnera_db_pool_idle Number of idle connections in the pool\n");
+    metrics.push_str("# TYPE vulnera_db_pool_idle gauge\n");
+    metrics.push_str(&format!("vulnera_db_pool_idle {}\n", pool_idle));
+
+    metrics.push_str("# HELP vulnera_db_pool_active Number of active connections in the pool\n");
+    metrics.push_str("# TYPE vulnera_db_pool_active gauge\n");
+    metrics.push_str(&format!(
+        "vulnera_db_pool_active {}\n",
+        pool_size.saturating_sub(pool_idle as u32)
+    ));
+
     Ok(metrics)
 }

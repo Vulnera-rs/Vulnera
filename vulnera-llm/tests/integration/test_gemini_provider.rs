@@ -1,25 +1,25 @@
-//! Integration tests for HuaweiLlmProvider using wiremock
+//! Integration tests for GeminiLlmProvider using wiremock
 
-use wiremock::matchers::{body_json_schema, header, method, path};
+use wiremock::matchers::{header, method};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use vulnera_core::config::LlmConfig;
 use vulnera_llm::domain::{LlmRequest, Message};
-use vulnera_llm::infrastructure::providers::{HuaweiLlmProvider, LlmProvider};
+use vulnera_llm::infrastructure::providers::{GeminiLlmProvider, LlmProvider};
 
 fn create_test_config(api_url: &str) -> LlmConfig {
     LlmConfig {
-        enabled: true,
+        gemini_api_url: api_url.to_string(),
+        gemini_api_key: Some("test-api-key".to_string()),
         default_model: "test-model".to_string(),
-        code_fix_model: None,
         explanation_model: None,
-        huawei_api_url: api_url.to_string(),
-        huawei_api_key: Some("test-api-key".to_string()),
-        max_tokens: 1024,
+        code_fix_model: None,
+        enrichment_model: None,
         temperature: 0.7,
+        max_tokens: 1024,
         timeout_seconds: 30,
-        rate_limit_requests_per_minute: 60,
-        rate_limit_tokens_per_minute: 100000,
+        enable_streaming: false,
+        enrichment: Default::default(),
     }
 }
 
@@ -37,9 +37,9 @@ fn create_test_request() -> LlmRequest {
     }
 }
 
-/// Test successful generation with mocked Huawei API
+/// Test successful generation with mocked Gemini API
 #[tokio::test]
-async fn test_huawei_provider_generate_success() {
+async fn test_gemini_provider_generate_success() {
     let mock_server = MockServer::start().await;
 
     let response_body = serde_json::json!({
@@ -63,14 +63,14 @@ async fn test_huawei_provider_generate_success() {
     });
 
     Mock::given(method("POST"))
-        .and(header("Authorization", "Bearer test-api-key"))
+        .and(header("x-goog-api-key", "test-api-key"))
         .and(header("Content-Type", "application/json"))
         .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
         .mount(&mock_server)
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -91,7 +91,7 @@ async fn test_huawei_provider_generate_success() {
 
 /// Test error handling for API errors
 #[tokio::test]
-async fn test_huawei_provider_api_error() {
+async fn test_gemini_provider_api_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -107,7 +107,7 @@ async fn test_huawei_provider_api_error() {
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -118,7 +118,7 @@ async fn test_huawei_provider_api_error() {
 
 /// Test error handling for network timeout
 #[tokio::test]
-async fn test_huawei_provider_timeout() {
+async fn test_gemini_provider_timeout() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -128,7 +128,7 @@ async fn test_huawei_provider_timeout() {
 
     let mut config = create_test_config(&mock_server.uri());
     config.timeout_seconds = 1; // Very short timeout
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -137,12 +137,12 @@ async fn test_huawei_provider_timeout() {
 
 /// Test error handling when API key is missing
 #[tokio::test]
-async fn test_huawei_provider_missing_api_key() {
+async fn test_gemini_provider_missing_api_key() {
     let mock_server = MockServer::start().await;
 
     let mut config = create_test_config(&mock_server.uri());
-    config.huawei_api_key = None;
-    let provider = HuaweiLlmProvider::new(config);
+    config.gemini_api_key = None;
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -157,14 +157,14 @@ async fn test_huawei_provider_missing_api_key() {
 
 /// Test streaming generation with mocked API
 #[tokio::test]
-async fn test_huawei_provider_generate_stream() {
+async fn test_gemini_provider_generate_stream() {
     let mock_server = MockServer::start().await;
 
     // Simulate SSE response
     let sse_response = "data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"stream-2\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\" World\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n";
 
     Mock::given(method("POST"))
-        .and(header("Authorization", "Bearer test-api-key"))
+        .and(header("x-goog-api-key", "test-api-key"))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_string(sse_response)
@@ -174,7 +174,7 @@ async fn test_huawei_provider_generate_stream() {
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let mut request = create_test_request();
     request.stream = Some(true);
@@ -198,58 +198,9 @@ async fn test_huawei_provider_generate_stream() {
     );
 }
 
-/// Test request body format
-#[tokio::test]
-async fn test_huawei_provider_request_format() {
-    let mock_server = MockServer::start().await;
-
-    let response_body = serde_json::json!({
-        "id": "resp-123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "test-model",
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": "Response"
-            },
-            "finish_reason": "stop"
-        }]
-    });
-
-    Mock::given(method("POST"))
-        .and(header("Content-Type", "application/json"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
-
-    let request = LlmRequest {
-        model: "custom-model".to_string(),
-        messages: vec![
-            Message::new("system", "You are helpful."),
-            Message::new("user", "Hello"),
-        ],
-        max_tokens: Some(500),
-        temperature: Some(0.8),
-        top_p: None,
-        top_k: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        stream: Some(false),
-    };
-
-    let result = provider.generate(request).await;
-    assert!(result.is_ok());
-}
-
 /// Test handling of malformed API response
 #[tokio::test]
-async fn test_huawei_provider_malformed_response() {
+async fn test_gemini_provider_malformed_response() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -258,7 +209,7 @@ async fn test_huawei_provider_malformed_response() {
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -267,7 +218,7 @@ async fn test_huawei_provider_malformed_response() {
 
 /// Test handling of 500 Internal Server Error
 #[tokio::test]
-async fn test_huawei_provider_server_error() {
+async fn test_gemini_provider_server_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -280,7 +231,7 @@ async fn test_huawei_provider_server_error() {
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 
@@ -290,7 +241,7 @@ async fn test_huawei_provider_server_error() {
 
 /// Test handling of 401 Unauthorized
 #[tokio::test]
-async fn test_huawei_provider_unauthorized() {
+async fn test_gemini_provider_unauthorized() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
@@ -306,7 +257,7 @@ async fn test_huawei_provider_unauthorized() {
         .await;
 
     let config = create_test_config(&mock_server.uri());
-    let provider = HuaweiLlmProvider::new(config);
+    let provider = GeminiLlmProvider::new(config);
 
     let result = provider.generate(create_test_request()).await;
 

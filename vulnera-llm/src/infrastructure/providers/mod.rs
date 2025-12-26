@@ -2,9 +2,9 @@ use crate::domain::{LlmRequest, LlmResponse};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-pub mod huawei;
+pub mod gemini;
 
-pub use huawei::HuaweiLlmProvider;
+pub use gemini::GeminiLlmProvider;
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {

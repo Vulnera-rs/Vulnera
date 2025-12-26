@@ -43,6 +43,54 @@ impl PasswordHasher {
             }
         })
     }
+
+    /// Hash a password asynchronously (non-blocking)
+    ///
+    /// Uses `spawn_blocking` to offload CPU-intensive bcrypt hashing to the blocking thread pool,
+    /// preventing tokio runtime starvation under concurrent load.
+    pub async fn hash_async(&self, password: String) -> Result<PasswordHash, AuthError> {
+        let cost = self.cost;
+        tokio::task::spawn_blocking(move || hash(password, cost))
+            .await
+            .map_err(|e| {
+                tracing::error!("Password hash task panicked: {}", e);
+                AuthError::InvalidPassword {
+                    reason: "Password hashing failed".to_string(),
+                }
+            })?
+            .map(PasswordHash::from)
+            .map_err(|e| {
+                tracing::error!("Failed to hash password: {}", e);
+                AuthError::InvalidPassword {
+                    reason: "Password hashing failed".to_string(),
+                }
+            })
+    }
+
+    /// Verify a password asynchronously (non-blocking)
+    ///
+    /// Uses `spawn_blocking` to offload CPU-intensive bcrypt verification to the blocking thread pool,
+    /// preventing tokio runtime starvation under concurrent load.
+    pub async fn verify_async(
+        &self,
+        password: String,
+        hash: PasswordHash,
+    ) -> Result<bool, AuthError> {
+        tokio::task::spawn_blocking(move || verify(&password, hash.as_str()))
+            .await
+            .map_err(|e| {
+                tracing::error!("Password verify task panicked: {}", e);
+                AuthError::InvalidPassword {
+                    reason: "Password verification failed".to_string(),
+                }
+            })?
+            .map_err(|e| {
+                tracing::error!("Failed to verify password: {}", e);
+                AuthError::InvalidPassword {
+                    reason: "Password verification failed".to_string(),
+                }
+            })
+    }
 }
 
 impl Default for PasswordHasher {
