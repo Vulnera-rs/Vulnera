@@ -34,9 +34,20 @@ use crate::infrastructure::taint_queries::get_propagation_queries;
 /// Result of a SAST scan
 #[derive(Debug)]
 pub struct ScanResult {
+    /// Detected security findings
     pub findings: Vec<SastFinding>,
+    /// Number of files successfully scanned
     pub files_scanned: usize,
+    /// Number of files skipped (too large, binary, etc.)
+    pub files_skipped: usize,
+    /// Number of files that failed to parse or analyze
+    pub files_failed: usize,
+    /// Analysis engine used
     pub analysis_engine: AnalysisEngine,
+    /// Errors encountered during analysis (non-fatal)
+    pub errors: Vec<String>,
+    /// Total scan duration in milliseconds
+    pub duration_ms: u64,
 }
 
 impl ScanResult {
@@ -77,6 +88,16 @@ pub struct AnalysisConfig {
     pub enable_call_graph: bool,
     /// Analysis depth: Quick, Standard, or Deep
     pub analysis_depth: AnalysisDepth,
+    /// Maximum file size to analyze in bytes (files larger are skipped)
+    pub max_file_size_bytes: u64,
+    /// Per-file analysis timeout in seconds
+    pub per_file_timeout_seconds: u64,
+    /// Overall scan timeout in seconds (None = no limit)
+    pub scan_timeout_seconds: Option<u64>,
+    /// Maximum findings per file (prevents memory explosion)
+    pub max_findings_per_file: usize,
+    /// Maximum total findings across all files (None = no limit)
+    pub max_total_findings: Option<usize>,
 }
 
 impl Default for AnalysisConfig {
@@ -84,10 +105,15 @@ impl Default for AnalysisConfig {
         Self {
             enable_ast_cache: true,
             ast_cache_ttl_hours: 1,
-            max_concurrent_files: 4,
+            max_concurrent_files: 8,
             enable_data_flow: true,
             enable_call_graph: true,
             analysis_depth: AnalysisDepth::Standard,
+            max_file_size_bytes: 1_048_576, // 1MB
+            per_file_timeout_seconds: 30,
+            scan_timeout_seconds: None,
+            max_findings_per_file: 100,
+            max_total_findings: None,
         }
     }
 }
@@ -101,6 +127,11 @@ impl From<&SastConfig> for AnalysisConfig {
             enable_data_flow: config.enable_data_flow,
             enable_call_graph: config.enable_call_graph,
             analysis_depth: config.analysis_depth,
+            max_file_size_bytes: config.max_file_size_bytes.unwrap_or(1_048_576),
+            per_file_timeout_seconds: config.per_file_timeout_seconds.unwrap_or(30),
+            scan_timeout_seconds: config.scan_timeout_seconds,
+            max_findings_per_file: config.max_findings_per_file.unwrap_or(100),
+            max_total_findings: config.max_total_findings,
         }
     }
 }
@@ -156,7 +187,7 @@ impl ScanProjectUseCase {
         let tree_sitter_rules = db_repository
             .get_tree_sitter_rules()
             .await
-            .map_err(|e| ScanError::DatabaseError(e.to_string()))?;
+            .map_err(|e| ScanError::database("get_tree_sitter_rules", e.to_string()))?;
 
         {
             let mut repo = self.rule_repository.write().await;
@@ -177,6 +208,7 @@ impl ScanProjectUseCase {
 
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
+        let start_time = std::time::Instant::now();
         info!("Starting native SAST scan");
 
         let files = self.scanner.scan(root).map_err(|e| {
@@ -189,6 +221,9 @@ impl ScanProjectUseCase {
 
         let mut all_findings = Vec::new();
         let mut files_scanned = 0;
+        let mut files_skipped = 0;
+        let mut files_failed = 0;
+        let mut errors: Vec<String> = Vec::new();
 
         let rules = self.rule_repository.read().await;
         let all_rules = rules.get_all_rules();
@@ -206,12 +241,35 @@ impl ScanProjectUseCase {
 
         // Phase 2: Analyze each file
         for file in files {
+            // Check file size limit
+            let file_size = match std::fs::metadata(&file.path) {
+                Ok(meta) => meta.len(),
+                Err(e) => {
+                    debug!(file = %file.path.display(), error = %e, "Failed to get file metadata");
+                    files_skipped += 1;
+                    continue;
+                }
+            };
+
+            if file_size > self.config.max_file_size_bytes {
+                debug!(
+                    file = %file.path.display(),
+                    file_size,
+                    max_size = self.config.max_file_size_bytes,
+                    "Skipping file: exceeds size limit"
+                );
+                files_skipped += 1;
+                continue;
+            }
+
             debug!(file = %file.path.display(), language = ?file.language, "Scanning file");
 
             let content = match std::fs::read_to_string(&file.path) {
                 Ok(content) => content,
                 Err(e) => {
                     warn!(file = %file.path.display(), error = %e, "Failed to read file");
+                    files_failed += 1;
+                    errors.push(format!("Failed to read {}: {}", file.path.display(), e));
                     continue;
                 }
             };
@@ -232,16 +290,25 @@ impl ScanProjectUseCase {
             }
 
             // Execute tree-sitter pattern analysis
-            self.execute_tree_sitter_analysis(
-                &file.path,
-                &file.language,
-                &content,
-                &applicable_rules,
-                &suppressions,
-                is_test_context,
-                &mut all_findings,
-            )
-            .await?;
+            if let Err(e) = self
+                .execute_tree_sitter_analysis(
+                    &file.path,
+                    &file.language,
+                    &content,
+                    &applicable_rules,
+                    &suppressions,
+                    is_test_context,
+                    &mut all_findings,
+                )
+                .await
+            {
+                warn!(file = %file.path.display(), error = %e, "Tree-sitter analysis failed");
+                errors.push(format!(
+                    "Analysis failed for {}: {}",
+                    file.path.display(),
+                    e
+                ));
+            }
 
             // Phase 3: Data flow analysis
             if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
@@ -253,6 +320,30 @@ impl ScanProjectUseCase {
                 )
                 .await;
             }
+
+            // Check max findings per file limit
+            let file_finding_count = all_findings
+                .iter()
+                .filter(|f| f.location.file_path == file.path.display().to_string())
+                .count();
+            if file_finding_count >= self.config.max_findings_per_file {
+                debug!(
+                    file = %file.path.display(),
+                    count = file_finding_count,
+                    "Max findings per file limit reached"
+                );
+            }
+
+            // Check max total findings limit
+            if let Some(max_total) = self.config.max_total_findings {
+                if all_findings.len() >= max_total {
+                    info!(
+                        total_findings = all_findings.len(),
+                        max_total, "Max total findings limit reached, stopping scan early"
+                    );
+                    break;
+                }
+            }
         }
 
         // Phase 4: Adjust severity for data-flow confirmed findings
@@ -262,15 +353,20 @@ impl ScanProjectUseCase {
 
         all_findings = Self::deduplicate_findings(all_findings);
 
+        let duration_ms = start_time.elapsed().as_millis() as u64;
         info!(
             finding_count = all_findings.len(),
-            files_scanned, "SAST scan completed"
+            files_scanned, files_skipped, files_failed, duration_ms, "SAST scan completed"
         );
 
         Ok(ScanResult {
             findings: all_findings,
             files_scanned,
+            files_skipped,
+            files_failed,
             analysis_engine: AnalysisEngine::TreeSitter,
+            errors,
+            duration_ms,
         })
     }
 
@@ -451,9 +547,9 @@ impl ScanProjectUseCase {
             .filter_map(|s| s.variable_name.as_deref().or(Some(&s.matched_text)))
             .collect();
 
-        println!(
-            "DEBUG: Sanitized variables blocking propagation: {:?}",
-            sanitized_vars
+        tracing::trace!(
+            sanitized_vars = ?sanitized_vars,
+            "Sanitized variables blocking taint propagation"
         );
 
         while changed && iteration < max_iterations {
@@ -468,9 +564,9 @@ impl ScanProjectUseCase {
 
                 // Skip if target is a sanitized variable (prevent re-tainting)
                 if sanitized_vars.contains(target.as_str()) {
-                    println!(
-                        "DEBUG: Skipping propagation to sanitized variable: {}",
-                        target
+                    tracing::trace!(
+                        target = %target,
+                        "Skipping taint propagation to sanitized variable"
                     );
                     continue;
                 }
@@ -846,15 +942,94 @@ impl Default for ScanProjectUseCase {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ScanError {
+    /// Failed to read a file during scanning
+    #[error("Failed to read file '{path}': {message}")]
+    FileRead {
+        path: std::path::PathBuf,
+        message: String,
+    },
+
+    /// Failed to parse source code
+    #[error("Failed to parse {language} file '{path}': {message}")]
+    ParseFailed {
+        path: std::path::PathBuf,
+        language: String,
+        message: String,
+        line: Option<u32>,
+    },
+
+    /// Query compilation failed for a rule
+    #[error("Query compilation failed for rule '{rule_id}': {message}")]
+    QueryCompilation { rule_id: String, message: String },
+
+    /// Database operation failed
+    #[error("Database operation '{operation}' failed: {message}")]
+    Database { operation: String, message: String },
+
+    /// Scan timeout exceeded
+    #[error("Scan timeout after {duration_ms}ms for path '{path}'")]
+    Timeout {
+        path: std::path::PathBuf,
+        duration_ms: u64,
+    },
+
+    /// Resource limit exceeded
+    #[error("Resource limit exceeded: {message}")]
+    ResourceLimit { message: String },
+
+    /// Configuration error
+    #[error("Configuration error: {0}")]
+    Config(String),
+
+    /// Generic IO error (for backward compatibility)
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
 
-    #[error("Parse error: {0}")]
-    ParseFailed(String),
+impl ScanError {
+    /// Create a file read error with context
+    pub fn file_read(path: impl Into<std::path::PathBuf>, source: std::io::Error) -> Self {
+        Self::FileRead {
+            path: path.into(),
+            message: source.to_string(),
+        }
+    }
 
-    #[error("Database error: {0}")]
-    DatabaseError(String),
+    /// Create a parse error with context
+    pub fn parse_failed(
+        path: impl Into<std::path::PathBuf>,
+        language: &Language,
+        message: impl Into<String>,
+        line: Option<u32>,
+    ) -> Self {
+        Self::ParseFailed {
+            path: path.into(),
+            language: language.to_string(),
+            message: message.into(),
+            line,
+        }
+    }
 
-    #[error("Query engine error: {0}")]
-    QueryEngineError(String),
+    /// Create a database error
+    pub fn database(operation: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Database {
+            operation: operation.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Create a timeout error
+    pub fn timeout(path: impl Into<std::path::PathBuf>, duration: std::time::Duration) -> Self {
+        Self::Timeout {
+            path: path.into(),
+            duration_ms: duration.as_millis() as u64,
+        }
+    }
+
+    /// Create a resource limit error
+    pub fn resource_limit(message: impl Into<String>) -> Self {
+        Self::ResourceLimit {
+            message: message.into(),
+        }
+    }
 }

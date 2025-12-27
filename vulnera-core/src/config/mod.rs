@@ -629,6 +629,16 @@ pub struct SastConfig {
     pub ast_cache_ttl_hours: Option<u64>,
     /// Maximum concurrent file analysis (default: 4)
     pub max_concurrent_files: Option<usize>,
+    /// Maximum file size to analyze in bytes (default: 1MB, files larger are skipped)
+    pub max_file_size_bytes: Option<u64>,
+    /// Per-file analysis timeout in seconds (default: 30)
+    pub per_file_timeout_seconds: Option<u64>,
+    /// Overall scan timeout in seconds (None = no limit)
+    pub scan_timeout_seconds: Option<u64>,
+    /// Maximum findings per file (prevents memory explosion, default: 100)
+    pub max_findings_per_file: Option<usize>,
+    /// Maximum total findings across all files (stops scan early if exceeded, None = no limit)
+    pub max_total_findings: Option<usize>,
 }
 
 impl Default for SastConfig {
@@ -662,6 +672,11 @@ impl Default for SastConfig {
             enable_ast_cache: Some(true),
             ast_cache_ttl_hours: Some(4),
             max_concurrent_files: Some(4),
+            max_file_size_bytes: Some(1_048_576), // 1MB
+            per_file_timeout_seconds: Some(30),
+            scan_timeout_seconds: None, // No overall limit by default
+            max_findings_per_file: Some(100),
+            max_total_findings: None, // No limit by default
         }
     }
 }

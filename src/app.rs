@@ -410,6 +410,11 @@ pub async fn create_app(
             ast_cache_ttl_hours: config.sast.ast_cache_ttl_hours.unwrap_or(4),
             max_concurrent_files: config.sast.max_concurrent_files.unwrap_or(4),
             analysis_depth: config.sast.analysis_depth,
+            max_file_size_bytes: config.sast.max_file_size_bytes.unwrap_or(1_048_576),
+            per_file_timeout_seconds: config.sast.per_file_timeout_seconds.unwrap_or(30),
+            scan_timeout_seconds: config.sast.scan_timeout_seconds,
+            max_findings_per_file: config.sast.max_findings_per_file.unwrap_or(100),
+            max_total_findings: config.sast.max_total_findings,
         };
 
         let use_case = ScanProjectUseCase::with_config(&config.sast, analysis_config);
