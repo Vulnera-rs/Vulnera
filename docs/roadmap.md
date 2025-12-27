@@ -18,7 +18,7 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
 - **PostgreSQL Backend:** User management, API keys, and job tracking
 - **Dragonfly DB Caching:** High-performance caching for vulnerability data
 - **OpenAPI Documentation:** Auto-generated Swagger UI
-- **Authentication & Authorization:** JWT tokens and API keys with bcrypt hashing
+- **Authentication & Authorization:** JWT tokens and API keys with Argon2id hashing (OWASP-recommended)
 
 #### Analysis Modules
 
@@ -77,9 +77,7 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
   - Context-aware analysis
   - Data flow analysis for taint tracking
 
-
 #### Secrets Detection Improvements
-
 
 - [ ] **Enhanced Secret Types:**
   - Additional cloud provider credentials
