@@ -10,6 +10,26 @@
 use crate::domain::value_objects::Language;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
+
+// =============================================================================
+// TaintConfig Error Types
+// =============================================================================
+
+/// Errors that can occur when loading or processing taint configuration
+#[derive(Debug, thiserror::Error)]
+pub enum TaintConfigError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("TOML parse error: {0}")]
+    TomlParse(#[from] toml::de::Error),
+    #[error("JSON parse error: {0}")]
+    JsonParse(#[from] serde_json::Error),
+    #[error("Invalid pattern: {0}")]
+    InvalidPattern(String),
+    #[error("Unsupported file format: {0}")]
+    UnsupportedFormat(String),
+}
 
 // =============================================================================
 // TaintConfig - Customizable taint patterns
@@ -53,6 +73,153 @@ impl Default for TaintConfig {
             include_builtin: true,
             generic_validation_confidence: 0.5,
         }
+    }
+}
+
+impl TaintConfig {
+    /// Create a new empty taint configuration
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Load taint configuration from a file (TOML or JSON)
+    ///
+    /// File format is determined by extension:
+    /// - `.toml` -> TOML format
+    /// - `.json` -> JSON format
+    ///
+    /// # Example TOML format:
+    /// ```toml
+    /// include_builtin = true
+    /// generic_validation_confidence = 0.6
+    ///
+    /// [[custom_sources.python]]
+    /// query = "(call function: (identifier) @fn (#eq? @fn \"get_user_input\"))"
+    /// name = "custom_user_input"
+    /// category = "user_input"
+    /// labels = ["user_controlled"]
+    /// ```
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, TaintConfigError> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path)?;
+
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.to_lowercase());
+
+        match extension.as_deref() {
+            Some("toml") => {
+                let config: TaintConfig = toml::from_str(&content)?;
+                config.validate()?;
+                Ok(config)
+            }
+            Some("json") => {
+                let config: TaintConfig = serde_json::from_str(&content)?;
+                config.validate()?;
+                Ok(config)
+            }
+            Some(ext) => Err(TaintConfigError::UnsupportedFormat(format!(
+                "Unsupported extension: .{}",
+                ext
+            ))),
+            None => Err(TaintConfigError::UnsupportedFormat(
+                "No file extension provided".to_string(),
+            )),
+        }
+    }
+
+    /// Merge another configuration into this one
+    ///
+    /// Custom patterns from `other` are appended to existing patterns.
+    /// Configuration flags (include_builtin, confidence) are taken from `other`.
+    pub fn merge(&mut self, other: TaintConfig) {
+        // Merge custom sources
+        for (lang, patterns) in other.custom_sources {
+            self.custom_sources
+                .entry(lang)
+                .or_default()
+                .extend(patterns);
+        }
+
+        // Merge custom sinks
+        for (lang, patterns) in other.custom_sinks {
+            self.custom_sinks.entry(lang).or_default().extend(patterns);
+        }
+
+        // Merge custom sanitizers
+        for (lang, patterns) in other.custom_sanitizers {
+            self.custom_sanitizers
+                .entry(lang)
+                .or_default()
+                .extend(patterns);
+        }
+
+        // Override flags with other's values
+        self.include_builtin = other.include_builtin;
+        self.generic_validation_confidence = other.generic_validation_confidence;
+    }
+
+    /// Validate the configuration
+    fn validate(&self) -> Result<(), TaintConfigError> {
+        // Validate all patterns have non-empty queries
+        for (lang, patterns) in &self.custom_sources {
+            for pattern in patterns {
+                if pattern.query.trim().is_empty() {
+                    return Err(TaintConfigError::InvalidPattern(format!(
+                        "Empty query in source pattern '{}' for language '{}'",
+                        pattern.name, lang
+                    )));
+                }
+            }
+        }
+
+        for (lang, patterns) in &self.custom_sinks {
+            for pattern in patterns {
+                if pattern.query.trim().is_empty() {
+                    return Err(TaintConfigError::InvalidPattern(format!(
+                        "Empty query in sink pattern '{}' for language '{}'",
+                        pattern.name, lang
+                    )));
+                }
+            }
+        }
+
+        for (lang, patterns) in &self.custom_sanitizers {
+            for pattern in patterns {
+                if pattern.query.trim().is_empty() {
+                    return Err(TaintConfigError::InvalidPattern(format!(
+                        "Empty query in sanitizer pattern '{}' for language '{}'",
+                        pattern.name, lang
+                    )));
+                }
+            }
+        }
+
+        // Validate confidence threshold
+        if !(0.0..=1.0).contains(&self.generic_validation_confidence) {
+            return Err(TaintConfigError::InvalidPattern(format!(
+                "generic_validation_confidence must be between 0.0 and 1.0, got {}",
+                self.generic_validation_confidence
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Get all source patterns for a language (built-in + custom)
+    pub fn get_sources_for_language(&self, language: &Language) -> Vec<TaintPattern> {
+        get_source_queries(language, self)
+    }
+
+    /// Get all sink patterns for a language (built-in + custom)
+    pub fn get_sinks_for_language(&self, language: &Language) -> Vec<TaintPattern> {
+        get_sink_queries(language, self)
+    }
+
+    /// Get all sanitizer patterns for a language (built-in + custom)
+    pub fn get_sanitizers_for_language(&self, language: &Language) -> Vec<TaintPattern> {
+        get_sanitizer_queries(language, self)
     }
 }
 
