@@ -4,8 +4,12 @@
 //! Enables tracking function calls across module boundaries.
 
 use std::collections::{HashMap, HashSet};
+use tree_sitter::Tree;
 
 use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature};
+use crate::domain::value_objects::Language;
+use crate::infrastructure::call_graph_queries::*;
+use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 
 /// Call graph for inter-procedural analysis
 #[derive(Debug, Default)]
@@ -226,209 +230,135 @@ impl CallGraph {
 #[derive(Debug)]
 pub struct CallGraphBuilder {
     graph: CallGraph,
-    /// Current scope stack for resolving function calls
-    scope_stack: Vec<String>,
+    // We capture unresolved calls here: File -> Vec<CallSite>
+    // but simplifying for this step: direct graph insertion
 }
 
 impl CallGraphBuilder {
     pub fn new() -> Self {
         Self {
             graph: CallGraph::new(),
-            scope_stack: Vec::new(),
         }
     }
 
-    /// Analyze a source file and extract function definitions/calls
-    ///
-    /// This is a simplified version that scans for function patterns.
-    /// A full implementation would use tree-sitter queries for each language.
-    pub fn analyze_file(&mut self, file_path: &str, content: &str) {
-        // Extract function definitions and calls using simple pattern matching
-        // A production implementation would use tree-sitter for accurate AST parsing
-        for (line_num, line) in content.lines().enumerate() {
-            let line_num = line_num as u32 + 1;
-
-            // Simple pattern: detect Python/JS function definitions
-            if let Some(func_name) = Self::extract_function_def(line, file_path) {
-                let sig = FunctionSignature {
-                    name: func_name.clone(),
-                    module_path: Some(file_path.to_string()),
-                    parameters: Vec::new(),
-                    return_type: None,
-                };
-                let id = sig.fully_qualified_name();
-                let node = CallGraphNode {
-                    id: id.clone(),
-                    signature: sig,
-                    file_path: file_path.to_string(),
-                    start_line: line_num,
-                    end_line: line_num, // Simplified
-                };
-                self.graph.add_function(node);
-                self.scope_stack.push(id);
-            }
-
-            // Detect function calls within current scope
-            for callee_name in Self::extract_function_calls(line) {
-                if let Some(caller_id) = self.scope_stack.last() {
-                    let call_site = CallSite {
-                        target_id: format!("{}::{}", file_path, callee_name),
-                        target_name: callee_name,
-                        line: line_num,
-                        column: 0,
-                        arguments: Vec::new(),
-                    };
-                    self.graph.add_call(caller_id, call_site);
-                }
-            }
-        }
-    }
-
-    /// Extract function definition name from a line (simplified)
-    fn extract_function_def(line: &str, _file_path: &str) -> Option<String> {
-        let trimmed = line.trim();
-
-        // Python: def function_name(
-        if let Some(rest) = trimmed.strip_prefix("def ") {
-            if let Some(paren_idx) = rest.find('(') {
-                return Some(rest[..paren_idx].trim().to_string());
-            }
-        }
-
-        // JavaScript/TypeScript: function name( or async function name(
-        let rest = trimmed
-            .strip_prefix("async ")
-            .unwrap_or(trimmed)
-            .strip_prefix("function ")
-            .or_else(|| {
-                // Arrow functions with const/let: const name = (
-                trimmed
-                    .strip_prefix("const ")
-                    .or_else(|| trimmed.strip_prefix("let "))
-                    .and_then(|r| {
-                        if r.contains("=>") || r.contains("function") {
-                            Some(r)
-                        } else {
-                            None
-                        }
-                    })
-            });
-
-        if let Some(rest) = rest {
-            // Get the function name before the parenthesis or =
-            let end_idx = rest
-                .find('(')
-                .or_else(|| rest.find('='))
-                .unwrap_or(rest.len());
-            let name = rest[..end_idx].trim();
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                return Some(name.to_string());
-            }
-        }
-
-        // Rust: fn name(
-        if let Some(rest) = trimmed.strip_prefix("fn ") {
-            if let Some(paren_idx) = rest.find('(') {
-                let name = rest[..paren_idx].trim();
-                // Handle generic parameters
-                let name = name.split('<').next().unwrap_or(name);
-                return Some(name.to_string());
-            }
-        }
-
-        // Go: func name( or func (receiver) name(
-        if let Some(rest) = trimmed.strip_prefix("func ") {
-            // Skip receiver if present
-            let rest = if rest.starts_with('(') {
-                rest.find(')').map(|i| &rest[i + 1..]).unwrap_or(rest)
-            } else {
-                rest
-            };
-            let rest = rest.trim();
-            if let Some(paren_idx) = rest.find('(') {
-                let name = rest[..paren_idx].trim();
-                return Some(name.to_string());
-            }
-        }
-
-        None
-    }
-
-    /// Extract function call names from a line (simplified)
-    fn extract_function_calls(line: &str) -> Vec<String> {
-        let mut calls = Vec::new();
-        let mut chars = line.chars().peekable();
-        let mut current_word = String::new();
-
-        while let Some(c) = chars.next() {
-            if c.is_alphanumeric() || c == '_' || c == '.' {
-                current_word.push(c);
-            } else if c == '(' && !current_word.is_empty() {
-                // Found a function call
-                // Get the last part after any dots (method name)
-                let name = current_word.split('.').last().unwrap_or(&current_word);
-                if !name.is_empty() && !Self::is_keyword(name) {
-                    calls.push(name.to_string());
-                }
-                current_word.clear();
-            } else {
-                current_word.clear();
-            }
-        }
-
-        calls
-    }
-
-    /// Check if a word is a language keyword (not a function call)
-    fn is_keyword(word: &str) -> bool {
-        matches!(
-            word,
-            "if" | "else"
-                | "for"
-                | "while"
-                | "return"
-                | "def"
-                | "class"
-                | "function"
-                | "const"
-                | "let"
-                | "var"
-                | "fn"
-                | "impl"
-                | "struct"
-                | "match"
-                | "switch"
-                | "case"
-                | "try"
-                | "catch"
-                | "async"
-                | "await"
-        )
-    }
-
-    /// Enter a function scope
-    pub fn enter_function(&mut self, signature: FunctionSignature) {
-        let id = signature.fully_qualified_name();
-        let node = CallGraphNode {
-            id: id.clone(),
-            signature,
-            file_path: String::new(),
-            start_line: 0,
-            end_line: 0,
+    /// Analyze a source file using Tree-sitter AST
+    pub fn analyze_ast(
+        &mut self,
+        file_path: &str,
+        tree: &Tree,
+        language: &Language,
+        source: &str,
+        query_engine: &mut TreeSitterQueryEngine,
+    ) {
+        let source_bytes = source.as_bytes();
+        let (def_query_str, call_query_str) = match language {
+            Language::Python => (PYTHON_DEFINITIONS, PYTHON_CALLS),
+            Language::JavaScript => (JAVASCRIPT_DEFINITIONS, JAVASCRIPT_CALLS),
+            Language::TypeScript => (TYPESCRIPT_DEFINITIONS, TYPESCRIPT_CALLS),
+            Language::Rust => (RUST_DEFINITIONS, RUST_CALLS),
+            Language::Go => (GO_DEFINITIONS, GO_CALLS),
+            Language::C => (C_DEFINITIONS, C_CALLS),
+            Language::Cpp => (CPP_DEFINITIONS, CPP_CALLS),
+            // Default empty for unsupported langs
+            _ => ("", ""),
         };
-        self.graph.add_function(node);
-        self.scope_stack.push(id);
-    }
 
-    /// Exit the current function scope
-    pub fn exit_function(&mut self) {
-        self.scope_stack.pop();
-    }
+        if def_query_str.is_empty() {
+            return;
+        }
 
-    /// Record a function call at current scope
-    pub fn record_call(&mut self, call_site: CallSite) {
-        if let Some(caller_id) = self.scope_stack.last() {
-            self.graph.add_call(caller_id, call_site);
+        // 1. Find Definitions (The logic here needs to compile queries)
+        // We assume query_engine can compile string -> Query
+        // Note: In real enterprise code, we pre-compile these once.
+        // For now, we rely on the engine's cache.
+
+        // Define struct for collected functions
+        struct DefinedFunction {
+            id: String,
+            start_byte: usize,
+            end_byte: usize,
+        }
+
+        let mut functions: Vec<DefinedFunction> = Vec::new();
+
+        // Run definition query
+        if let Ok(query) = query_engine.compile_query(def_query_str, language) {
+            let matches = query_engine.execute_query(&query, tree, source_bytes);
+            for m in matches {
+                let name_node = m.captures.get("name");
+                if let Some(name_n) = name_node {
+                    let func_name = &source[name_n.start_byte..name_n.end_byte];
+
+                    // Construct ID (Simplified: File::Name)
+                    // In future: proper module resolution
+                    let id = format!("{}::{}", file_path, func_name);
+
+                    let start_line = m.start_position.0 as u32 + 1;
+                    let end_line = m.end_position.0 as u32 + 1;
+
+                    let sig = FunctionSignature {
+                        name: func_name.to_string(),
+                        module_path: Some(file_path.to_string()),
+                        parameters: Vec::new(), // TODO: Extract params
+                        return_type: None,
+                    };
+
+                    let node = CallGraphNode {
+                        id: id.clone(),
+                        signature: sig,
+                        file_path: file_path.to_string(),
+                        start_line,
+                        end_line,
+                    };
+                    self.graph.add_function(node);
+
+                    functions.push(DefinedFunction {
+                        id,
+                        start_byte: m.start_byte,
+                        end_byte: m.end_byte,
+                    });
+                }
+            }
+        }
+
+        // 2. Find Calls
+        if let Ok(query) = query_engine.compile_query(call_query_str, language) {
+            let matches = query_engine.execute_query(&query, tree, source_bytes);
+            for m in matches {
+                let name_node = m.captures.get("name");
+                if let Some(name_n) = name_node {
+                    let callee_name = &source[name_n.start_byte..name_n.end_byte];
+
+                    // Determine Caller by checking which function definition contains this call
+                    let caller_id = functions
+                        .iter()
+                        .find(|f| m.start_byte >= f.start_byte && m.end_byte <= f.end_byte)
+                        .map(|f| f.id.clone());
+
+                    if let Some(caller) = caller_id {
+                        // Resolve Target (Fuzzy: Look for same function name in same file first)
+                        // In Phase 2: We would create an "Unresolved Edge" and link later.
+                        // Impl for now: Direct link if local, or create a 'phantom' ID.
+
+                        // NOTE: This logic assumes internal calls for now.
+                        let target_id = format!("{}::{}", file_path, callee_name); // Assume local internal call
+
+                        // We also add a cross-file heuristic for the future:
+                        // If not found locally, we'd search the graph.
+                        // For now, we just add the edges.
+
+                        let call_site = CallSite {
+                            target_id,
+                            target_name: callee_name.to_string(),
+                            line: m.start_position.0 as u32 + 1,
+                            column: m.start_position.1 as u32,
+                            arguments: Vec::new(),
+                        };
+
+                        self.graph.add_call(&caller, call_site);
+                    }
+                }
+            }
         }
     }
 

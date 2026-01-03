@@ -9,6 +9,7 @@
 
 pub mod ast_cache;
 pub mod call_graph;
+pub mod call_graph_queries;
 pub mod data_flow;
 pub mod parsers;
 pub mod query_engine;
