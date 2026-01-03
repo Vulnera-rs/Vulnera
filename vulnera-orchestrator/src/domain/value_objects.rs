@@ -3,18 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Source type for analysis input
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SourceType {
-    /// Git repository URL
-    Git,
-    /// File upload
-    FileUpload,
-    /// S3 bucket path
-    S3Bucket,
-    /// Local directory path
-    Directory,
-}
+pub use vulnera_core::domain::project::SourceType;
 
 /// AWS credentials for S3 bucket access
 ///

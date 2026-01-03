@@ -4,6 +4,7 @@ use async_trait::async_trait;
 
 use super::entities::ModuleResult;
 use super::value_objects::{ModuleConfig, ModuleExecutionError, ModuleType};
+use crate::domain::project::Project;
 
 /// Trait that all analysis modules must implement
 ///
@@ -14,6 +15,17 @@ use super::value_objects::{ModuleConfig, ModuleExecutionError, ModuleType};
 pub trait AnalysisModule: Send + Sync {
     /// Get the module type identifier
     fn module_type(&self) -> ModuleType;
+
+    /// Prepare module-specific configuration from project metadata
+    ///
+    /// This allows modules to extract necessary information (like manifest contents)
+    /// without the orchestrator needing to know module-specific details.
+    async fn prepare_config(
+        &self,
+        _project: &Project,
+    ) -> Result<std::collections::HashMap<String, serde_json::Value>, ModuleExecutionError> {
+        Ok(std::collections::HashMap::new())
+    }
 
     /// Execute the analysis module
     ///

@@ -158,6 +158,69 @@ impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContex
     }
 }
 
+impl From<vulnera_core::domain::module::ModuleResult> for ModuleResultDto {
+    fn from(result: vulnera_core::domain::module::ModuleResult) -> Self {
+        Self {
+            module_type: format!("{:?}", result.module_type),
+            status: if result.error.is_none() {
+                "Completed".to_string()
+            } else {
+                "Failed".to_string()
+            },
+            files_scanned: result.metadata.files_scanned,
+            duration_ms: result.metadata.duration_ms,
+            findings_count: result.findings.len(),
+            metadata: Some(serde_json::to_value(&result.metadata).unwrap_or_default()),
+            error: result.error,
+        }
+    }
+}
+
+impl From<crate::infrastructure::JobSnapshot> for JobStatusResponse {
+    fn from(snapshot: crate::infrastructure::JobSnapshot) -> Self {
+        Self {
+            job_id: snapshot.job_id,
+            project_id: snapshot.project_id,
+            status: format!("{:?}", snapshot.status),
+            created_at: snapshot.created_at,
+            started_at: snapshot.started_at,
+            completed_at: snapshot.completed_at,
+            error: snapshot.error,
+            callback_url: snapshot.callback_url,
+            invocation_context: snapshot
+                .invocation_context
+                .map(JobInvocationContextDto::from),
+            summary: snapshot
+                .summary
+                .unwrap_or_else(|| crate::domain::entities::Summary {
+                    total_findings: 0,
+                    by_severity: Default::default(),
+                    by_type: crate::domain::entities::TypeBreakdown {
+                        sast: 0,
+                        secrets: 0,
+                        dependencies: 0,
+                        api: 0,
+                    },
+                    modules_completed: 0,
+                    modules_failed: 0,
+                }),
+            modules: snapshot
+                .module_results
+                .into_iter()
+                .map(ModuleResultDto::from)
+                .collect(),
+            findings_by_type: snapshot.findings_by_type.unwrap_or_else(|| {
+                crate::domain::entities::FindingsByType {
+                    sast: vec![],
+                    secrets: vec![],
+                    dependencies: std::collections::HashMap::new(),
+                    api: vec![],
+                }
+            }),
+        }
+    }
+}
+
 /// Final report response
 #[derive(Serialize, ToSchema)]
 pub struct FinalReportResponse {

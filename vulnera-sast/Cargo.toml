@@ -73,4 +73,4 @@ tempfile = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
 serde_yml = { workspace = true }
-insta = { version = "1.42", features = ["yaml"] }
+insta = { version = "1.45", features = ["yaml"] }

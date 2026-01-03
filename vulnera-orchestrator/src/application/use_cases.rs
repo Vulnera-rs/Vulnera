@@ -1,6 +1,5 @@
 //! Orchestrator use cases
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::task::JoinSet;
@@ -16,34 +15,6 @@ use crate::domain::entities::{
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
-
-/// Infer ecosystem from dependency file path.
-fn infer_ecosystem_from_path(path: &str) -> Option<&'static str> {
-    let lower = path.to_lowercase();
-    if lower.ends_with("package.json")
-        || lower.ends_with("package-lock.json")
-        || lower.ends_with("yarn.lock")
-    {
-        Some("npm")
-    } else if lower.ends_with("requirements.txt")
-        || lower.ends_with("pipfile")
-        || lower.ends_with("pyproject.toml")
-        || lower.ends_with("poetry.lock")
-        || lower.ends_with("uv.lock")
-    {
-        Some("pypi")
-    } else if lower.ends_with("cargo.toml") || lower.ends_with("cargo.lock") {
-        Some("cargo")
-    } else if lower.ends_with("go.mod") || lower.ends_with("go.sum") {
-        Some("go")
-    } else if lower.ends_with("pom.xml") || lower.ends_with("build.gradle") {
-        Some("maven")
-    } else if lower.ends_with("composer.json") || lower.ends_with("composer.lock") {
-        Some("packagist")
-    } else {
-        None
-    }
-}
 
 /// Use case for creating a new analysis job
 pub struct CreateAnalysisJobUseCase {
@@ -126,45 +97,19 @@ impl ExecuteAnalysisJobUseCase {
         // Spawn all module execution tasks concurrently
         for module_type in &job.modules_to_run {
             if let Some(module) = self.module_registry.get_module(module_type) {
-                let mut config_map = std::collections::HashMap::new();
-
-                // For DependencyAnalyzer, load manifest content from metadata
-                if *module_type == vulnera_core::domain::module::ModuleType::DependencyAnalyzer {
-                    if let Some(manifest_path) = project.metadata.dependency_files.first() {
-                        match tokio::fs::read_to_string(manifest_path).await {
-                            Ok(content) => {
-                                config_map.insert(
-                                    "file_content".to_string(),
-                                    serde_json::Value::String(content),
-                                );
-                                config_map.insert(
-                                    "filename".to_string(),
-                                    serde_json::Value::String(
-                                        PathBuf::from(manifest_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or("unknown")
-                                            .to_string(),
-                                    ),
-                                );
-                                if let Some(ecosystem) = infer_ecosystem_from_path(manifest_path) {
-                                    config_map.insert(
-                                        "ecosystem".to_string(),
-                                        serde_json::Value::String(ecosystem.to_string()),
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    job_id = %job.job_id,
-                                    manifest = %manifest_path,
-                                    error = %e,
-                                    "Failed to load dependency manifest"
-                                );
-                            }
-                        }
+                // Prepare module-specific configuration from project metadata
+                let config_map = match module.prepare_config(project).await {
+                    Ok(map) => map,
+                    Err(e) => {
+                        warn!(
+                            job_id = %job.job_id,
+                            module = ?module_type,
+                            error = %e,
+                            "Failed to prepare module configuration"
+                        );
+                        std::collections::HashMap::new()
                     }
-                }
+                };
 
                 let config = ModuleConfig {
                     job_id: job.job_id,

@@ -8,17 +8,9 @@ use uuid::Uuid;
 use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId};
 use vulnera_core::domain::module::{Finding, ModuleResult};
 use vulnera_core::domain::organization::value_objects::OrganizationId;
+pub use vulnera_core::domain::project::{Project, ProjectMetadata};
 
-use super::value_objects::{AnalysisDepth, JobStatus, SourceType};
-
-/// Represents a project to analyze
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Project {
-    pub id: String,
-    pub source_type: SourceType,
-    pub source_uri: String,
-    pub metadata: ProjectMetadata,
-}
+use super::value_objects::{AnalysisDepth, JobStatus};
 
 /// How the job request was authenticated
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -40,23 +32,6 @@ pub struct JobInvocationContext {
     /// Whether this job was triggered via master key (skip analytics)
     #[serde(default)]
     pub is_master_key: bool,
-}
-
-/// Project metadata
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProjectMetadata {
-    /// Detected languages in the project
-    pub languages: Vec<String>,
-    /// Detected frameworks (e.g., "django", "react", "spring")
-    pub frameworks: Vec<String>,
-    /// Detected dependency files
-    pub dependency_files: Vec<String>,
-    /// All detected configuration files of interest
-    pub detected_config_files: Vec<String>,
-    /// Project root path (for directory-based sources)
-    pub root_path: Option<String>,
-    /// Git revision (HEAD commit) when the source comes from a repository clone
-    pub git_revision: Option<String>,
 }
 
 /// Analysis job tracking overall analysis
