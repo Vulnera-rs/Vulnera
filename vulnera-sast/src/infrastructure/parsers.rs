@@ -7,6 +7,7 @@ use tracing::{debug, error, instrument, warn};
 #[derive(Debug, Clone)]
 pub struct AstNode {
     pub node_type: String,
+    pub field_name: Option<String>,
     pub start_byte: usize,
     pub end_byte: usize,
     pub start_point: (u32, u32), // (row, column)
@@ -66,7 +67,7 @@ impl Parser for PythonParser {
             node_count = root_node.child_count(),
             "Python AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -106,7 +107,7 @@ impl Parser for JavaScriptParser {
             node_count = root_node.child_count(),
             "JavaScript AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -168,7 +169,7 @@ impl Parser for TypeScriptParser {
             node_count = root_node.child_count(),
             "{} AST parsed successfully", lang
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -214,7 +215,7 @@ impl Parser for RustParser {
             node_count = root_node.child_count(),
             "Rust AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -276,7 +277,7 @@ impl Parser for GoParser {
             node_count = root_node.child_count(),
             "Go AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -316,7 +317,7 @@ impl Parser for CParser {
             node_count = root_node.child_count(),
             "C AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
@@ -356,16 +357,30 @@ impl Parser for CppParser {
             node_count = root_node.child_count(),
             "C++ AST parsed successfully"
         );
-        Ok(convert_tree_sitter_node(root_node, source))
+        Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
 
 /// Convert tree-sitter node to our AST representation
-fn convert_tree_sitter_node(node: tree_sitter::Node, source: &str) -> AstNode {
+fn convert_tree_sitter_node(
+    node: tree_sitter::Node,
+    source: &str,
+    field_name: Option<String>,
+) -> AstNode {
     let mut children = Vec::new();
     let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        children.push(convert_tree_sitter_node(child, source));
+
+    // Iterate children manually to capture field names
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            let child_field_name = cursor.field_name().map(|s| s.to_string());
+            children.push(convert_tree_sitter_node(child, source, child_field_name));
+
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
     }
 
     let start_byte = node.start_byte();
@@ -375,11 +390,59 @@ fn convert_tree_sitter_node(node: tree_sitter::Node, source: &str) -> AstNode {
 
     AstNode {
         node_type: node.kind().to_string(),
+        field_name,
         start_byte,
         end_byte,
         start_point: (start_point.row as u32, start_point.column as u32),
         end_point: (end_point.row as u32, end_point.column as u32),
         children,
         source: source[start_byte..end_byte].to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_python_field_names() {
+        if let Ok(mut parser) = PythonParser::new() {
+            let code = "def foo(x): pass";
+            let ast = parser.parse(code).expect("Should parse");
+
+            // Find function_definition anywhere in the tree
+            // Since structure is module -> function_definition
+            let func_def = ast
+                .children
+                .iter()
+                .find(|n| n.node_type == "function_definition")
+                .expect("Should match function_definition");
+
+            // Check that 'name' field is associated with identifier 'foo'
+            let name_node = func_def
+                .children
+                .iter()
+                .find(|n| n.node_type == "identifier")
+                .expect("Should find identifier");
+
+            assert_eq!(
+                name_node.field_name.as_deref(),
+                Some("name"),
+                "Identifier should be 'name' field"
+            );
+            assert_eq!(name_node.source, "foo");
+
+            // Check parameters field
+            let params_node = func_def
+                .children
+                .iter()
+                .find(|n| n.node_type == "parameters")
+                .expect("Should find parameters");
+            assert_eq!(
+                params_node.field_name.as_deref(),
+                Some("parameters"),
+                "Params should be 'parameters' field"
+            );
+        }
     }
 }
