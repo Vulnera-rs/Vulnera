@@ -210,15 +210,30 @@ impl Default for DataFlowAnalyzer {
 }
 
 /// Inter-procedural data flow context
-/// Tracks taint across function boundaries
+/// Tracks taint across function boundaries using call graph information
 #[derive(Debug, Default)]
 pub struct InterProceduralContext {
     /// Taint states per function scope
     function_contexts: HashMap<String, DataFlowAnalyzer>,
-    /// Parameter taint mapping: function_id -> param_index -> is_tainted
+    /// Parameter taint mapping: function_id -> param_index -> taint_state
     param_taint: HashMap<String, HashMap<usize, TaintState>>,
     /// Return value taint: function_id -> taint_state
     return_taint: HashMap<String, TaintState>,
+    /// Function summaries computed during analysis
+    function_summaries: HashMap<String, FunctionSummary>,
+}
+
+/// Summary of a function's taint behavior (computed during analysis)
+#[derive(Debug, Clone, Default)]
+pub struct FunctionSummary {
+    /// Which parameters propagate to return value
+    pub params_to_return: HashSet<usize>,
+    /// Which parameters flow to sinks (dangerous)
+    pub params_to_sinks: HashMap<usize, Vec<String>>,
+    /// Whether return is inherently tainted
+    pub return_tainted: bool,
+    /// Whether this function acts as a sanitizer
+    pub is_sanitizer: bool,
 }
 
 impl InterProceduralContext {
@@ -265,19 +280,79 @@ impl InterProceduralContext {
         self.return_taint.get(function_id)
     }
 
-    /// Propagate taint through a function call
+    /// Set the summary for a function (computed after analysis)
+    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionSummary) {
+        self.function_summaries
+            .insert(function_id.to_string(), summary);
+    }
+
+    /// Get the summary for a function
+    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionSummary> {
+        self.function_summaries.get(function_id)
+    }
+
+    /// Propagate taint through a function call using computed summaries
     /// Returns the taint state of the return value, if any
     pub fn propagate_through_call(
         &self,
         function_id: &str,
         argument_taints: &[Option<TaintState>],
+        call_file: &str,
+        call_line: u32,
+        call_column: u32,
     ) -> Option<TaintState> {
-        // If any argument is tainted and flows to return, propagate
+        // First check if we have a pre-computed summary for this function
+        if let Some(summary) = self.function_summaries.get(function_id) {
+            // Check if function is a sanitizer - it clears taint
+            if summary.is_sanitizer {
+                return None;
+            }
+
+            // Check if function returns tainted data inherently
+            if summary.return_tainted {
+                let state = TaintState {
+                    labels: vec![TaintLabel {
+                        source: function_id.to_string(),
+                        category: "function_return".to_string(),
+                    }],
+                    origin_file: call_file.to_string(),
+                    origin_line: call_line,
+                    flow_path: vec![FlowStep {
+                        kind: FlowStepKind::Source,
+                        expression: format!("{}()", function_id),
+                        file: call_file.to_string(),
+                        line: call_line,
+                        column: call_column,
+                        note: Some("Return value from tainted function".to_string()),
+                    }],
+                };
+                return Some(state);
+            }
+
+            // Check if any tainted argument flows to return
+            for param_idx in &summary.params_to_return {
+                if let Some(Some(arg_taint)) = argument_taints.get(*param_idx) {
+                    // Clone and extend the taint state
+                    let mut new_state = arg_taint.clone();
+                    new_state.flow_path.push(FlowStep {
+                        kind: FlowStepKind::Propagation,
+                        expression: format!("{}() call", function_id),
+                        file: call_file.to_string(),
+                        line: call_line,
+                        column: call_column,
+                        note: Some(format!("Param {} flows to return", param_idx)),
+                    });
+                    return Some(new_state);
+                }
+            }
+
+            return None;
+        }
+
+        // Fallback: Use legacy parameter taint tracking
         for (idx, arg_taint) in argument_taints.iter().enumerate() {
             if arg_taint.is_some() {
-                // Check if this parameter flows to return
                 if self.get_param_taint(function_id, idx).is_some() {
-                    // Combine with return taint if exists
                     if let Some(ret_taint) = self.get_return_taint(function_id) {
                         return Some(ret_taint.clone());
                     }
@@ -285,8 +360,32 @@ impl InterProceduralContext {
             }
         }
 
-        // Check if function has inherent return taint (e.g., reads from source)
+        // Check if function has inherent return taint
         self.get_return_taint(function_id).cloned()
+    }
+
+    /// Compute summary for a function based on its analysis results
+    pub fn compute_function_summary(&mut self, function_id: &str) {
+        let mut summary = FunctionSummary::default();
+
+        // Check if return is tainted
+        if self.return_taint.contains_key(function_id) {
+            summary.return_tainted = true;
+        }
+
+        // Check which parameters flow to return (heuristic: if param is tainted and return is tainted)
+        if let Some(param_taints) = self.param_taint.get(function_id) {
+            for (&param_idx, _) in param_taints {
+                // Simple heuristic: if param is marked tainted and return is tainted,
+                // assume param flows to return
+                if summary.return_tainted {
+                    summary.params_to_return.insert(param_idx);
+                }
+            }
+        }
+
+        self.function_summaries
+            .insert(function_id.to_string(), summary);
     }
 
     /// Collect all detected paths from all function contexts
@@ -296,6 +395,23 @@ impl InterProceduralContext {
             .flat_map(|analyzer| analyzer.get_detected_paths().to_vec())
             .collect()
     }
+
+    /// Get statistics about the inter-procedural context
+    pub fn stats(&self) -> InterProceduralStats {
+        InterProceduralStats {
+            functions_analyzed: self.function_contexts.len(),
+            summaries_computed: self.function_summaries.len(),
+            total_findings: self.collect_all_paths().len(),
+        }
+    }
+}
+
+/// Statistics about inter-procedural analysis
+#[derive(Debug, Clone)]
+pub struct InterProceduralStats {
+    pub functions_analyzed: usize,
+    pub summaries_computed: usize,
+    pub total_findings: usize,
 }
 
 // =============================================================================
