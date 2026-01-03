@@ -42,6 +42,7 @@ pub enum AstCacheError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedAstNode {
     pub node_type: String,
+    pub field_name: Option<String>,
     pub start_byte: usize,
     pub end_byte: usize,
     pub start_row: u32,
@@ -56,6 +57,7 @@ impl From<&AstNode> for CachedAstNode {
     fn from(node: &AstNode) -> Self {
         Self {
             node_type: node.node_type.clone(),
+            field_name: node.field_name.clone(),
             start_byte: node.start_byte,
             end_byte: node.end_byte,
             start_row: node.start_point.0,
@@ -72,6 +74,7 @@ impl From<CachedAstNode> for AstNode {
     fn from(cached: CachedAstNode) -> Self {
         Self {
             node_type: cached.node_type,
+            field_name: cached.field_name,
             start_byte: cached.start_byte,
             end_byte: cached.end_byte,
             start_point: (cached.start_row, cached.start_col),
@@ -420,6 +423,7 @@ mod tests {
 
         let ast = AstNode {
             node_type: "test".to_string(),
+            field_name: None,
             start_byte: 0,
             end_byte: 10,
             start_point: (0, 0),
@@ -474,12 +478,14 @@ mod tests {
     fn test_ast_node_serialization_roundtrip() {
         let ast = AstNode {
             node_type: "function_definition".to_string(),
+            field_name: None,
             start_byte: 0,
             end_byte: 100,
             start_point: (0, 0),
             end_point: (5, 0),
             children: vec![AstNode {
                 node_type: "identifier".to_string(),
+                field_name: Some("name".to_string()),
                 start_byte: 4,
                 end_byte: 8,
                 start_point: (0, 4),
