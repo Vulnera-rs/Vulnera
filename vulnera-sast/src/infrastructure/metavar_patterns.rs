@@ -148,8 +148,19 @@ fn tokenize(pattern: &str) -> Vec<MetavarToken> {
                         break;
                     } else if c == '\\' {
                         chars.next();
-                        if let Some(&escaped) = chars.peek() {
-                            content.push(chars.next().unwrap());
+                        // Handle escape sequences properly
+                        if let Some(escaped_char) = chars.next() {
+                            let unescaped = match escaped_char {
+                                'n' => '\n',
+                                't' => '\t',
+                                'r' => '\r',
+                                '\\' => '\\',
+                                '"' => '"',
+                                '\'' => '\'',
+                                '0' => '\0',
+                                other => other, // Pass through unknown escapes
+                            };
+                            content.push(unescaped);
                         }
                     } else {
                         content.push(chars.next().unwrap());
@@ -303,12 +314,51 @@ fn translate_function_call(
         Language::C | Language::Cpp => ("call_expression", "function", "arguments"),
     };
 
+    // Extract argument patterns from tokens
+    let arg_patterns = extract_argument_patterns(tokens);
+
+    // Build argument matching based on extracted patterns
+    let args_query = if arg_patterns.is_empty() {
+        // No specific arguments, match any
+        format!("{args_node}: (_)* @args")
+    } else {
+        // Generate specific argument captures
+        let arg_captures: Vec<String> = arg_patterns
+            .iter()
+            .enumerate()
+            .map(|(i, pattern)| match pattern {
+                ArgumentPattern::Metavar(_name) => format!("(_) @arg{i}"),
+                ArgumentPattern::Identifier(_) | ArgumentPattern::StringLiteral(_) => {
+                    format!("(_) @arg{i}")
+                }
+            })
+            .collect();
+        format!("{args_node}: (argument_list {})", arg_captures.join(" "))
+    };
+
+    // Build constraints for literal arguments
+    let constraints: Vec<String> = arg_patterns
+        .iter()
+        .enumerate()
+        .filter_map(|(i, pattern)| match pattern {
+            ArgumentPattern::Identifier(lit) => Some(format!(r#"(#eq? @arg{i} "{lit}")"#)),
+            ArgumentPattern::StringLiteral(lit) => Some(format!(r#"(#match? @arg{i} "{lit}")"#)),
+            ArgumentPattern::Metavar(_) => None,
+        })
+        .collect();
+
+    let constraint_str = if constraints.is_empty() {
+        String::new()
+    } else {
+        format!("\n  {}", constraints.join("\n  "))
+    };
+
     if is_metavar {
         // Match any function call, capture the function name
         Some(format!(
             r#"({call_node}
   {func_field}: (identifier) @func
-  {args_node}: (_)* @args) @call"#
+  {args_query}{constraint_str}) @call"#
         ))
     } else {
         // Match specific function name
@@ -316,9 +366,43 @@ fn translate_function_call(
             r#"({call_node}
   {func_field}: (identifier) @func
   (#eq? @func "{name}")
-  {args_node}: (_)* @args) @call"#
+  {args_query}{constraint_str}) @call"#
         ))
     }
+}
+
+/// Argument pattern type
+#[derive(Debug, Clone)]
+enum ArgumentPattern {
+    Metavar(String),
+    Identifier(String),
+    StringLiteral(String),
+}
+
+/// Extract argument patterns from tokens (between parentheses, split by commas)
+fn extract_argument_patterns(tokens: &[MetavarToken]) -> Vec<ArgumentPattern> {
+    let mut patterns = Vec::new();
+    let mut inside_parens = false;
+
+    for token in tokens {
+        match token {
+            MetavarToken::OpenParen => inside_parens = true,
+            MetavarToken::CloseParen => break,
+            MetavarToken::Metavar(name) if inside_parens => {
+                patterns.push(ArgumentPattern::Metavar(name.clone()));
+            }
+            MetavarToken::Identifier(name) if inside_parens => {
+                patterns.push(ArgumentPattern::Identifier(name.clone()));
+            }
+            MetavarToken::StringLiteral(content) if inside_parens => {
+                patterns.push(ArgumentPattern::StringLiteral(content.clone()));
+            }
+            MetavarToken::Comma | MetavarToken::Whitespace => {}
+            _ => {}
+        }
+    }
+
+    patterns
 }
 
 /// Translate binary expression pattern
@@ -349,13 +433,26 @@ fn translate_binary_expression(operator: &str, language: &Language) -> Option<St
     };
 
     if let Some(op) = op_match {
+        // Generate operator-specific query with operator field
+        // Python uses a child node for operator, others use an operator field
+        let op_clause = match language {
+            Language::Python => {
+                // Python binary_operator has operator as a direct child
+                format!(r#"operator: "{op}""#)
+            }
+            _ => {
+                // Most languages use operator field
+                format!(r#"operator: "{op}""#)
+            }
+        };
         Some(format!(
             r#"({node_type}
   left: (_) @left
+  {op_clause}
   right: (_) @right) @expr"#
         ))
     } else {
-        // Generic binary expression
+        // Generic binary expression - match any operator
         Some(format!(
             r#"({node_type}
   left: (_) @left
@@ -366,19 +463,75 @@ fn translate_binary_expression(operator: &str, language: &Language) -> Option<St
 
 /// Translate member access pattern
 fn translate_member_access(tokens: &[MetavarToken], language: &Language) -> Option<String> {
-    let node_type = match language {
-        Language::Python => "attribute",
-        Language::JavaScript | Language::TypeScript => "member_expression",
-        Language::Rust => "field_expression",
-        Language::Go => "selector_expression",
-        Language::C | Language::Cpp => "field_expression",
+    let (node_type, obj_field, attr_field) = match language {
+        Language::Python => ("attribute", "object", "attribute"),
+        Language::JavaScript | Language::TypeScript => ("member_expression", "object", "property"),
+        Language::Rust => ("field_expression", "value", "field"),
+        Language::Go => ("selector_expression", "operand", "field"),
+        Language::C | Language::Cpp => ("field_expression", "argument", "field"),
     };
 
-    Some(format!(
-        r#"({node_type}
-  object: (_) @object
-  attribute: (_) @attribute) @access"#
-    ))
+    // Parse tokens to find object and attribute patterns
+    let dot_pos = tokens.iter().position(|t| matches!(t, MetavarToken::Dot));
+
+    if let Some(dot_idx) = dot_pos {
+        // Get object token (first non-whitespace before dot)
+        let object_token = tokens[..dot_idx]
+            .iter()
+            .filter(|t| !matches!(t, MetavarToken::Whitespace))
+            .next();
+
+        // Get attribute token (first non-whitespace after dot)
+        let attr_token = tokens[dot_idx + 1..]
+            .iter()
+            .filter(|t| !matches!(t, MetavarToken::Whitespace))
+            .next();
+
+        // Build object pattern and constraint
+        let (obj_pattern, obj_constraint) = match object_token {
+            Some(MetavarToken::Identifier(name)) => (
+                "(identifier) @object",
+                Some(format!(r#"(#eq? @object "{name}")"#)),
+            ),
+            Some(MetavarToken::Metavar(_)) => ("(_) @object", None),
+            _ => ("(_) @object", None),
+        };
+
+        // Build attribute pattern and constraint
+        let (attr_pattern, attr_constraint) = match attr_token {
+            Some(MetavarToken::Identifier(name)) => (
+                "(property_identifier) @attribute",
+                Some(format!(r#"(#eq? @attribute "{name}")"#)),
+            ),
+            Some(MetavarToken::Metavar(_)) => ("(_) @attribute", None),
+            _ => ("(_) @attribute", None),
+        };
+
+        // Combine constraints
+        let constraints: Vec<String> = [obj_constraint, attr_constraint]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let constraint_str = if constraints.is_empty() {
+            String::new()
+        } else {
+            format!("\n  {}", constraints.join("\n  "))
+        };
+
+        Some(format!(
+            r#"({node_type}
+  {obj_field}: {obj_pattern}
+  {attr_field}: {attr_pattern}{constraint_str}) @access"#
+        ))
+    } else {
+        // No dot found, generate generic member access
+        Some(format!(
+            r#"({node_type}
+  {obj_field}: (_) @object
+  {attr_field}: (_) @attribute) @access"#
+        ))
+    }
 }
 
 /// Translate simple expression pattern
@@ -387,21 +540,37 @@ fn translate_simple_expression(tokens: &[MetavarToken], language: &Language) -> 
         return None;
     }
 
+    // Use language-specific node types
+    let (id_node, string_node) = match language {
+        Language::Python => ("identifier", "string"),
+        Language::JavaScript | Language::TypeScript => ("identifier", "string"),
+        Language::Rust => ("identifier", "string_literal"),
+        Language::Go => ("identifier", "interpreted_string_literal"),
+        Language::C | Language::Cpp => ("identifier", "string_literal"),
+    };
+
     match &tokens[0] {
         MetavarToken::Metavar(_) => {
             // Match any identifier
-            Some("(identifier) @expr".to_string())
+            Some(format!("({id_node}) @expr"))
         }
         MetavarToken::Identifier(name) => {
             // Match specific identifier
             Some(format!(
-                r#"((identifier) @expr
+                r#"(({id_node}) @expr
   (#eq? @expr "{name}"))"#
             ))
         }
-        MetavarToken::StringLiteral(_) => {
-            // Match string literals
-            Some("(string) @expr".to_string())
+        MetavarToken::StringLiteral(content) => {
+            // Match string literals, optionally with content match
+            if content.is_empty() {
+                Some(format!("({string_node}) @expr"))
+            } else {
+                Some(format!(
+                    r#"(({string_node}) @expr
+  (#match? @expr "{content}"))"#
+                ))
+            }
         }
         _ => None,
     }
