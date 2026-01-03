@@ -189,43 +189,36 @@ async fn inject_auth_state_middleware(
     next.run(request).await
 }
 
-/// Create the application router with comprehensive middleware stack
-pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>) -> Router {
-    // Create CSRF service for auth endpoints
-    let csrf_service = Arc::new(CsrfService::new(config.auth.csrf_token_bytes));
+/// Root route - redirect to docs if enabled, otherwise show API info
+async fn root_handler() -> Response {
+    axum::Json(serde_json::json!({
+        "name": "Vulnera API",
+        "version": env!("CARGO_PKG_VERSION"),
+        "description": "A comprehensive vulnerability analysis API",
+        "endpoints": {
+            "health": "/health",
+            "metrics": "/metrics",
+            "api": "/api/v1",
+            "docs": "/docs"
+        }
+    }))
+    .into_response()
+}
 
-    // Create CSRF middleware state
-    let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
-
-    // Create auth state for auth endpoints
-    let auth_app_state = AuthAppState {
-        login_use_case: orchestrator_state.login_use_case.clone(),
-        register_use_case: orchestrator_state.register_use_case.clone(),
-        refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
-        validate_token_use_case: orchestrator_state.validate_token_use_case.clone(),
-        auth_state: orchestrator_state.auth_state.clone(),
-        token_ttl_hours: config.auth.token_ttl_hours,
-        refresh_token_ttl_hours: config.auth.refresh_token_ttl_hours,
-        token_blacklist: Some(orchestrator_state.token_blacklist.clone()),
-        blacklist_tokens_on_logout: config.auth.blacklist_tokens_on_logout,
-        csrf_service: csrf_service.clone(),
-        cookie_domain: config.auth.cookie_domain.clone(),
-        cookie_secure: config.auth.cookie_secure,
-        cookie_same_site: config.auth.cookie_same_site.clone(),
-        cookie_path: config.auth.cookie_path.clone(),
-        refresh_cookie_path: config.auth.refresh_cookie_path.clone(),
-    };
-
-    // Auth routes
-    // Public auth routes (no CSRF required - these establish or maintain the session)
-    let public_auth_routes = Router::new()
+fn auth_routes<S>(
+    auth_app_state: AuthAppState,
+    csrf_middleware_state: Arc<CsrfMiddlewareState>,
+) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let public = Router::new()
         .route("/auth/login", post(login))
         .route("/auth/register", post(register))
         .route("/auth/refresh", post(refresh_token))
         .with_state(auth_app_state.clone());
 
-    // Protected auth routes (CSRF required for explicit user actions)
-    let protected_auth_routes = Router::new()
+    let protected = Router::new()
         .route("/auth/logout", post(logout))
         .route("/auth/api-keys", post(create_api_key).get(list_api_keys))
         .route(
@@ -233,31 +226,45 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             axum::routing::delete(revoke_api_key),
         )
         .layer(middleware::from_fn_with_state(
-            csrf_middleware_state.clone(),
+            csrf_middleware_state,
             csrf_validation_middleware,
         ))
         .with_state(auth_app_state);
 
-    // LLM routes (will use unified rate limiting with higher cost via request cost weighting)
-    let llm_routes = Router::new()
+    Router::new().merge(public).merge(protected)
+}
+
+fn llm_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    OrchestratorState: axum::extract::FromRef<S>,
+{
+    Router::new()
         .route("/llm/fix", post(generate_code_fix))
         .route("/llm/explain", post(explain_vulnerability))
         .route("/llm/query", post(natural_language_query))
-        .route("/jobs/{job_id}/enrich", post(enrich_job_findings));
-    // Note: LLM requests will be rate limited by the unified rate limiter
-    // with RequestCost::Llm (10 tokens per request)
+        .route("/jobs/{job_id}/enrich", post(enrich_job_findings))
+}
 
-    // Dependencies routes (no CSRF validation - designed for cross-origin requests)
-    // Applied with extended timeout for dependency analysis operations
-    let dependencies_routes = Router::new()
+fn dependencies_routes<S>(config: Arc<Config>) -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    OrchestratorState: axum::extract::FromRef<S>,
+{
+    Router::new()
         .route("/dependencies/analyze", post(analyze_dependencies))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(config.server.dependencies_analysis_timeout_seconds),
-        ));
+        ))
+}
 
-    // Organization routes (protected by CSRF for POST/PUT/DELETE)
-    let organization_routes = Router::new()
+fn organization_routes<S>() -> Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+    OrchestratorState: axum::extract::FromRef<S>,
+{
+    Router::new()
         .route(
             "/organizations",
             post(create_organization).get(list_organizations),
@@ -285,18 +292,49 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         )
         .route("/organizations/{id}/analytics/usage", get(get_usage))
         .route("/organizations/{id}/analytics/quota", get(get_quota))
-        // Personal analytics routes (for users without organizations)
         .route("/me/analytics/dashboard", get(get_personal_dashboard_stats))
-        .route("/me/analytics/usage", get(get_personal_usage));
+        .route("/me/analytics/usage", get(get_personal_usage))
+}
 
-    // Routes that need CSRF validation
-    // Applied with extended timeout for analysis operations
-    let csrf_protected_routes = Router::new()
+/// Create the application router with comprehensive middleware stack
+pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>) -> Router {
+    // Create CSRF service for auth endpoints
+    let csrf_service = Arc::new(CsrfService::new(config.auth.csrf_token_bytes));
+
+    // Create CSRF middleware state
+    let csrf_middleware_state = Arc::new(CsrfMiddlewareState::new(csrf_service.clone()));
+
+    // Create auth state for auth endpoints
+    let auth_app_state = AuthAppState {
+        login_use_case: orchestrator_state.login_use_case.clone(),
+        register_use_case: orchestrator_state.register_use_case.clone(),
+        refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
+        validate_token_use_case: orchestrator_state.validate_token_use_case.clone(),
+        auth_state: orchestrator_state.auth_state.clone(),
+        token_ttl_hours: config.auth.token_ttl_hours,
+        refresh_token_ttl_hours: config.auth.refresh_token_ttl_hours,
+        token_blacklist: Some(orchestrator_state.token_blacklist.clone()),
+        blacklist_tokens_on_logout: config.auth.blacklist_tokens_on_logout,
+        csrf_service: csrf_service.clone(),
+        cookie_domain: config.auth.cookie_domain.clone(),
+        cookie_secure: config.auth.cookie_secure,
+        cookie_same_site: config.auth.cookie_same_site.clone(),
+        cookie_path: config.auth.cookie_path.clone(),
+        refresh_cookie_path: config.auth.refresh_cookie_path.clone(),
+    };
+
+    // Modular routes
+    let auth_router = auth_routes(auth_app_state, csrf_middleware_state.clone());
+    let llm_router = llm_routes();
+    let dependencies_router = dependencies_routes(config.clone());
+    let organization_router = organization_routes();
+
+    // Routes that need CSRF validation and extended timeout
+    let analysis_and_mgmt_routes = Router::new()
         .route("/analyze/job", post(analyze))
         .route("/analyze/repository", post(analyze_repository))
-        .merge(llm_routes)
-        .merge(organization_routes)
-        .merge(protected_auth_routes)
+        .merge(llm_router)
+        .merge(organization_router)
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             Duration::from_secs(config.server.general_analysis_timeout_seconds),
@@ -312,25 +350,9 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
             "/jobs/{id}",
             get(crate::presentation::controllers::jobs::get_job),
         )
-        .merge(csrf_protected_routes)
-        .merge(public_auth_routes)
-        .merge(dependencies_routes);
-
-    // Root route - redirect to docs if enabled, otherwise show API info
-    async fn root_handler() -> Response {
-        axum::Json(serde_json::json!({
-            "name": "Vulnera API",
-            "version": env!("CARGO_PKG_VERSION"),
-            "description": "A comprehensive vulnerability analysis API",
-            "endpoints": {
-                "health": "/health",
-                "metrics": "/metrics",
-                "api": "/api/v1",
-                "docs": "/docs"
-            }
-        }))
-        .into_response()
-    }
+        .merge(analysis_and_mgmt_routes)
+        .merge(auth_router)
+        .merge(dependencies_router);
 
     let health_routes = Router::new()
         .route("/", get(root_handler))

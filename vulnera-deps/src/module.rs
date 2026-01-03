@@ -1,6 +1,7 @@
 //! Dependency analyzer module implementation
 
 use async_trait::async_trait;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
@@ -17,6 +18,7 @@ use crate::use_cases::AnalyzeDependenciesUseCase;
 /// Dependency analyzer module
 pub struct DependencyAnalyzerModule {
     use_case: Arc<AnalyzeDependenciesUseCase<CacheServiceImpl>>,
+    parser_factory: Arc<ParserFactory>,
 }
 
 impl DependencyAnalyzerModule {
@@ -28,14 +30,17 @@ impl DependencyAnalyzerModule {
         max_concurrent_registry_queries: usize,
     ) -> Self {
         let use_case = Arc::new(AnalyzeDependenciesUseCase::new_with_config(
-            parser_factory,
+            parser_factory.clone(),
             vulnerability_repository,
             cache_service,
             max_concurrent_requests,
             max_concurrent_registry_queries,
         ));
 
-        Self { use_case }
+        Self {
+            use_case,
+            parser_factory,
+        }
     }
 
     /// Create a new module with analysis context for workspace-aware analysis
@@ -48,7 +53,7 @@ impl DependencyAnalyzerModule {
         project_root: Option<std::path::PathBuf>,
     ) -> Self {
         let use_case = Arc::new(AnalyzeDependenciesUseCase::new_with_context(
-            parser_factory,
+            parser_factory.clone(),
             vulnerability_repository,
             cache_service,
             max_concurrent_requests,
@@ -56,7 +61,10 @@ impl DependencyAnalyzerModule {
             project_root,
         ));
 
-        Self { use_case }
+        Self {
+            use_case,
+            parser_factory,
+        }
     }
 }
 
@@ -64,6 +72,49 @@ impl DependencyAnalyzerModule {
 impl AnalysisModule for DependencyAnalyzerModule {
     fn module_type(&self) -> ModuleType {
         ModuleType::DependencyAnalyzer
+    }
+
+    async fn prepare_config(
+        &self,
+        project: &vulnera_core::domain::project::Project,
+    ) -> Result<std::collections::HashMap<String, serde_json::Value>, ModuleExecutionError> {
+        let mut config_map = std::collections::HashMap::new();
+
+        if let Some(manifest_path) = project.metadata.dependency_files.first() {
+            match tokio::fs::read_to_string(manifest_path).await {
+                Ok(content) => {
+                    config_map.insert(
+                        "file_content".to_string(),
+                        serde_json::Value::String(content),
+                    );
+                    config_map.insert(
+                        "filename".to_string(),
+                        serde_json::Value::String(
+                            PathBuf::from(manifest_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown")
+                                .to_string(),
+                        ),
+                    );
+                    if let Some(ecosystem) = self.parser_factory.detect_ecosystem(manifest_path) {
+                        config_map.insert(
+                            "ecosystem".to_string(),
+                            serde_json::Value::String(ecosystem.to_string()),
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        manifest = %manifest_path,
+                        error = %e,
+                        "Failed to load dependency manifest"
+                    );
+                }
+            }
+        }
+
+        Ok(config_map)
     }
 
     async fn execute(&self, config: &ModuleConfig) -> Result<ModuleResult, ModuleExecutionError> {
