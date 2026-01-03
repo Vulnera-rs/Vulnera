@@ -232,9 +232,20 @@ impl ScanProjectUseCase {
         if self.config.enable_call_graph && self.config.analysis_depth != AnalysisDepth::Quick {
             debug!("Building call graph for inter-procedural analysis");
             let mut call_graph = self.call_graph_builder.write().await;
+            let mut query_engine = TreeSitterQueryEngine::new();
+
             for file in &files {
                 if let Ok(content) = std::fs::read_to_string(&file.path) {
-                    call_graph.analyze_file(&file.path.display().to_string(), &content);
+                    // Parse file to get AST
+                    if let Ok((tree, _)) = query_engine.parse(&content, &file.language) {
+                        call_graph.analyze_ast(
+                            &file.path.display().to_string(),
+                            &tree,
+                            &file.language,
+                            &content,
+                            &mut query_engine,
+                        );
+                    }
                 }
             }
         }
