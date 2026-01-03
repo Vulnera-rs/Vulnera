@@ -1,0 +1,196 @@
+# Taint Configuration Example
+# This file defines custom taint sources, sinks, and sanitizers
+# for SAST analysis. Place this file in your project and set
+# `taint_config_path` in your vulnera configuration.
+
+# Whether to include built-in patterns (default: true)
+include_builtin = true
+
+# Confidence threshold for generic validation (0.0-1.0)
+# Generic validators reduce confidence instead of clearing taint
+generic_validation_confidence = 0.6
+
+# =============================================================================
+# Custom Taint Sources - Python
+# =============================================================================
+# Sources are where untrusted data enters your application
+
+[[custom_sources.python]]
+query = """
+(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @method)
+  (#eq? @obj "request")
+  (#match? @method "^(get|post|json|form|args|values)$")
+) @source
+"""
+name = "django_request_data"
+category = "user_input"
+is_known = true
+labels = ["user_controlled", "web_input"]
+
+[[custom_sources.python]]
+query = """
+(call
+  function: (identifier) @fn
+  (#eq? @fn "input"))
+"""
+name = "python_input"
+category = "user_input"
+is_known = true
+labels = ["user_controlled"]
+
+[[custom_sources.python]]
+query = """
+(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @method)
+  (#eq? @obj "os")
+  (#eq? @method "getenv")
+) @source
+"""
+name = "environment_variable"
+category = "environment"
+is_known = true
+labels = ["env_input"]
+
+# =============================================================================
+# Custom Taint Sinks - Python
+# =============================================================================
+# Sinks are dangerous functions where tainted data causes vulnerabilities
+
+[[custom_sinks.python]]
+query = """
+(call
+  function: (identifier) @fn
+  arguments: (argument_list (_) @arg)
+  (#eq? @fn "eval"))
+"""
+name = "eval_injection"
+category = "code_injection"
+is_known = true
+
+[[custom_sinks.python]]
+query = """
+(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @method)
+  (#eq? @obj "subprocess")
+  (#match? @method "^(run|call|Popen|check_output)$")
+) @sink
+"""
+name = "command_injection"
+category = "command_injection"
+is_known = true
+
+[[custom_sinks.python]]
+query = """
+(call
+  function: (attribute
+    object: (_) @cursor
+    attribute: (identifier) @method)
+  arguments: (argument_list (string) @query)
+  (#eq? @method "execute")
+) @sink
+"""
+name = "sql_injection"
+category = "sql_injection"
+is_known = true
+
+# =============================================================================
+# Custom Taint Sanitizers - Python
+# =============================================================================
+# Sanitizers are functions that clean or validate tainted data
+
+[[custom_sanitizers.python]]
+query = """
+(call
+  function: (attribute
+    object: (_)
+    attribute: (identifier) @method)
+  (#match? @method "^(escape|quote|sanitize|clean|validate)$")
+) @sanitizer
+"""
+name = "generic_sanitizer"
+category = "sanitization"
+is_known = true
+# No clears_labels means it clears all labels
+
+[[custom_sanitizers.python]]
+query = """
+(call
+  function: (identifier) @fn
+  (#eq? @fn "html_escape"))
+"""
+name = "html_escape"
+category = "xss_prevention"
+is_known = true
+clears_labels = ["xss"]
+
+[[custom_sanitizers.python]]
+query = """
+(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @method)
+  (#eq? @obj "shlex")
+  (#eq? @method "quote")
+) @sanitizer
+"""
+name = "shell_quote"
+category = "command_injection_prevention"
+is_known = true
+clears_labels = ["command_injection"]
+
+# =============================================================================
+# JavaScript/TypeScript Custom Patterns
+# =============================================================================
+
+[[custom_sources.javascript]]
+query = """
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @prop)
+  (#eq? @obj "req")
+  (#match? @prop "^(body|query|params|headers)$")
+) @source
+"""
+name = "express_request"
+category = "user_input"
+is_known = true
+labels = ["user_controlled", "http_input"]
+
+[[custom_sinks.javascript]]
+query = """
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "eval"))
+"""
+name = "eval_injection"
+category = "code_injection"
+is_known = true
+
+[[custom_sinks.javascript]]
+query = """
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop)
+  (#eq? @prop "innerHTML"))
+"""
+name = "xss_innerhtml"
+category = "xss"
+is_known = true
+
+[[custom_sanitizers.javascript]]
+query = """
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(escape|encodeURIComponent|encodeURI|sanitize)$"))
+"""
+name = "url_encoding"
+category = "encoding"
+is_known = true

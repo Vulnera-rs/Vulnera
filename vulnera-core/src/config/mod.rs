@@ -615,6 +615,9 @@ pub struct SastConfig {
     pub exclude_patterns: Vec<String>,
     /// Optional path to rule configuration file (TOML or JSON)
     pub rule_file_path: Option<PathBuf>,
+    /// Optional path to taint configuration file (TOML or JSON)
+    /// Allows defining custom taint sources, sinks, and sanitizers
+    pub taint_config_path: Option<PathBuf>,
     /// Whether to enable logging for SAST operations
     pub enable_logging: bool,
     /// Enable data flow / taint analysis (default: true)
@@ -639,6 +642,10 @@ pub struct SastConfig {
     pub max_findings_per_file: Option<usize>,
     /// Maximum total findings across all files (stops scan early if exceeded, None = no limit)
     pub max_total_findings: Option<usize>,
+    /// Enable incremental analysis (skip unchanged files based on content hash)
+    pub enable_incremental: Option<bool>,
+    /// Path to store incremental analysis state (file hashes)
+    pub incremental_state_path: Option<PathBuf>,
 }
 
 impl Default for SastConfig {
@@ -665,6 +672,7 @@ impl Default for SastConfig {
                 "fixtures".to_string(),
             ],
             rule_file_path: None,
+            taint_config_path: None,
             enable_logging: true,
             enable_data_flow: true,
             enable_call_graph: true,
@@ -676,7 +684,9 @@ impl Default for SastConfig {
             per_file_timeout_seconds: Some(30),
             scan_timeout_seconds: None, // No overall limit by default
             max_findings_per_file: Some(100),
-            max_total_findings: None, // No limit by default
+            max_total_findings: None,        // No limit by default
+            enable_incremental: Some(false), // Disabled by default
+            incremental_state_path: None,
         }
     }
 }
