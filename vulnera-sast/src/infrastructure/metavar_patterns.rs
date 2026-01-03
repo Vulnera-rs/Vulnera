@@ -580,6 +580,10 @@ fn translate_simple_expression(tokens: &[MetavarToken], language: &Language) -> 
 mod tests {
     use super::*;
 
+    // ==========================================================================
+    // Tokenization Tests
+    // ==========================================================================
+
     #[test]
     fn test_tokenize_function_call() {
         let tokens = tokenize("foo($ARG)");
@@ -604,6 +608,286 @@ mod tests {
         assert!(matches!(&filtered[2], MetavarToken::Metavar(n) if n == "$Y"));
     }
 
+    // ==========================================================================
+    // Feature 1: Escape Sequence Handling Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_escape_sequence_newline() {
+        let tokens = tokenize(r#""hello\nworld""#);
+        assert_eq!(tokens.len(), 1);
+        if let MetavarToken::StringLiteral(content) = &tokens[0] {
+            assert_eq!(content, "hello\nworld");
+        } else {
+            panic!("Expected StringLiteral token");
+        }
+    }
+
+    #[test]
+    fn test_escape_sequence_tab() {
+        let tokens = tokenize(r#""col1\tcol2""#);
+        assert_eq!(tokens.len(), 1);
+        if let MetavarToken::StringLiteral(content) = &tokens[0] {
+            assert_eq!(content, "col1\tcol2");
+        } else {
+            panic!("Expected StringLiteral token");
+        }
+    }
+
+    #[test]
+    fn test_escape_sequence_backslash() {
+        let tokens = tokenize(r#""path\\to\\file""#);
+        assert_eq!(tokens.len(), 1);
+        if let MetavarToken::StringLiteral(content) = &tokens[0] {
+            assert_eq!(content, "path\\to\\file");
+        } else {
+            panic!("Expected StringLiteral token");
+        }
+    }
+
+    #[test]
+    fn test_escape_sequence_quotes() {
+        let tokens = tokenize(r#""say \"hello\"""#);
+        assert_eq!(tokens.len(), 1);
+        if let MetavarToken::StringLiteral(content) = &tokens[0] {
+            assert_eq!(content, "say \"hello\"");
+        } else {
+            panic!("Expected StringLiteral token");
+        }
+    }
+
+    #[test]
+    fn test_escape_sequence_carriage_return() {
+        let tokens = tokenize(r#""line\r\n""#);
+        assert_eq!(tokens.len(), 1);
+        if let MetavarToken::StringLiteral(content) = &tokens[0] {
+            assert_eq!(content, "line\r\n");
+        } else {
+            panic!("Expected StringLiteral token");
+        }
+    }
+
+    // ==========================================================================
+    // Feature 2: Argument Pattern Extraction Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_extract_single_metavar_arg() {
+        let tokens = tokenize("foo($X)");
+        let args = extract_argument_patterns(&tokens);
+        assert_eq!(args.len(), 1);
+        assert!(matches!(&args[0], ArgumentPattern::Metavar(n) if n == "$X"));
+    }
+
+    #[test]
+    fn test_extract_multiple_args() {
+        let tokens = tokenize("foo($X, $Y, $Z)");
+        let args = extract_argument_patterns(&tokens);
+        assert_eq!(args.len(), 3);
+        assert!(matches!(&args[0], ArgumentPattern::Metavar(n) if n == "$X"));
+        assert!(matches!(&args[1], ArgumentPattern::Metavar(n) if n == "$Y"));
+        assert!(matches!(&args[2], ArgumentPattern::Metavar(n) if n == "$Z"));
+    }
+
+    #[test]
+    fn test_extract_mixed_args() {
+        let tokens = tokenize("foo($X, literal, \"string\")");
+        let args = extract_argument_patterns(&tokens);
+        assert_eq!(args.len(), 3);
+        assert!(matches!(&args[0], ArgumentPattern::Metavar(n) if n == "$X"));
+        assert!(matches!(&args[1], ArgumentPattern::Identifier(n) if n == "literal"));
+        assert!(matches!(&args[2], ArgumentPattern::StringLiteral(s) if s == "string"));
+    }
+
+    #[test]
+    fn test_translate_function_call_with_args() {
+        let parsed = parse_metavar_pattern("foo($X, literal)");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Should contain argument captures
+        assert!(q.contains("@arg0"));
+        assert!(q.contains("@arg1"));
+        // Should contain constraint for literal argument
+        assert!(q.contains("literal"));
+    }
+
+    // ==========================================================================
+    // Feature 3: Operator-Specific Binary Expression Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_binary_expr_with_plus_operator() {
+        let parsed = parse_metavar_pattern("$X + $Y");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        assert!(q.contains("binary_operator"));
+        assert!(q.contains(r#"operator: "+""#));
+        assert!(q.contains("@left"));
+        assert!(q.contains("@right"));
+    }
+
+    #[test]
+    fn test_binary_expr_with_equals_operator() {
+        let parsed = parse_metavar_pattern("$A == $B");
+        let query = translate_to_tree_sitter(&parsed, &Language::JavaScript);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        assert!(q.contains("binary_expression"));
+        assert!(q.contains(r#"operator: "==""#));
+    }
+
+    #[test]
+    fn test_binary_expr_with_unmapped_operator() {
+        // % is tokenized but not in the operator mapping, so no operator field
+        let parsed = parse_metavar_pattern("$X % $Y");
+        let query = translate_to_tree_sitter(&parsed, &Language::JavaScript);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Unmapped operator should still generate query but without operator constraint
+        assert!(q.contains("binary_expression"));
+        assert!(q.contains("@left"));
+        assert!(q.contains("@right"));
+        // Should NOT contain operator field for unmapped operators
+        assert!(!q.contains(r#"operator: "%""#));
+    }
+
+    #[test]
+    fn test_binary_expr_language_specific_node() {
+        // Python uses binary_operator
+        let parsed = parse_metavar_pattern("$X - $Y");
+        let py_query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(py_query.unwrap().contains("binary_operator"));
+
+        // Rust uses binary_expression
+        let rs_query = translate_to_tree_sitter(&parsed, &Language::Rust);
+        assert!(rs_query.unwrap().contains("binary_expression"));
+    }
+
+    // ==========================================================================
+    // Feature 4: Member Access Token Parsing Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_member_access_metavar_object() {
+        let parsed = parse_metavar_pattern("$OBJ.method");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        assert!(q.contains("attribute"));
+        assert!(q.contains("@object"));
+        assert!(q.contains("@attribute"));
+        // Should have constraint for literal "method"
+        assert!(q.contains("method"));
+    }
+
+    #[test]
+    fn test_member_access_literal_object() {
+        let parsed = parse_metavar_pattern("request.$ATTR");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Should have constraint for literal "request"
+        assert!(q.contains("request"));
+        assert!(q.contains("@object"));
+    }
+
+    #[test]
+    fn test_member_access_both_metavars() {
+        let parsed = parse_metavar_pattern("$OBJ.$ATTR");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // No constraints for metavars, just wildcards
+        assert!(q.contains("(_) @object"));
+        assert!(q.contains("(_) @attribute"));
+    }
+
+    #[test]
+    fn test_member_access_language_specific_fields() {
+        let parsed = parse_metavar_pattern("obj.field");
+
+        // Python uses "attribute" node
+        let py = translate_to_tree_sitter(&parsed, &Language::Python).unwrap();
+        assert!(py.contains("(attribute"));
+
+        // JavaScript uses "member_expression"
+        let js = translate_to_tree_sitter(&parsed, &Language::JavaScript).unwrap();
+        assert!(js.contains("(member_expression"));
+
+        // Rust uses "field_expression"
+        let rs = translate_to_tree_sitter(&parsed, &Language::Rust).unwrap();
+        assert!(rs.contains("(field_expression"));
+
+        // Go uses "selector_expression"
+        let go = translate_to_tree_sitter(&parsed, &Language::Go).unwrap();
+        assert!(go.contains("(selector_expression"));
+    }
+
+    // ==========================================================================
+    // Feature 5: Language-Specific Node Types Tests
+    // ==========================================================================
+
+    #[test]
+    fn test_simple_expr_identifier_language_specific() {
+        let parsed = parse_metavar_pattern("$VAR");
+
+        // All should produce identifier node
+        let py = translate_to_tree_sitter(&parsed, &Language::Python).unwrap();
+        assert!(py.contains("(identifier)"));
+
+        let rs = translate_to_tree_sitter(&parsed, &Language::Rust).unwrap();
+        assert!(rs.contains("(identifier)"));
+    }
+
+    #[test]
+    fn test_simple_expr_string_python() {
+        let parsed = parse_metavar_pattern("\"test\"");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Python uses "string" node
+        assert!(q.contains("(string)"));
+        // Should have content match
+        assert!(q.contains("test"));
+    }
+
+    #[test]
+    fn test_simple_expr_string_rust() {
+        let parsed = parse_metavar_pattern("\"test\"");
+        let query = translate_to_tree_sitter(&parsed, &Language::Rust);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Rust uses "string_literal" node
+        assert!(q.contains("(string_literal)"));
+    }
+
+    #[test]
+    fn test_simple_expr_string_go() {
+        let parsed = parse_metavar_pattern("\"test\"");
+        let query = translate_to_tree_sitter(&parsed, &Language::Go);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Go uses "interpreted_string_literal" node
+        assert!(q.contains("(interpreted_string_literal)"));
+    }
+
+    #[test]
+    fn test_simple_expr_empty_string() {
+        let parsed = parse_metavar_pattern("\"\"");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        // Empty string should not have match constraint
+        assert!(q.contains("(string)"));
+        assert!(!q.contains("#match?"));
+    }
+
+    // ==========================================================================
+    // Structure Detection Tests
+    // ==========================================================================
+
     #[test]
     fn test_detect_function_call_structure() {
         let parsed = parse_metavar_pattern("foo($ARG)");
@@ -623,6 +907,25 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_member_access_structure() {
+        let parsed = parse_metavar_pattern("obj.method");
+        assert!(matches!(parsed.structure, PatternStructure::MemberAccess));
+    }
+
+    #[test]
+    fn test_detect_simple_expression_structure() {
+        let parsed = parse_metavar_pattern("$VAR");
+        assert!(matches!(
+            parsed.structure,
+            PatternStructure::SimpleExpression
+        ));
+    }
+
+    // ==========================================================================
+    // Translation Tests
+    // ==========================================================================
+
+    #[test]
     fn test_translate_function_call() {
         let parsed = parse_metavar_pattern("foo($ARG)");
         let query = translate_to_tree_sitter(&parsed, &Language::Python);
@@ -630,5 +933,17 @@ mod tests {
         let q = query.unwrap();
         assert!(q.contains("call"));
         assert!(q.contains("foo"));
+    }
+
+    #[test]
+    fn test_translate_metavar_function_call() {
+        let parsed = parse_metavar_pattern("$FUNC($ARG)");
+        let query = translate_to_tree_sitter(&parsed, &Language::Python);
+        assert!(query.is_some());
+        let q = query.unwrap();
+        assert!(q.contains("call"));
+        assert!(q.contains("@func"));
+        // Should NOT have #eq? constraint for metavar function name
+        assert!(!q.contains("#eq? @func"));
     }
 }
