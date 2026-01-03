@@ -7,6 +7,7 @@
 //! - PostgreSQL rule storage with hot-reload
 //! - SARIF v2.1.0 export
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock as StdRwLock};
 use streaming_iterator::StreamingIterator;
@@ -228,29 +229,56 @@ impl ScanProjectUseCase {
         let rules = self.rule_repository.read().await;
         let all_rules = rules.get_all_rules();
 
-        // Phase 1: Build call graph (if enabled and not Quick mode)
+        // =========================================================================
+        // Phase 1: Build Call Graph & Parse All Files
+        // =========================================================================
+        // In enterprise mode, we first build the complete call graph by parsing
+        // all files, then resolve cross-file references before analysis.
+
+        let mut parsed_files: HashMap<String, (tree_sitter::Tree, String)> = HashMap::new();
+
         if self.config.enable_call_graph && self.config.analysis_depth != AnalysisDepth::Quick {
-            debug!("Building call graph for inter-procedural analysis");
+            debug!("Phase 1: Building call graph with cross-file resolution");
             let mut call_graph = self.call_graph_builder.write().await;
             let mut query_engine = TreeSitterQueryEngine::new();
 
+            // 1a. Parse all files and build initial graph
             for file in &files {
                 if let Ok(content) = std::fs::read_to_string(&file.path) {
-                    // Parse file to get AST
+                    let file_path_str = file.path.display().to_string();
+
                     if let Ok((tree, _)) = query_engine.parse(&content, &file.language) {
+                        // Build call graph nodes and edges
                         call_graph.analyze_ast(
-                            &file.path.display().to_string(),
+                            &file_path_str,
                             &tree,
                             &file.language,
                             &content,
                             &mut query_engine,
                         );
+
+                        // Cache the parsed tree for reuse in analysis phase
+                        parsed_files.insert(file_path_str, (tree, content));
                     }
                 }
             }
+
+            // 1b. Resolve cross-file references
+            let resolved_count = call_graph.graph_mut().resolve_all_calls();
+            let stats = call_graph.graph().stats();
+
+            info!(
+                functions = stats.total_functions,
+                calls = stats.total_calls,
+                resolved = resolved_count,
+                entry_points = stats.entry_points,
+                "Call graph built with cross-file resolution"
+            );
         }
 
-        // Phase 2: Analyze each file
+        // =========================================================================
+        // Phase 2: File Analysis (Pattern Matching & Data Flow)
+        // =========================================================================
         for file in files {
             // Check file size limit
             let file_size = match std::fs::metadata(&file.path) {

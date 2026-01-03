@@ -3,7 +3,7 @@
 //! Inter-procedural call graph construction and traversal for SAST analysis.
 //! Enables tracking function calls across module boundaries.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
 use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature};
@@ -22,6 +22,45 @@ pub struct CallGraph {
     reverse_edges: HashMap<String, Vec<String>>,
     /// Entry points (functions not called by others)
     entry_points: HashSet<String>,
+    /// Index: function_name (without path) -> list of fully qualified IDs
+    name_index: HashMap<String, Vec<String>>,
+    /// Unresolved calls pending cross-file resolution
+    unresolved_calls: Vec<UnresolvedCall>,
+    /// Function taint summaries for inter-procedural analysis
+    function_summaries: HashMap<String, FunctionTaintSummary>,
+}
+
+/// Unresolved call site pending cross-file resolution
+#[derive(Debug, Clone)]
+pub struct UnresolvedCall {
+    /// Caller function ID
+    pub caller_id: String,
+    /// Called function name (without module path)
+    pub callee_name: String,
+    /// Optional module hint (e.g., from import statement)
+    pub module_hint: Option<String>,
+    /// Call location
+    pub line: u32,
+    pub column: u32,
+}
+
+/// Summary of a function's taint behavior for inter-procedural analysis
+#[derive(Debug, Clone, Default)]
+pub struct FunctionTaintSummary {
+    /// Function ID
+    pub function_id: String,
+    /// Which parameters get propagated to return value (param indices)
+    pub params_to_return: HashSet<usize>,
+    /// Which parameters flow to sinks (param_idx -> sink categories)
+    pub params_to_sinks: HashMap<usize, Vec<String>>,
+    /// Whether return value is inherently tainted (e.g., reads user input)
+    pub return_tainted: bool,
+    /// Source categories introduced by this function
+    pub introduces_taint: Vec<String>,
+    /// Whether this function acts as a sanitizer
+    pub is_sanitizer: bool,
+    /// Which labels this sanitizer clears
+    pub clears_labels: Vec<String>,
 }
 
 impl CallGraph {
@@ -224,6 +263,195 @@ impl CallGraph {
             sccs.push(scc);
         }
     }
+
+    // =========================================================================
+    // Symbol Resolution & Cross-File Linking
+    // =========================================================================
+
+    /// Build the name index for fast function lookup by name
+    pub fn build_name_index(&mut self) {
+        self.name_index.clear();
+        for (id, node) in &self.nodes {
+            self.name_index
+                .entry(node.signature.name.clone())
+                .or_default()
+                .push(id.clone());
+        }
+    }
+
+    /// Add an unresolved call for later resolution
+    pub fn add_unresolved_call(&mut self, call: UnresolvedCall) {
+        self.unresolved_calls.push(call);
+    }
+
+    /// Resolve all pending cross-file calls
+    /// Returns the number of calls successfully resolved
+    pub fn resolve_all_calls(&mut self) -> usize {
+        // Ensure name index is built
+        if self.name_index.is_empty() {
+            self.build_name_index();
+        }
+
+        let mut resolved_count = 0;
+        let unresolved = std::mem::take(&mut self.unresolved_calls);
+
+        for call in unresolved {
+            if let Some(target_id) = self.resolve_call(&call) {
+                let call_site = CallSite {
+                    target_id: target_id.clone(),
+                    target_name: call.callee_name.clone(),
+                    line: call.line,
+                    column: call.column,
+                    arguments: Vec::new(),
+                };
+                self.add_call(&call.caller_id, call_site);
+                resolved_count += 1;
+            }
+            // Unresolved calls are dropped (could log or store for reporting)
+        }
+
+        resolved_count
+    }
+
+    /// Try to resolve a single call to its target function ID
+    fn resolve_call(&self, call: &UnresolvedCall) -> Option<String> {
+        // Strategy 1: Check if there's a function with exact name match
+        if let Some(candidates) = self.name_index.get(&call.callee_name) {
+            // If only one candidate, use it
+            if candidates.len() == 1 {
+                return Some(candidates[0].clone());
+            }
+
+            // Strategy 2: Use module hint to disambiguate
+            if let Some(ref hint) = call.module_hint {
+                for candidate in candidates {
+                    // Check if the candidate's file path contains the module hint
+                    if let Some(node) = self.nodes.get(candidate) {
+                        if node.file_path.contains(hint) {
+                            return Some(candidate.clone());
+                        }
+                    }
+                }
+            }
+
+            // Strategy 3: Prefer functions in the same directory as caller
+            if let Some(caller_node) = self.nodes.get(&call.caller_id) {
+                let caller_dir = std::path::Path::new(&caller_node.file_path)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string());
+
+                if let Some(dir) = caller_dir {
+                    for candidate in candidates {
+                        if let Some(node) = self.nodes.get(candidate) {
+                            if node.file_path.starts_with(&dir) {
+                                return Some(candidate.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback: use first candidate (ambiguous but better than nothing)
+            return Some(candidates[0].clone());
+        }
+
+        None
+    }
+
+    // =========================================================================
+    // Topological Sort for Analysis Order
+    // =========================================================================
+
+    /// Get functions in topological order (callees before callers)
+    /// This ensures we analyze leaf functions first, then their callers
+    pub fn topological_order(&self) -> Vec<String> {
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut result = Vec::new();
+        let mut queue = VecDeque::new();
+
+        // Initialize in-degrees
+        for id in self.nodes.keys() {
+            in_degree.insert(id.clone(), 0);
+        }
+
+        // Count incoming edges (how many functions call this one)
+        for callers in self.reverse_edges.values() {
+            for caller in callers {
+                if let Some(degree) = in_degree.get_mut(caller) {
+                    *degree += 1;
+                }
+            }
+        }
+
+        // Start with leaf functions (no outgoing calls, or calls to external functions)
+        for (id, degree) in &in_degree {
+            if *degree == 0 {
+                queue.push_back(id.clone());
+            }
+        }
+
+        // BFS/Kahn's algorithm
+        while let Some(current) = queue.pop_front() {
+            result.push(current.clone());
+
+            // For each function that calls current, reduce its in-degree
+            if let Some(callers) = self.reverse_edges.get(&current) {
+                for caller in callers {
+                    if let Some(degree) = in_degree.get_mut(caller) {
+                        *degree -= 1;
+                        if *degree == 0 {
+                            queue.push_back(caller.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    // =========================================================================
+    // Function Summaries
+    // =========================================================================
+
+    /// Set the taint summary for a function
+    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionTaintSummary) {
+        self.function_summaries
+            .insert(function_id.to_string(), summary);
+    }
+
+    /// Get the taint summary for a function
+    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionTaintSummary> {
+        self.function_summaries.get(function_id)
+    }
+
+    /// Check if a function propagates taint from any parameter to return
+    pub fn propagates_taint(&self, function_id: &str) -> bool {
+        self.function_summaries
+            .get(function_id)
+            .map(|s| !s.params_to_return.is_empty() || s.return_tainted)
+            .unwrap_or(false)
+    }
+
+    /// Get statistics about the call graph
+    pub fn stats(&self) -> CallGraphStats {
+        let total_edges: usize = self.edges.values().map(|v| v.len()).sum();
+        CallGraphStats {
+            total_functions: self.nodes.len(),
+            total_calls: total_edges,
+            entry_points: self.entry_points.len(),
+            resolved_summaries: self.function_summaries.len(),
+        }
+    }
+}
+
+/// Statistics about the call graph
+#[derive(Debug, Clone)]
+pub struct CallGraphStats {
+    pub total_functions: usize,
+    pub total_calls: usize,
+    pub entry_points: usize,
+    pub resolved_summaries: usize,
 }
 
 /// Builder for constructing call graphs from AST
@@ -259,10 +487,9 @@ impl CallGraphBuilder {
             Language::Go => (GO_DEFINITIONS, GO_CALLS),
             Language::C => (C_DEFINITIONS, C_CALLS),
             Language::Cpp => (CPP_DEFINITIONS, CPP_CALLS),
-            // Default empty for unsupported langs
-            _ => ("", ""),
         };
 
+        // Check if queries are empty (unsupported language configuration)
         if def_query_str.is_empty() {
             return;
         }
@@ -322,6 +549,15 @@ impl CallGraphBuilder {
         }
 
         // 2. Find Calls
+        // Build a set of local function names for quick lookup
+        let local_function_names: HashSet<&str> = functions
+            .iter()
+            .filter_map(|f| {
+                // Extract just the function name from the ID (after "::")
+                f.id.split("::").last()
+            })
+            .collect();
+
         if let Ok(query) = query_engine.compile_query(call_query_str, language) {
             let matches = query_engine.execute_query(&query, tree, source_bytes);
             for m in matches {
@@ -336,26 +572,34 @@ impl CallGraphBuilder {
                         .map(|f| f.id.clone());
 
                     if let Some(caller) = caller_id {
-                        // Resolve Target (Fuzzy: Look for same function name in same file first)
-                        // In Phase 2: We would create an "Unresolved Edge" and link later.
-                        // Impl for now: Direct link if local, or create a 'phantom' ID.
+                        // Check if this is a local function call
+                        if local_function_names.contains(callee_name) {
+                            // Local call - create direct edge
+                            let target_id = format!("{}::{}", file_path, callee_name);
+                            let call_site = CallSite {
+                                target_id,
+                                target_name: callee_name.to_string(),
+                                line: m.start_position.0 as u32 + 1,
+                                column: m.start_position.1 as u32,
+                                arguments: Vec::new(),
+                            };
+                            self.graph.add_call(&caller, call_site);
+                        } else {
+                            // Cross-file or external call - add as unresolved
+                            // Extract module hint from method call pattern (e.g., "module.function")
+                            let module_hint = m.captures.get("obj").map(|obj_node| {
+                                source[obj_node.start_byte..obj_node.end_byte].to_string()
+                            });
 
-                        // NOTE: This logic assumes internal calls for now.
-                        let target_id = format!("{}::{}", file_path, callee_name); // Assume local internal call
-
-                        // We also add a cross-file heuristic for the future:
-                        // If not found locally, we'd search the graph.
-                        // For now, we just add the edges.
-
-                        let call_site = CallSite {
-                            target_id,
-                            target_name: callee_name.to_string(),
-                            line: m.start_position.0 as u32 + 1,
-                            column: m.start_position.1 as u32,
-                            arguments: Vec::new(),
-                        };
-
-                        self.graph.add_call(&caller, call_site);
+                            let unresolved = UnresolvedCall {
+                                caller_id: caller.clone(),
+                                callee_name: callee_name.to_string(),
+                                module_hint,
+                                line: m.start_position.0 as u32 + 1,
+                                column: m.start_position.1 as u32,
+                            };
+                            self.graph.add_unresolved_call(unresolved);
+                        }
                     }
                 }
             }
@@ -365,6 +609,11 @@ impl CallGraphBuilder {
     /// Get a reference to the built call graph
     pub fn graph(&self) -> &CallGraph {
         &self.graph
+    }
+
+    /// Get a mutable reference to the call graph
+    pub fn graph_mut(&mut self) -> &mut CallGraph {
+        &mut self.graph
     }
 
     /// Build and return the call graph
