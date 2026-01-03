@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
-use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature};
+use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
@@ -479,14 +479,51 @@ impl CallGraphBuilder {
         query_engine: &mut TreeSitterQueryEngine,
     ) {
         let source_bytes = source.as_bytes();
-        let (def_query_str, call_query_str) = match language {
-            Language::Python => (PYTHON_DEFINITIONS, PYTHON_CALLS),
-            Language::JavaScript => (JAVASCRIPT_DEFINITIONS, JAVASCRIPT_CALLS),
-            Language::TypeScript => (TYPESCRIPT_DEFINITIONS, TYPESCRIPT_CALLS),
-            Language::Rust => (RUST_DEFINITIONS, RUST_CALLS),
-            Language::Go => (GO_DEFINITIONS, GO_CALLS),
-            Language::C => (C_DEFINITIONS, C_CALLS),
-            Language::Cpp => (CPP_DEFINITIONS, CPP_CALLS),
+
+        // Get query strings for this language
+        let (def_query_str, call_query_str, param_query_str, class_query_str) = match language {
+            Language::Python => (
+                PYTHON_DEFINITIONS,
+                PYTHON_CALLS,
+                Some(PYTHON_PARAMETERS),
+                Some(PYTHON_CLASS_METHODS),
+            ),
+            Language::JavaScript => (
+                JAVASCRIPT_DEFINITIONS,
+                JAVASCRIPT_CALLS,
+                Some(JAVASCRIPT_PARAMETERS),
+                Some(JAVASCRIPT_CLASS_METHODS),
+            ),
+            Language::TypeScript => (
+                TYPESCRIPT_DEFINITIONS,
+                TYPESCRIPT_CALLS,
+                Some(TYPESCRIPT_PARAMETERS),
+                Some(TYPESCRIPT_CLASS_METHODS),
+            ),
+            Language::Rust => (
+                RUST_DEFINITIONS,
+                RUST_CALLS,
+                Some(RUST_PARAMETERS),
+                Some(RUST_IMPL_METHODS),
+            ),
+            Language::Go => (
+                GO_DEFINITIONS,
+                GO_CALLS,
+                Some(GO_PARAMETERS),
+                Some(GO_STRUCT_METHODS),
+            ),
+            Language::C => (
+                C_DEFINITIONS,
+                C_CALLS,
+                Some(C_PARAMETERS),
+                None, // C doesn't have classes
+            ),
+            Language::Cpp => (
+                CPP_DEFINITIONS,
+                CPP_CALLS,
+                Some(CPP_PARAMETERS),
+                Some(CPP_CLASS_METHODS),
+            ),
         };
 
         // Check if queries are empty (unsupported language configuration)
@@ -494,10 +531,70 @@ impl CallGraphBuilder {
             return;
         }
 
-        // 1. Find Definitions (The logic here needs to compile queries)
-        // We assume query_engine can compile string -> Query
-        // Note: In real enterprise code, we pre-compile these once.
-        // For now, we rely on the engine's cache.
+        // Define struct for collected classes/structs with byte ranges
+        struct ClassContext {
+            name: String,
+            start_byte: usize,
+            end_byte: usize,
+        }
+
+        // 1. Extract class/struct contexts first
+        let mut class_contexts: Vec<ClassContext> = Vec::new();
+        if let Some(class_query) = class_query_str {
+            if let Ok(query) = query_engine.compile_query(class_query, language) {
+                let matches = query_engine.execute_query(&query, tree, source_bytes);
+                for m in matches {
+                    // Look for class.name, type.name, or struct.name depending on language
+                    let class_name = m
+                        .captures
+                        .get("class.name")
+                        .or_else(|| m.captures.get("type.name"))
+                        .or_else(|| m.captures.get("struct.name"));
+
+                    if let Some(name_node) = class_name {
+                        let name = source[name_node.start_byte..name_node.end_byte].to_string();
+                        class_contexts.push(ClassContext {
+                            name,
+                            start_byte: m.start_byte,
+                            end_byte: m.end_byte,
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Extract parameters for functions (build a map: func_name -> params)
+        let mut function_params: HashMap<String, Vec<ParameterInfo>> = HashMap::new();
+        if let Some(param_query) = param_query_str {
+            if let Ok(query) = query_engine.compile_query(param_query, language) {
+                let matches = query_engine.execute_query(&query, tree, source_bytes);
+                for m in matches {
+                    let name_node = m.captures.get("name");
+                    let param_node = m.captures.get("param.name");
+                    let type_node = m.captures.get("param.type");
+
+                    if let (Some(name_n), Some(param_n)) = (name_node, param_node) {
+                        let func_name = source[name_n.start_byte..name_n.end_byte].to_string();
+                        let param_name = source[param_n.start_byte..param_n.end_byte].to_string();
+
+                        // Extract type if available
+                        let type_hint =
+                            type_node.map(|t| source[t.start_byte..t.end_byte].to_string());
+
+                        let param_info = ParameterInfo {
+                            name: param_name,
+                            type_hint,
+                            default_value: None, // Default values not extracted currently
+                        };
+
+                        function_params
+                            .entry(func_name)
+                            .or_default()
+                            .push(param_info);
+                    }
+                }
+            }
+        }
 
         // Define struct for collected functions
         struct DefinedFunction {
@@ -508,7 +605,7 @@ impl CallGraphBuilder {
 
         let mut functions: Vec<DefinedFunction> = Vec::new();
 
-        // Run definition query
+        // 3. Find Definitions and build qualified IDs
         if let Ok(query) = query_engine.compile_query(def_query_str, language) {
             let matches = query_engine.execute_query(&query, tree, source_bytes);
             for m in matches {
@@ -516,17 +613,28 @@ impl CallGraphBuilder {
                 if let Some(name_n) = name_node {
                     let func_name = &source[name_n.start_byte..name_n.end_byte];
 
-                    // Construct ID (Simplified: File::Name)
-                    // In future: proper module resolution
-                    let id = format!("{}::{}", file_path, func_name);
+                    // Check if this function is inside a class/struct
+                    let containing_class = class_contexts
+                        .iter()
+                        .find(|ctx| m.start_byte >= ctx.start_byte && m.end_byte <= ctx.end_byte);
+
+                    // Build qualified ID: file::Class::method or file::function
+                    let id = if let Some(class_ctx) = containing_class {
+                        format!("{}::{}::{}", file_path, class_ctx.name, func_name)
+                    } else {
+                        format!("{}::{}", file_path, func_name)
+                    };
 
                     let start_line = m.start_position.0 as u32 + 1;
                     let end_line = m.end_position.0 as u32 + 1;
 
+                    // Get parameters for this function
+                    let params = function_params.get(func_name).cloned().unwrap_or_default();
+
                     let sig = FunctionSignature {
                         name: func_name.to_string(),
                         module_path: Some(file_path.to_string()),
-                        parameters: Vec::new(), // TODO: Extract params
+                        parameters: params,
                         return_type: None,
                     };
 

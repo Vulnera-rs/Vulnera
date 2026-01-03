@@ -365,22 +365,97 @@ impl InterProceduralContext {
     }
 
     /// Compute summary for a function based on its analysis results
+    ///
+    /// This method analyzes the taint states within a function to determine:
+    /// - Which parameters flow to the return value
+    /// - Which parameters flow to dangerous sinks
+    /// - Whether the function acts as a sanitizer
     pub fn compute_function_summary(&mut self, function_id: &str) {
         let mut summary = FunctionSummary::default();
 
-        // Check if return is tainted
-        if self.return_taint.contains_key(function_id) {
+        // 1. Check if return is tainted and track its origin
+        if let Some(return_state) = self.return_taint.get(function_id) {
             summary.return_tainted = true;
+
+            // Track which parameters contributed to the return taint
+            // by analyzing the labels on the return taint state
+            for label in &return_state.labels {
+                // Check if this label's source indicates a parameter
+                // Parameter sources are encoded as "param:N" in the source field
+                if let Some(param_str) = label.source.strip_prefix("param:") {
+                    if let Ok(param_idx) = param_str.parse::<usize>() {
+                        summary.params_to_return.insert(param_idx);
+                    }
+                }
+            }
         }
 
-        // Check which parameters flow to return (heuristic: if param is tainted and return is tainted)
+        // 2. Analyze parameter taints that we've tracked
         if let Some(param_taints) = self.param_taint.get(function_id) {
-            for (&param_idx, _) in param_taints {
-                // Simple heuristic: if param is marked tainted and return is tainted,
-                // assume param flows to return
-                if summary.return_tainted {
-                    summary.params_to_return.insert(param_idx);
+            for (&param_idx, _param_state) in param_taints {
+                // Check if this parameter's taint reached any sinks
+                // This information comes from the function's analyzer findings
+                if let Some(analyzer) = self.function_contexts.get(function_id) {
+                    for finding in analyzer.get_detected_paths() {
+                        // Check if the source or any intermediate step involves this parameter
+                        let param_source = format!("param:{}", param_idx);
+
+                        let source_from_param =
+                            finding.labels.iter().any(|l| l.source == param_source);
+
+                        let intermediate_from_param = finding
+                            .intermediate_steps
+                            .iter()
+                            .any(|step| step.expression.contains(&format!("param_{}", param_idx)));
+
+                        if source_from_param || intermediate_from_param {
+                            // This parameter reached this sink
+                            summary
+                                .params_to_sinks
+                                .entry(param_idx)
+                                .or_default()
+                                .push(finding.sink.expression.clone());
+                        }
+                    }
                 }
+
+                // If param is tainted and return is tainted, check for flow
+                // by examining if any taint state has labels from this param
+                if summary.return_tainted {
+                    if let Some(analyzer) = self.function_contexts.get(function_id) {
+                        let param_source = format!("param:{}", param_idx);
+
+                        for (_, taint_state) in &analyzer.taint_states {
+                            // Check if this state has labels from the parameter
+                            let from_param =
+                                taint_state.labels.iter().any(|l| l.source == param_source);
+
+                            // If any taint state from this param exists, and return is tainted,
+                            // mark parameter as flowing to return
+                            if from_param {
+                                summary.params_to_return.insert(param_idx);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Check if this function is a sanitizer
+        // A function is a sanitizer if it has sanitizer rules applied
+        // or if it clears taint without reaching sinks
+        if let Some(analyzer) = self.function_contexts.get(function_id) {
+            // Simple heuristic: function is sanitizer if no findings and processes taint
+            let has_taint_input = !self
+                .param_taint
+                .get(function_id)
+                .map_or(true, |p| p.is_empty());
+            let has_no_findings = analyzer.get_detected_paths().is_empty();
+
+            // Sanitizer: takes tainted input, produces non-tainted or cleaned output
+            if has_taint_input && has_no_findings && !summary.return_tainted {
+                summary.is_sanitizer = true;
             }
         }
 
