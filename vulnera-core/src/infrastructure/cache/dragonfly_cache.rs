@@ -2,7 +2,6 @@
 //!
 //! This module provides a Redis-compatible cache implementation using the Dragonfly database.
 //! Dragonfly is a high-performance, multi-threaded in-memory data store that
-// cspell:ignore Dragonfly GzEncoder GzDecoder flate
 
 use async_trait::async_trait;
 use redis::Client;
@@ -263,6 +262,76 @@ impl DragonflyCache {
             })?;
 
         Ok(deleted > 0)
+    }
+
+    /// Delete all cache keys matching a pattern using SCAN + DEL
+    ///
+    /// This uses the SCAN command to iterate through keys matching the pattern,
+    /// then deletes them in batches. This is safe for production as SCAN is
+    /// non-blocking and iterates incrementally.
+    ///
+    /// # Arguments
+    /// * `pattern` - Redis glob-style pattern (e.g., "sast:ast:*")
+    ///
+    /// # Returns
+    /// The number of keys deleted
+    pub async fn delete_by_pattern(&self, pattern: &str) -> Result<usize, ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+        let mut cursor: u64 = 0;
+        let mut total_deleted: usize = 0;
+        const SCAN_COUNT: usize = 100; // Process 100 keys at a time
+
+        loop {
+            // Use SCAN to find keys matching the pattern
+            let (next_cursor, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg(pattern)
+                .arg("COUNT")
+                .arg(SCAN_COUNT)
+                .query_async(&mut conn)
+                .await
+                .map_err(|e| {
+                    error!("Failed to SCAN for pattern {}: {}", pattern, e);
+                    ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("Redis SCAN error: {}", e),
+                    )))
+                })?;
+
+            // Delete found keys in batch
+            if !keys.is_empty() {
+                let deleted: i64 = redis::cmd("DEL")
+                    .arg(&keys)
+                    .query_async::<i64>(&mut conn)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to DEL keys: {}", e);
+                        ApplicationError::Cache(CacheError::Io(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!("Redis DEL error: {}", e),
+                        )))
+                    })?;
+
+                total_deleted += deleted as usize;
+                debug!(
+                    "Deleted {} keys matching pattern '{}' (batch)",
+                    deleted, pattern
+                );
+            }
+
+            cursor = next_cursor;
+            if cursor == 0 {
+                // SCAN complete
+                break;
+            }
+        }
+
+        debug!(
+            "Total deleted {} keys matching pattern '{}'",
+            total_deleted, pattern
+        );
+        Ok(total_deleted)
     }
 }
 

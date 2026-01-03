@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::{debug, instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 /// Cache key prefix for SAST AST entries
 const AST_CACHE_PREFIX: &str = "sast:ast";
@@ -278,9 +278,15 @@ impl AstCacheService for DragonflyAstCache {
 
     #[instrument(skip(self))]
     async fn clear(&self) -> Result<(), AstCacheError> {
-        // Delete all keys matching the AST cache prefix
-        // Note: This requires SCAN pattern support
-        warn!("Clear all AST cache not implemented - use TTL expiration");
+        // Delete all keys matching the AST cache prefix using SCAN + DEL
+        let pattern = format!("{}:*", AST_CACHE_PREFIX);
+        let deleted = self
+            .dragonfly
+            .delete_by_pattern(&pattern)
+            .await
+            .map_err(|e| AstCacheError::Backend(e.to_string()))?;
+
+        info!(deleted_keys = deleted, "Cleared AST cache");
         Ok(())
     }
 }

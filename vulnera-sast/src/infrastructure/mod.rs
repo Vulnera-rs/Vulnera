@@ -13,6 +13,7 @@ pub mod call_graph;
 pub mod call_graph_queries;
 pub mod data_flow;
 pub mod incremental;
+pub mod metavar_patterns;
 pub mod parsers;
 pub mod query_engine;
 pub mod rules;

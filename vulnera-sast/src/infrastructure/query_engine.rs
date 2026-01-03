@@ -430,11 +430,39 @@ impl TreeSitterQueryEngine {
                 let query = self.compile_query(query_str, language)?;
                 Ok(self.execute_query(&query, tree, source.as_bytes()))
             }
-            Pattern::Metavariable(_) => {
-                // Metavariable patterns are handled by tree-sitter captures
-                // This is a placeholder - full implementation would parse the metavariable
-                // syntax and convert to tree-sitter queries
-                Ok(Vec::new())
+            Pattern::Metavariable(pattern_str) => {
+                // Parse the metavariable pattern
+                use crate::infrastructure::metavar_patterns::{
+                    parse_metavar_pattern, translate_to_tree_sitter,
+                };
+
+                let parsed = parse_metavar_pattern(pattern_str);
+
+                // Translate to tree-sitter query
+                if let Some(ts_query_str) = translate_to_tree_sitter(&parsed, language) {
+                    // Compile and execute the generated query
+                    match self.compile_query(&ts_query_str, language) {
+                        Ok(query) => {
+                            let matches = self.execute_query(&query, tree, source.as_bytes());
+                            Ok(matches)
+                        }
+                        Err(e) => {
+                            warn!(
+                                pattern = pattern_str,
+                                error = %e,
+                                "Failed to compile metavariable pattern"
+                            );
+                            Ok(Vec::new())
+                        }
+                    }
+                } else {
+                    // Pattern structure not supported, return empty
+                    debug!(
+                        pattern = pattern_str,
+                        "Metavariable pattern structure not supported for translation"
+                    );
+                    Ok(Vec::new())
+                }
             }
             Pattern::AnyOf(patterns) => {
                 // Union: collect all matches from all sub-patterns
