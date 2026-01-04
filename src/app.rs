@@ -42,7 +42,7 @@ use vulnera_core::infrastructure::{
     cache::CacheServiceImpl,
     parsers::ParserFactory,
     rate_limiter::RateLimiterService,
-    registries::MultiplexRegistryClient,
+    registries::VulneraRegistryAdapter,
     repository_source::github_client::GitHubRepositoryClient,
 };
 use vulnera_deps::AnalyzeDependenciesUseCase;
@@ -252,7 +252,7 @@ pub async fn create_app(
         config.apis.github.token.is_some(),
         config.apis.github.timeout_seconds,
     ));
-    let registry_client = Arc::new(MultiplexRegistryClient::new());
+    let registry_client = Arc::new(VulneraRegistryAdapter::new());
     let version_resolution_service: Arc<dyn VersionResolutionService> =
         Arc::new(VersionResolutionServiceImpl::new(registry_client));
     let repository_analysis_service: Arc<dyn RepositoryAnalysisService> =

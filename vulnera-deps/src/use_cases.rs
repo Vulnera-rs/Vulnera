@@ -13,7 +13,7 @@ use vulnera_core::domain::vulnerability::{
     value_objects::{Ecosystem, VulnerabilityId},
 };
 use vulnera_core::infrastructure::parsers::ParserFactory;
-use vulnera_core::infrastructure::registries::{CratesIoRegistryClient, PackageRegistryClient};
+use vulnera_core::infrastructure::registries::{PackageRegistryClient, VulneraRegistryAdapter};
 
 use crate::application::analysis_context::{AnalysisContext, detect_workspace};
 use crate::domain::{DependencyGraph, PackageId};
@@ -274,8 +274,8 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                                 ),
                             )
                         })?;
-                        // Create a new registry client instance for each task (CratesIoRegistryClient is stateless)
-                        let registry = CratesIoRegistryClient;
+                        // Create a new registry client instance for each task
+                        let registry = VulneraRegistryAdapter::new();
                         match registry.list_versions(Ecosystem::Cargo, &pkg_name).await {
                             Ok(mut vers) => {
                                 // Prefer stable, non-yanked versions within [lower, upper)
@@ -643,16 +643,9 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         HashMap<PackageId, Vec<vulnera_core::domain::vulnerability::value_objects::Version>>,
         ApplicationError,
     > {
-        use vulnera_core::infrastructure::registries::{
-            CratesIoRegistryClient, MultiplexRegistryClient, NpmRegistryClient, PyPiRegistryClient,
-        };
+        use vulnera_core::infrastructure::registries::VulneraRegistryAdapter;
 
-        let registry: Arc<dyn PackageRegistryClient> = match ecosystem {
-            Ecosystem::Npm => Arc::new(NpmRegistryClient),
-            Ecosystem::PyPI => Arc::new(PyPiRegistryClient),
-            Ecosystem::Cargo => Arc::new(CratesIoRegistryClient),
-            _ => Arc::new(MultiplexRegistryClient::new()),
-        };
+        let registry: Arc<dyn PackageRegistryClient> = Arc::new(VulneraRegistryAdapter::new());
 
         let mut available_versions = HashMap::new();
         let semaphore = Arc::new(tokio::sync::Semaphore::new(
