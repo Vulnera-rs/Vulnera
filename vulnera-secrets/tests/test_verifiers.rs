@@ -22,6 +22,7 @@ async fn test_github_verifier_success() {
         .verify(
             "valid_token",
             &SecretType::GitHubToken,
+            None,
             Duration::from_secs(1),
         )
         .await;
@@ -44,6 +45,7 @@ async fn test_github_verifier_invalid() {
         .verify(
             "invalid_token",
             &SecretType::GitHubToken,
+            None,
             Duration::from_secs(1),
         )
         .await;
@@ -67,6 +69,7 @@ async fn test_gitlab_verifier_success() {
         .verify(
             "valid_token",
             &SecretType::GitLabToken,
+            None,
             Duration::from_secs(1),
         )
         .await;

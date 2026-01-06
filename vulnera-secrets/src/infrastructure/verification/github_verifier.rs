@@ -3,6 +3,7 @@
 use crate::domain::entities::SecretType;
 use crate::infrastructure::verification::{SecretVerifier, VerificationResult};
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -39,6 +40,7 @@ impl SecretVerifier for GitHubVerifier {
         &self,
         secret: &str,
         _secret_type: &SecretType,
+        _context: Option<&HashMap<SecretType, String>>,
         timeout: Duration,
     ) -> VerificationResult {
         // Verify GitHub token by calling GitHub API

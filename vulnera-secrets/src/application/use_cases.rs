@@ -49,9 +49,19 @@ impl ScanForSecretsUseCase {
     }
 
     pub fn with_config(config: &SecretDetectionConfig) -> Self {
+        let mut exclude_extensions = config.exclude_extensions.clone();
+
+        // If markdown scanning is enabled, ensure we don't exclude markdown files
+        if config.scan_markdown_codeblocks {
+            exclude_extensions.retain(|ext| {
+                let ext_lower = ext.to_lowercase();
+                ext_lower != "md" && ext_lower != "markdown"
+            });
+        }
+
         let scanner = DirectoryScanner::new(config.max_scan_depth, config.max_file_size_bytes)
             .with_exclude_patterns(config.exclude_patterns.clone())
-            .with_exclude_extensions(config.exclude_extensions.clone());
+            .with_exclude_extensions(exclude_extensions);
 
         let rule_repository = if let Some(ref rule_file_path) = config.rule_file_path {
             RuleRepository::with_file_and_defaults(rule_file_path)
@@ -241,7 +251,7 @@ impl ScanForSecretsUseCase {
                     self.since_date,
                 );
 
-                match git_scanner.scan_history(root) {
+                match git_scanner.scan_history(root).await {
                     Ok(git_findings) => {
                         info!(
                             git_finding_count = git_findings.len(),

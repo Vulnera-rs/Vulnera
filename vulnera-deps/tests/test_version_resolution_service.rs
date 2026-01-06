@@ -8,7 +8,9 @@ use vulnera_core::domain::vulnerability::entities::{AffectedPackage, Package, Vu
 use vulnera_core::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource,
 };
-use vulnera_core::infrastructure::registries::{PackageRegistryClient, RegistryError, VersionInfo};
+use vulnera_core::infrastructure::registries::{
+    PackageRegistryClient, RegistryError, RegistryPackageMetadata, VersionInfo,
+};
 use vulnera_deps::services::version_resolution::VersionResolutionServiceImpl;
 use vulnera_deps::types::VersionResolutionService;
 
@@ -88,6 +90,21 @@ impl PackageRegistryClient for MockRegistryClient {
         } else {
             Err(RegistryError::NotFound)
         }
+    }
+
+    async fn fetch_metadata(
+        &self,
+        _ecosystem: Ecosystem,
+        name: &str,
+        version: &Version,
+    ) -> Result<RegistryPackageMetadata, RegistryError> {
+        Ok(RegistryPackageMetadata {
+            name: name.to_string(),
+            version: version.clone(),
+            dependencies: Vec::new(),
+            project_url: None,
+            license: None,
+        })
     }
 }
 
