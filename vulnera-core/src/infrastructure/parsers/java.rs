@@ -27,8 +27,13 @@ impl MavenParser {
     }
 
     /// Extract dependencies from XML content using quick-xml
-    fn extract_maven_dependencies(&self, content: &str) -> Result<Vec<Package>, ParseError> {
+    fn extract_maven_dependencies(
+        &self,
+        content: &str,
+        root_package: &Package,
+    ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         let mut reader = Reader::from_str(content);
 
@@ -69,7 +74,17 @@ impl MavenParser {
                                 })?;
                             let package = Package::new(pkg_name, version, Ecosystem::Maven)
                                 .map_err(|e| ParseError::MissingField { field: e })?;
-                            packages.push(package);
+                            packages.push(package.clone());
+
+                            // Create dependency edge from root
+                            dependencies.push(
+                                crate::domain::vulnerability::entities::Dependency::new(
+                                    root_package.clone(),
+                                    package,
+                                    version_str.clone().unwrap_or_else(|| "0.0.0".to_string()),
+                                    false, // Direct dependency from manifest
+                                ),
+                            );
                         }
                         in_dependency = false;
                         current_tag = None;
@@ -106,7 +121,90 @@ impl MavenParser {
             buf.clear();
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
+    }
+
+    /// Extract root package information from pom.xml
+    fn extract_root_package(&self, content: &str) -> Result<Package, ParseError> {
+        let mut reader = Reader::from_str(content);
+        let mut buf = Vec::new();
+        let mut depth = 0;
+
+        let mut group_id: Option<String> = None;
+        let mut artifact_id: Option<String> = None;
+        let mut version: Option<String> = None;
+
+        let mut parent_group_id: Option<String> = None;
+        let mut parent_version: Option<String> = None;
+
+        let mut current_tag: Option<String> = None;
+        let mut in_parent = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    depth += 1;
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    if depth == 2 {
+                        if name == "parent" {
+                            in_parent = true;
+                        }
+                        current_tag = Some(name);
+                    } else if depth == 3 && in_parent {
+                        current_tag = Some(name);
+                    }
+                }
+                Ok(Event::End(_)) => {
+                    depth -= 1;
+                    current_tag = None;
+                    if depth == 1 {
+                        in_parent = false;
+                    }
+                }
+                Ok(Event::Text(t)) => {
+                    if let Some(tag) = current_tag.as_deref() {
+                        let txt = reader
+                            .decoder()
+                            .decode(t.as_ref())
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+                        if !txt.is_empty() {
+                            match tag {
+                                "groupId" if !in_parent => group_id = Some(txt),
+                                "artifactId" if !in_parent => artifact_id = Some(txt),
+                                "version" if !in_parent => version = Some(txt),
+                                "groupId" if in_parent => parent_group_id = Some(txt),
+                                "version" if in_parent => parent_version = Some(txt),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                _ => {}
+            }
+            buf.clear();
+            if depth > 3 {
+                continue;
+            }
+        }
+
+        let g = group_id
+            .or(parent_group_id)
+            .unwrap_or_else(|| "unknown".to_string());
+        let a = artifact_id.unwrap_or_else(|| "root".to_string());
+        let v_str = version
+            .or(parent_version)
+            .unwrap_or_else(|| "0.0.0".to_string());
+        let cleaned_v = self.clean_maven_version(&v_str)?;
+        let v = Version::parse(&cleaned_v).unwrap_or_else(|_| Version::new(0, 0, 0));
+
+        Package::new(format!("{}:{}", g, a), v, Ecosystem::Maven)
+            .map_err(|e| ParseError::MissingField { field: e })
     }
 
     /// Clean Maven version string
@@ -159,11 +257,8 @@ impl PackageFileParser for MavenParser {
     }
 
     async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
-        let packages = self.extract_maven_dependencies(content)?;
-        Ok(ParseResult {
-            packages,
-            dependencies: Vec::new(),
-        })
+        let root_package = self.extract_root_package(content)?;
+        self.extract_maven_dependencies(content, &root_package)
     }
 
     fn ecosystem(&self) -> Ecosystem {

@@ -5,12 +5,15 @@
 //! vulnera-advisor crate's unified registry implementation.
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tracing::debug;
 use vulnera_advisor::{PackageRegistry, VersionRegistry};
 
 use crate::domain::vulnerability::value_objects::{Ecosystem, Version};
 
-use super::{PackageRegistryClient, RegistryError, VersionInfo};
+use super::{
+    PackageRegistryClient, RegistryDependency, RegistryError, RegistryPackageMetadata, VersionInfo,
+};
 
 /// Adapter that wraps vulnera-advisor's `PackageRegistry` to implement `PackageRegistryClient`.
 ///
@@ -104,6 +107,149 @@ impl PackageRegistryClient for VulneraRegistryAdapter {
         );
 
         Ok(versions)
+    }
+
+    async fn fetch_metadata(
+        &self,
+        ecosystem: Ecosystem,
+        name: &str,
+        version: &Version,
+    ) -> Result<RegistryPackageMetadata, RegistryError> {
+        let ecosystem_str = Self::ecosystem_to_string(&ecosystem);
+        let version_str = version.to_string();
+
+        debug!(
+            "Fetching metadata for {}@{} in {}",
+            name, version_str, ecosystem_str
+        );
+
+        match ecosystem {
+            Ecosystem::Npm => self.fetch_npm_metadata(name, &version_str).await,
+            Ecosystem::Cargo => self.fetch_cargo_metadata(name, &version_str).await,
+            _ => Err(RegistryError::UnsupportedEcosystem(ecosystem)),
+        }
+    }
+}
+
+impl VulneraRegistryAdapter {
+    async fn fetch_npm_metadata(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<RegistryPackageMetadata, RegistryError> {
+        let url = format!("https://registry.npmjs.org/{}/{}", name, version);
+        let client = reqwest::Client::builder()
+            .user_agent("Vulnera (vulnera.io)")
+            .build()
+            .map_err(|e| RegistryError::Other(e.to_string()))?;
+
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| RegistryError::Http {
+                message: e.to_string(),
+                status: None,
+            })?;
+
+        if response.status() == 404 {
+            return Err(RegistryError::NotFound);
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|e| RegistryError::Parse(e.to_string()))?;
+
+        let mut dependencies = Vec::new();
+        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_object()) {
+            for (dep_name, req) in deps {
+                dependencies.push(RegistryDependency {
+                    name: dep_name.clone(),
+                    requirement: req.as_str().unwrap_or("*").to_string(),
+                    is_dev: false,
+                    is_optional: false,
+                });
+            }
+        }
+
+        Ok(RegistryPackageMetadata {
+            name: name.to_string(),
+            version: Version::parse(version).map_err(|e| RegistryError::Parse(e.to_string()))?,
+            dependencies,
+            project_url: json
+                .get("homepage")
+                .and_then(|h| h.as_str())
+                .map(|s| s.to_string()),
+            license: json
+                .get("license")
+                .and_then(|l| l.as_str())
+                .map(|s| s.to_string()),
+        })
+    }
+
+    async fn fetch_cargo_metadata(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<RegistryPackageMetadata, RegistryError> {
+        let url = format!(
+            "https://crates.io/api/v1/crates/{}/{}/dependencies",
+            name, version
+        );
+        let client = reqwest::Client::builder()
+            .user_agent("Vulnera (vulnera.io)")
+            .build()
+            .map_err(|e| RegistryError::Other(e.to_string()))?;
+
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| RegistryError::Http {
+                message: e.to_string(),
+                status: None,
+            })?;
+
+        if response.status() == 404 {
+            return Err(RegistryError::NotFound);
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|e| RegistryError::Parse(e.to_string()))?;
+
+        let mut dependencies = Vec::new();
+        if let Some(deps) = json.get("dependencies").and_then(|d| d.as_array()) {
+            for dep in deps {
+                let dep_name = dep
+                    .get("crate_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let req = dep.get("req").and_then(|v| v.as_str()).unwrap_or("*");
+                let kind = dep.get("kind").and_then(|v| v.as_str()).unwrap_or("normal");
+                let optional = dep
+                    .get("optional")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                dependencies.push(RegistryDependency {
+                    name: dep_name.to_string(),
+                    requirement: req.to_string(),
+                    is_dev: kind == "dev",
+                    is_optional: optional,
+                });
+            }
+        }
+
+        Ok(RegistryPackageMetadata {
+            name: name.to_string(),
+            version: Version::parse(version).map_err(|e| RegistryError::Parse(e.to_string()))?,
+            dependencies,
+            project_url: None,
+            license: None,
+        })
     }
 }
 
