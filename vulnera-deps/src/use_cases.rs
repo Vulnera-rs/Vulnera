@@ -21,18 +21,20 @@ use crate::services::resolution_algorithms::{BacktrackingResolver, Lexicographic
 use crate::services::{
     PopularPackageService, PopularPackageVulnerabilityResult,
     dependency_resolver::{DependencyResolverService, DependencyResolverServiceImpl},
+    resolution::RecursiveResolver,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Use case for analyzing dependencies from a file
-pub struct AnalyzeDependenciesUseCase<C: CacheService> {
+pub struct AnalyzeDependenciesUseCase<C: CacheService + 'static> {
     parser_factory: Arc<ParserFactory>,
     vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
     cache_service: Arc<C>,
     max_concurrent_requests: usize,
     max_concurrent_registry_queries: usize,
     dependency_resolver: Arc<dyn DependencyResolverService>,
+    recursive_resolver: Arc<RecursiveResolver<C>>,
     analysis_context: Option<Arc<AnalysisContext>>,
 }
 
@@ -46,6 +48,12 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
     ) -> Self {
         let dependency_resolver =
             Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
+        let registry_client = Arc::new(VulneraRegistryAdapter::new());
+        let recursive_resolver = Arc::new(RecursiveResolver::new(
+            registry_client,
+            cache_service.clone(),
+            5, // Default max depth
+        ));
         Self {
             parser_factory,
             vulnerability_repository,
@@ -53,6 +61,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             max_concurrent_requests,
             max_concurrent_registry_queries: 5, // Default value
             dependency_resolver,
+            recursive_resolver,
             analysis_context: None,
         }
     }
@@ -67,6 +76,12 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
     ) -> Self {
         let dependency_resolver =
             Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
+        let registry_client = Arc::new(VulneraRegistryAdapter::new());
+        let recursive_resolver = Arc::new(RecursiveResolver::new(
+            registry_client,
+            cache_service.clone(),
+            5, // Default max depth
+        ));
         Self {
             parser_factory,
             vulnerability_repository,
@@ -74,6 +89,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             max_concurrent_requests,
             max_concurrent_registry_queries,
             dependency_resolver,
+            recursive_resolver,
             analysis_context: None,
         }
     }
@@ -89,6 +105,12 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
     ) -> Self {
         let dependency_resolver =
             Arc::new(DependencyResolverServiceImpl::new(parser_factory.clone()));
+        let registry_client = Arc::new(VulneraRegistryAdapter::new());
+        let recursive_resolver = Arc::new(RecursiveResolver::new(
+            registry_client,
+            cache_service.clone(),
+            5, // Default max depth
+        ));
         let analysis_context = project_root.map(|root| Arc::new(AnalysisContext::new(root)));
         Self {
             parser_factory,
@@ -97,6 +119,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             max_concurrent_requests,
             max_concurrent_registry_queries,
             dependency_resolver,
+            recursive_resolver,
             analysis_context,
         }
     }
@@ -198,16 +221,53 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         }
 
         // Build dependency graph using DependencyResolverService
-        let dependency_graph = self
+        let mut dependency_graph = self
             .dependency_resolver
             .build_graph(packages.clone(), ecosystem.clone())
             .await?;
 
-        debug!(
-            "Built dependency graph: {} packages, {} dependencies",
-            dependency_graph.package_count(),
-            dependency_graph.dependency_count()
-        );
+        // If the graph is empty (manifest-only project without lockfile),
+        // use the RecursiveResolver to perform a deep subtree resolution.
+        if dependency_graph.dependency_count() == 0 && !packages.is_empty() {
+            debug!(
+                "No dependency edges found for {:?}. Triggering recursive resolution for deep analysis.",
+                ecosystem
+            );
+            match self
+                .recursive_resolver
+                .resolve(packages.clone(), ecosystem.clone())
+                .await
+            {
+                Ok(res) => {
+                    dependency_graph = res.graph;
+                    // Sync packages vector with the newly discovered transitive nodes
+                    for node in dependency_graph.nodes.values() {
+                        if !packages.iter().any(|p| {
+                            p.name == node.package.name && p.version == node.package.version
+                        }) {
+                            packages.push(node.package.clone());
+                        }
+                    }
+                    debug!(
+                        "Recursive resolution completed: {} packages, {} dependencies",
+                        dependency_graph.package_count(),
+                        dependency_graph.dependency_count()
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Recursive resolution failed, falling back to flat analysis: {}",
+                        e
+                    );
+                }
+            }
+        } else {
+            debug!(
+                "Built dependency graph: {} packages, {} dependencies",
+                dependency_graph.package_count(),
+                dependency_graph.dependency_count()
+            );
+        }
 
         // Resolve Cargo.toml minor/major specs to latest available version from crates.io (caret semantics)
         // Use parallel processing for better performance

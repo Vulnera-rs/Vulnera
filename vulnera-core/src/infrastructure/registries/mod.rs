@@ -51,6 +51,34 @@ impl VersionInfo {
     }
 }
 
+/// A dependency relationship as reported by a package registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryDependency {
+    /// Name of the dependent package.
+    pub name: String,
+    /// Version requirement string (e.g., "^1.2.3", "~> 2.0").
+    pub requirement: String,
+    /// Whether this is a development dependency.
+    pub is_dev: bool,
+    /// Whether this is an optional dependency.
+    pub is_optional: bool,
+}
+
+/// Detailed metadata for a specific package version from a registry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryPackageMetadata {
+    /// Package name.
+    pub name: String,
+    /// Package version.
+    pub version: Version,
+    /// List of dependencies.
+    pub dependencies: Vec<RegistryDependency>,
+    /// Homepage or repository URL if available.
+    pub project_url: Option<String>,
+    /// License information if available.
+    pub license: Option<String>,
+}
+
 /// Error type for registry operations.
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
@@ -101,6 +129,14 @@ pub trait PackageRegistryClient: Send + Sync {
         ecosystem: Ecosystem,
         name: &str,
     ) -> Result<Vec<VersionInfo>, RegistryError>;
+
+    /// Fetch detailed metadata including dependencies for a specific version.
+    async fn fetch_metadata(
+        &self,
+        ecosystem: Ecosystem,
+        name: &str,
+        version: &Version,
+    ) -> Result<RegistryPackageMetadata, RegistryError>;
 }
 
 /// Optional blanket helpers for implementations

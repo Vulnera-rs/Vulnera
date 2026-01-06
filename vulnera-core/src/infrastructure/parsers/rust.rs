@@ -27,8 +27,10 @@ impl CargoParser {
         &self,
         toml_value: &toml::Value,
         section: &str,
-    ) -> Result<Vec<Package>, ParseError> {
+        root_package: &Package,
+    ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         if let Some(deps) = toml_value.get(section).and_then(|s| s.as_table()) {
             for (name, version_info) in deps {
@@ -58,11 +60,22 @@ impl CargoParser {
                 let package = Package::new(name.clone(), version, Ecosystem::Cargo)
                     .map_err(|e| ParseError::MissingField { field: e })?;
 
-                packages.push(package);
+                packages.push(package.clone());
+
+                // Create dependency edge from root
+                dependencies.push(Dependency::new(
+                    root_package.clone(),
+                    package,
+                    version_str,
+                    false, // Direct dependency from manifest
+                ));
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 
     /// Clean Cargo version specifier
@@ -112,21 +125,42 @@ impl PackageFileParser for CargoParser {
 
     async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let toml_value: toml::Value = toml::from_str(content)?;
-        let mut packages = Vec::new();
+        let mut result = ParseResult::default();
+
+        // Extract root package info
+        let root_name = toml_value
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+            .unwrap_or("root")
+            .to_string();
+        let root_version_str = toml_value
+            .get("package")
+            .and_then(|p| p.get("version"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0");
+        let root_version =
+            Version::parse(root_version_str).unwrap_or_else(|_| Version::new(0, 0, 0));
+        let root_package = Package::new(root_name, root_version, Ecosystem::Cargo)
+            .map_err(|e| ParseError::MissingField { field: e })?;
 
         // Extract from dependencies section
-        packages.extend(self.extract_dependencies(&toml_value, "dependencies")?);
+        let deps = self.extract_dependencies(&toml_value, "dependencies", &root_package)?;
+        result.packages.extend(deps.packages);
+        result.dependencies.extend(deps.dependencies);
 
         // Extract from dev-dependencies section
-        packages.extend(self.extract_dependencies(&toml_value, "dev-dependencies")?);
+        let dev_deps = self.extract_dependencies(&toml_value, "dev-dependencies", &root_package)?;
+        result.packages.extend(dev_deps.packages);
+        result.dependencies.extend(dev_deps.dependencies);
 
         // Extract from build-dependencies section
-        packages.extend(self.extract_dependencies(&toml_value, "build-dependencies")?);
+        let build_deps =
+            self.extract_dependencies(&toml_value, "build-dependencies", &root_package)?;
+        result.packages.extend(build_deps.packages);
+        result.dependencies.extend(build_deps.dependencies);
 
-        Ok(ParseResult {
-            packages,
-            dependencies: Vec::new(), // Cargo.toml parser only extracts dependencies as a flat list for now
-        })
+        Ok(result)
     }
 
     fn ecosystem(&self) -> Ecosystem {

@@ -28,8 +28,10 @@ impl ComposerParser {
         &self,
         json: &Value,
         dep_type: &str,
-    ) -> Result<Vec<Package>, ParseError> {
+        root_package: &Package,
+    ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
+        let mut dependencies = Vec::new();
 
         if let Some(deps) = json.get(dep_type).and_then(|d| d.as_object()) {
             for (name, version_value) in deps {
@@ -55,11 +57,22 @@ impl ComposerParser {
                 let package = Package::new(name.clone(), version, Ecosystem::Packagist)
                     .map_err(|e| ParseError::MissingField { field: e })?;
 
-                packages.push(package);
+                packages.push(package.clone());
+
+                // Create dependency edge from root
+                dependencies.push(Dependency::new(
+                    root_package.clone(),
+                    package,
+                    version_str.to_string(),
+                    false, // Direct dependency from manifest
+                ));
             }
         }
 
-        Ok(packages)
+        Ok(ParseResult {
+            packages,
+            dependencies,
+        })
     }
 
     /// Clean Composer version string
@@ -121,16 +134,33 @@ impl PackageFileParser for ComposerParser {
 
     async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
         let json: Value = serde_json::from_str(content)?;
-        let mut packages = Vec::new();
+        let mut result = ParseResult::default();
+
+        // Extract root package info
+        let root_name = json
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("root")
+            .to_string();
+        let root_version_str = json
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0");
+        let root_version =
+            Version::parse(root_version_str).unwrap_or_else(|_| Version::new(0, 0, 0));
+        let root_package = Package::new(root_name, root_version, Ecosystem::Packagist)
+            .map_err(|e| ParseError::MissingField { field: e })?;
 
         // Extract different types of dependencies
-        packages.extend(self.extract_dependencies(&json, "require")?);
-        packages.extend(self.extract_dependencies(&json, "require-dev")?);
+        let deps = self.extract_dependencies(&json, "require", &root_package)?;
+        result.packages.extend(deps.packages);
+        result.dependencies.extend(deps.dependencies);
 
-        Ok(ParseResult {
-            packages,
-            dependencies: Vec::new(),
-        })
+        let dev_deps = self.extract_dependencies(&json, "require-dev", &root_package)?;
+        result.packages.extend(dev_deps.packages);
+        result.dependencies.extend(dev_deps.dependencies);
+
+        Ok(result)
     }
 
     fn ecosystem(&self) -> Ecosystem {

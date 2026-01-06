@@ -280,6 +280,70 @@ impl DependencyGraph {
     pub fn dependency_count(&self) -> usize {
         self.edges.len()
     }
+
+    /// Export the graph to Graphviz DOT format
+    pub fn to_dot(&self) -> String {
+        let mut dot = String::from("digraph DependencyGraph {\n");
+        dot.push_str("  node [shape=box, fontname=\"Helvetica\", fontsize=10];\n");
+        dot.push_str("  edge [fontname=\"Helvetica\", fontsize=8];\n");
+        dot.push_str("  rankdir=LR;\n");
+
+        // Add nodes
+        for (id, node) in &self.nodes {
+            let label = format!("{}@{}", node.package.name, node.package.version);
+            let color = if node.metadata.is_direct {
+                "#add8e6"
+            } else {
+                "#ffffff"
+            };
+            dot.push_str(&format!(
+                "  \"{}\" [label=\"{}\", style=filled, fillcolor=\"{}\"];\n",
+                id, label, color
+            ));
+        }
+
+        // Add edges
+        for edge in &self.edges {
+            let style = if edge.is_transitive {
+                "dashed"
+            } else {
+                "solid"
+            };
+            dot.push_str(&format!(
+                "  \"{}\" -> \"{}\" [label=\"{}\", style={}];\n",
+                edge.from, edge.to, edge.constraint, style
+            ));
+        }
+
+        dot.push_str("}\n");
+        dot
+    }
+
+    /// Export the graph to a JSON format suitable for frontend visualization
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "nodes": self.nodes.values().map(|n| {
+                serde_json::json!({
+                    "id": n.id.to_string(),
+                    "name": n.package.name,
+                    "version": n.package.version.to_string(),
+                    "is_direct": n.metadata.is_direct,
+                    "ecosystem": n.package.ecosystem.canonical_name(),
+                    "is_dev": n.metadata.is_dev,
+                    "is_optional": n.metadata.is_optional
+                })
+            }).collect::<Vec<_>>(),
+            "links": self.edges.iter().map(|e| {
+                serde_json::json!({
+                    "source": e.from.to_string(),
+                    "target": e.to.to_string(),
+                    "requirement": e.constraint.to_string(),
+                    "is_transitive": e.is_transitive,
+                    "dep_type": e.dep_type
+                })
+            }).collect::<Vec<_>>()
+        })
+    }
 }
 
 impl Default for DependencyGraph {

@@ -52,7 +52,23 @@ impl NpmParser {
         dep_type: &str,
     ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
-        let dependencies = Vec::new(); // NpmParser doesn't extract edges, so this will remain empty
+        let mut dependencies = Vec::new();
+
+        let root_name = json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("root")
+            .to_string();
+        let root_version = json
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0.0");
+        let root_pkg = Package::new(
+            root_name,
+            Version::parse(root_version).unwrap_or_else(|_| Version::new(0, 0, 0)),
+            Ecosystem::Npm,
+        )
+        .map_err(|e| ParseError::MissingField { field: e })?;
 
         if let Some(deps) = json.get(dep_type).and_then(|d| d.as_object()) {
             for (name, version_value) in deps {
@@ -79,7 +95,15 @@ impl NpmParser {
                 let package = Package::new(name.clone(), version, Ecosystem::Npm)
                     .map_err(|e| ParseError::MissingField { field: e })?;
 
-                packages.push(package);
+                packages.push(package.clone());
+
+                // Extract dependency relationship from the manifest root
+                dependencies.push(crate::domain::vulnerability::entities::Dependency::new(
+                    root_pkg.clone(),
+                    package,
+                    version_str.to_string(),
+                    false, // Direct dependency
+                ));
             }
         }
 

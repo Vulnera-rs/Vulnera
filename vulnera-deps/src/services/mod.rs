@@ -5,6 +5,7 @@
 pub mod dependency_resolver;
 pub mod popular_packages;
 pub mod repository_analysis;
+pub mod resolution;
 pub mod resolution_algorithms;
 pub mod version_resolution;
 
