@@ -3,6 +3,46 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.4.0] - 2026-01-06
+
+### Added
+
+- **Advanced SAST Capabilities:**
+  - Migrated call graph analysis to Tree-sitter AST for improved accuracy and language support.
+  - Implemented cross-file call graph resolution and topological sorting for inter-procedural analysis.
+  - Enhanced pattern translation for complex expressions including call arguments, member access, and binary operations.
+  - Support for custom taint configuration loading and incremental analysis capabilities.
+  - Detailed SAST metrics including skipped/failed files, scan duration, and resource limits.
+- **Enhanced Dependency Analysis:**
+  - Unified `VulneraRegistryAdapter` replacing multiple ecosystem-specific registry clients.
+  - Recursive dependency resolution for manifest files without lockfiles.
+  - Support for dependency graph export and richer edge relationship modeling.
+  - Improved synchronization between graph nodes and analysis reports.
+- **Secret Detection Improvements:**
+  - Context-aware secret verification to reduce false positives.
+  - Entropy-based detection for high-randomness credentials.
+- **LLM Integration Updates:**
+  - Migrated primary LLM provider from Huawei to Google Gemini for improved explanation quality and fix generation.
+- **Security & Performance:**
+  - Migrated password hashing from bcrypt to OWASP-recommended Argon2id.
+  - Made password verification operations exclusively asynchronous to prevent blocking the async runtime.
+- **Documentation:**
+  - Comprehensive documentation for the Web Dashboard and team collaboration features.
+  - Updated architectural guides reflecting the new Tree-sitter based SAST engine.
+
+### Changed
+
+- **MSRV Update:** Bumped Minimum Supported Rust Version (MSRV) to 1.82.0.
+- **Orchestrator Refinement:** Centralized analysis module initialization and refined data models for better extensibility.
+- **CLI Testing:** Added comprehensive integration tests for `vulnera-cli`.
+
+### Fixed
+
+- **Graph Consistency:** Resolved issues where root packages were inconsistently counted in dependency analysis reports.
+- **Test Stability:** Extended test timeouts for integration suites to accommodate complex analysis tasks.
+
+---
+
 ## [0.3.2] - 2025-11-26
 
 ### Added
@@ -340,7 +380,7 @@ For upgrading from 0.3.0 to 0.3.1:
      ```bash
      # Submit job (returns immediately)
      JOB_ID=$(curl -X POST .../analyze/job ... | jq -r .job_id)
-     
+
      # Poll for completion
      curl -X GET .../jobs/$JOB_ID
      ```

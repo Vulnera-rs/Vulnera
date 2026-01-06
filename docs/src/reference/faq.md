@@ -129,7 +129,7 @@ Possible reasons:
 | Aspect            | ML Models (Detection)                  | LLM Features (Explanation)    |
 | ----------------- | -------------------------------------- | ----------------------------- |
 | **Purpose**       | Find vulnerabilities                   | Explain & fix vulnerabilities |
-| **Technology**    | Pattern matching, AST parsing, entropy | Huawei Cloud Pangu LLM        |
+| **Technology**    | Pattern matching, AST parsing, entropy | Google Gemini                 |
 | **Speed**         | <1 second                              | 3-10 seconds                  |
 | **Offline**       | ✅ Yes                                 | ❌ No                         |
 | **Cost**          | 3 tokens                               | 6 tokens                      |
@@ -143,7 +143,7 @@ Possible reasons:
 - Secrets: Entropy + regex patterns (public ML fingerprints)
 - API: OpenAPI schema validation (OWASP standards)
 
-**LLM explanations** use Huawei Cloud.
+**LLM explanations** use Google Gemini.
 
 ### Can I use Vulnera without LLM features?
 

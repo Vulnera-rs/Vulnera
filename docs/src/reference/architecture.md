@@ -93,7 +93,7 @@ Each implements `AnalysisModule` trait:
 2. **SAST** — AST-based code analysis (tree-sitter)
 3. **Secrets** — ML pattern + entropy detection
 4. **API** — OpenAPI 3.x specification analysis
-5. **LLM** — Huawei Pangu API for explanations/fixes
+5. **LLM** — Google Gemini API for explanations/fixes
 
 ### Module Selection (Rule-Based)
 
@@ -279,13 +279,13 @@ All services instantiated and wired:
 
 **Analysis speed (typical):**
 
-| Module | Time | Depends On |
-|--------|------|-----------|
-| Secrets | 100ms/file | File size |
-| SAST | 500ms/file | File complexity |
-| API | 50ms/spec | Spec size |
-| Dependencies | 1-10s/package | Registry latency |
-| LLM | 1-5s/request | Pangu API latency |
+| Module       | Time          | Depends On        |
+| ------------ | ------------- | ----------------- |
+| Secrets      | 100ms/file    | File size         |
+| SAST         | 500ms/file    | File complexity   |
+| API          | 50ms/spec     | Spec size         |
+| Dependencies | 1-10s/package | Registry latency  |
+| LLM          | 1-5s/request  | Pangu API latency |
 
 ## Deployment Models
 

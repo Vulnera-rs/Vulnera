@@ -97,7 +97,7 @@ dirs = { workspace = true, optional = true }
 tempfile.workspace = true
 
 [workspace.package]
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 authors = ["Vulnera-Team"]
 license = "AGPL-3.0-or-later"
