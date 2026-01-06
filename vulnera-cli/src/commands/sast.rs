@@ -9,13 +9,14 @@ use anyhow::Result;
 use clap::Args;
 use serde::Serialize;
 use uuid::Uuid;
-use vulnera_core::domain::module::{AnalysisModule, FindingSeverity, ModuleConfig};
+use vulnera_core::domain::module::{AnalysisModule, ModuleConfig};
 use vulnera_sast::module::SastModule;
 
 use crate::Cli;
 use crate::context::CliContext;
 use crate::exit_codes;
 use crate::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
+use crate::severity::{parse_severity, severity_meets_minimum};
 
 /// Arguments for the sast command
 #[derive(Args, Debug)]
@@ -262,28 +263,4 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SastArgs) -> Result<i32> {
     } else {
         Ok(exit_codes::SUCCESS)
     }
-}
-
-/// Parse severity string to FindingSeverity
-fn parse_severity(s: &str) -> FindingSeverity {
-    match s.to_lowercase().as_str() {
-        "critical" => FindingSeverity::Critical,
-        "high" => FindingSeverity::High,
-        "medium" => FindingSeverity::Medium,
-        "low" => FindingSeverity::Low,
-        _ => FindingSeverity::Low,
-    }
-}
-
-/// Check if finding severity meets minimum threshold
-fn severity_meets_minimum(severity: &FindingSeverity, minimum: &FindingSeverity) -> bool {
-    let severity_order = |s: &FindingSeverity| match s {
-        FindingSeverity::Critical => 4,
-        FindingSeverity::High => 3,
-        FindingSeverity::Medium => 2,
-        FindingSeverity::Low => 1,
-        FindingSeverity::Info => 0,
-    };
-
-    severity_order(severity) >= severity_order(minimum)
 }
