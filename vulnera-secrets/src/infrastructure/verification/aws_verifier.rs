@@ -14,6 +14,7 @@
 use crate::domain::entities::SecretType;
 use crate::infrastructure::verification::{SecretVerifier, VerificationResult};
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::time::Duration;
 use tracing::debug;
 
@@ -68,6 +69,7 @@ impl SecretVerifier for AwsVerifier {
         &self,
         secret: &str,
         secret_type: &SecretType,
+        context: Option<&HashMap<SecretType, String>>,
         _timeout: Duration,
     ) -> VerificationResult {
         // Trim whitespace that might be present in detected secrets
@@ -112,17 +114,37 @@ impl SecretVerifier for AwsVerifier {
             return VerificationResult::Invalid;
         }
 
+        // If we have context, check if we have both parts for more thorough validation
+        if let Some(ctx) = context {
+            match secret_type {
+                SecretType::AwsAccessKey => {
+                    if let Some(secret_key) = ctx.get(&SecretType::AwsSecretKey) {
+                        if Self::validate_secret_key_format(secret_key) {
+                            debug!("Found both AWS access key and secret key with valid formats");
+                        }
+                    }
+                }
+                SecretType::AwsSecretKey => {
+                    if let Some(access_key) = ctx.get(&SecretType::AwsAccessKey) {
+                        if Self::validate_access_key_format(access_key) {
+                            debug!("Found both AWS access key and secret key with valid formats");
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Format is valid, but we cannot fully verify without both access key and secret key
-        // AWS requires Signature Version 4 signing which needs both parts
-        // Since secret detection finds these separately, we can only validate format
+        // AWS requires Signature Version 4 signing which needs both parts.
+        // Even if we have both in context, performing a real API call requires more setup (STS/IAM).
         debug!(
             secret_type = ?secret_type,
             secret_preview = %Self::redact_secret(secret),
-            "AWS credential format is valid, but full verification requires both access key and secret key"
+            "AWS credential format is valid, but full live verification is not yet implemented"
         );
 
-        // Return NotSupported to indicate format is valid but full verification isn't possible
-        // This is more accurate than Verified since we can't actually verify it's active
+        // Return NotSupported to indicate format is valid but live verification isn't performed
         VerificationResult::NotSupported
     }
 }

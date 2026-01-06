@@ -1,5 +1,7 @@
 //! File scanner for secret detection
 
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument, trace, warn};
 
@@ -171,6 +173,24 @@ impl DirectoryScanner {
             }
         }
 
-        true
+        // Final heuristic: check content for null bytes if it passed extension/name filters
+        !self.is_binary_content(path)
+    }
+
+    /// Check if file content appears to be binary by looking for null bytes in the first 1024 bytes
+    fn is_binary_content(&self, path: &Path) -> bool {
+        let mut file = match File::open(path) {
+            Ok(f) => f,
+            Err(_) => return false,
+        };
+
+        let mut buffer = [0u8; 1024];
+        match file.read(&mut buffer) {
+            Ok(n) if n > 0 => {
+                // A common heuristic: if a file contains null bytes, it's likely binary
+                buffer[..n].iter().any(|&b| b == 0)
+            }
+            _ => false,
+        }
     }
 }

@@ -2,6 +2,7 @@
 
 use crate::domain::entities::SecretType;
 use async_trait::async_trait;
+use std::collections::HashMap;
 use std::time::Duration;
 
 // Import verifiers
@@ -33,6 +34,7 @@ pub trait SecretVerifier: Send + Sync {
     /// # Arguments
     /// * `secret` - The secret to verify
     /// * `secret_type` - Type of secret
+    /// * `context` - Optional context (e.g., other secrets found in the same file)
     /// * `timeout` - Maximum time to wait for verification
     ///
     /// # Returns
@@ -41,6 +43,7 @@ pub trait SecretVerifier: Send + Sync {
         &self,
         secret: &str,
         secret_type: &SecretType,
+        context: Option<&HashMap<SecretType, String>>,
         timeout: Duration,
     ) -> VerificationResult;
 }
@@ -66,10 +69,13 @@ impl VerificationService {
         &self,
         secret: &str,
         secret_type: &SecretType,
+        context: Option<&HashMap<SecretType, String>>,
     ) -> VerificationResult {
         for verifier in &self.verifiers {
             if verifier.supports(secret_type) {
-                return verifier.verify(secret, secret_type, self.timeout).await;
+                return verifier
+                    .verify(secret, secret_type, context, self.timeout)
+                    .await;
             }
         }
 

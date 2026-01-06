@@ -4,8 +4,8 @@ use crate::domain::entities::{Location, SecretFinding};
 use crate::infrastructure::detectors::DetectorEngine;
 use chrono::{DateTime, Utc};
 use git2::{Commit, DiffDelta, DiffHunk, DiffLine, Repository};
-use std::path::Path;
-use tracing::{debug, error, info, instrument, warn};
+use std::path::{Path, PathBuf};
+use tracing::{debug, error, info, instrument};
 
 /// Git commit metadata
 #[derive(Debug, Clone)]
@@ -39,44 +39,31 @@ impl GitScanner {
 
     /// Scan git repository history for secrets
     #[instrument(skip(self), fields(repo_path = %repo_path.display()))]
-    pub fn scan_history(&self, repo_path: &Path) -> Result<Vec<SecretFinding>, GitScanError> {
+    pub async fn scan_history(&self, repo_path: &Path) -> Result<Vec<SecretFinding>, GitScanError> {
         info!("Starting git history scan");
-        let repo = Repository::open(repo_path).map_err(|e| {
-            error!(error = %e, "Failed to open git repository");
-            GitScanError::GitError(e)
-        })?;
 
-        let mut revwalk = repo.revwalk().map_err(GitScanError::GitError)?;
-        revwalk
-            .set_sorting(git2::Sort::TIME)
-            .map_err(GitScanError::GitError)?;
-        revwalk.push_head().map_err(GitScanError::GitError)?;
+        // Collect all OIDs first to avoid holding revwalk across await
+        let oids = {
+            let repo = Repository::open(repo_path).map_err(|e| {
+                error!(error = %e, "Failed to open git repository");
+                GitScanError::GitError(e)
+            })?;
+            let mut revwalk = repo.revwalk().map_err(GitScanError::GitError)?;
+            revwalk
+                .set_sorting(git2::Sort::TIME)
+                .map_err(GitScanError::GitError)?;
+            revwalk.push_head().map_err(GitScanError::GitError)?;
+            revwalk
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(GitScanError::GitError)?
+        };
 
+        let total_commits = oids.len();
+        let progress_interval = (total_commits / 10).max(1);
         let mut all_findings = Vec::new();
         let mut commit_count = 0;
 
-        // Estimate total commits for progress reporting (approximate)
-        let mut total_commits_estimate = 0;
-        let mut revwalk_estimate = repo.revwalk().map_err(GitScanError::GitError)?;
-        revwalk_estimate
-            .set_sorting(git2::Sort::TIME)
-            .map_err(GitScanError::GitError)?;
-        revwalk_estimate
-            .push_head()
-            .map_err(GitScanError::GitError)?;
-        for _ in revwalk_estimate {
-            total_commits_estimate += 1;
-            if total_commits_estimate > 10000 {
-                // Cap estimate to avoid long iteration
-                break;
-            }
-        }
-
-        let progress_interval = (total_commits_estimate / 10).max(1); // Report every 10%
-
-        for oid in revwalk {
-            let oid = oid.map_err(GitScanError::GitError)?;
-
+        for oid in oids {
             // Check max commits limit
             if let Some(max) = self.max_commits {
                 if commit_count >= max {
@@ -85,51 +72,100 @@ impl GitScanner {
                 }
             }
 
-            let commit = repo.find_commit(oid).map_err(GitScanError::GitError)?;
-            let commit_time =
-                DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_else(Utc::now);
+            // Extract commit data and lines to scan synchronously
+            let commit_data = {
+                let repo = Repository::open(repo_path).map_err(GitScanError::GitError)?;
+                let commit = repo.find_commit(oid).map_err(GitScanError::GitError)?;
+                let commit_time =
+                    DateTime::from_timestamp(commit.time().seconds(), 0).unwrap_or_else(Utc::now);
 
-            // Check since_date filter
-            if let Some(since) = self.since_date {
-                if commit_time < since {
-                    debug!(
-                        commit = %oid,
-                        date = %commit_time,
-                        "Skipping commit before since_date"
-                    );
-                    continue;
+                // Check since_date filter
+                if let Some(since) = self.since_date {
+                    if commit_time < since {
+                        debug!(
+                            commit = %oid,
+                            date = %commit_time,
+                            "Skipping commit before since_date"
+                        );
+                        None
+                    } else {
+                        let metadata = CommitMetadata {
+                            hash: oid.to_string(),
+                            author: commit.author().name().unwrap_or("unknown").to_string(),
+                            email: commit.author().email().unwrap_or("unknown").to_string(),
+                            date: commit_time,
+                            message: commit.message().unwrap_or("").to_string(),
+                        };
+                        let lines = self.get_commit_lines(&repo, &commit)?;
+                        Some((metadata, lines))
+                    }
+                } else {
+                    let metadata = CommitMetadata {
+                        hash: oid.to_string(),
+                        author: commit.author().name().unwrap_or("unknown").to_string(),
+                        email: commit.author().email().unwrap_or("unknown").to_string(),
+                        date: commit_time,
+                        message: commit.message().unwrap_or("").to_string(),
+                    };
+                    let lines = self.get_commit_lines(&repo, &commit)?;
+                    Some((metadata, lines))
                 }
-            }
+            };
+
+            let (metadata, lines_to_scan) = match commit_data {
+                Some(data) => data,
+                None => continue,
+            };
 
             commit_count += 1;
 
             // Report progress at intervals
             if commit_count % progress_interval == 0 {
-                let progress_pct = if total_commits_estimate > 0 {
-                    (commit_count * 100) / total_commits_estimate.min(commit_count + 1000)
-                } else {
-                    0
-                };
+                let progress_pct = (commit_count * 100) / total_commits;
                 info!(
                     commits_scanned = commit_count,
+                    total_commits,
                     findings_so_far = all_findings.len(),
                     progress_percent = progress_pct,
                     "Git history scan progress"
                 );
             }
 
-            // Get commit metadata
-            let metadata = CommitMetadata {
-                hash: oid.to_string(),
-                author: commit.author().name().unwrap_or("unknown").to_string(),
-                email: commit.author().email().unwrap_or("unknown").to_string(),
-                date: commit_time,
-                message: commit.message().unwrap_or("").to_string(),
-            };
+            // Process collected lines asynchronously
+            for (file_path, content) in lines_to_scan {
+                let line_findings = self
+                    .detector_engine
+                    .detect_in_file_async(&file_path, &content)
+                    .await;
 
-            // Scan commit diff
-            let findings = self.scan_commit(&repo, &commit, &metadata)?;
-            all_findings.extend(findings);
+                // Convert to git history findings with commit metadata
+                for finding in line_findings {
+                    all_findings.push(SecretFinding {
+                        id: format!("{}-{}", metadata.hash, finding.id),
+                        rule_id: finding.rule_id,
+                        secret_type: finding.secret_type,
+                        location: Location {
+                            file_path: format!("{}:{}", metadata.hash, finding.location.file_path),
+                            line: finding.location.line,
+                            column: finding.location.column,
+                            end_line: finding.location.end_line,
+                            end_column: finding.location.end_column,
+                        },
+                        severity: finding.severity,
+                        confidence: finding.confidence,
+                        description: format!(
+                            "{} (Found in commit {} by {} on {})",
+                            finding.description,
+                            &metadata.hash[..8],
+                            metadata.author,
+                            metadata.date.format("%Y-%m-%d")
+                        ),
+                        recommendation: finding.recommendation,
+                        matched_secret: finding.matched_secret,
+                        entropy: finding.entropy,
+                    });
+                }
+            }
         }
 
         info!(
@@ -141,14 +177,13 @@ impl GitScanner {
         Ok(all_findings)
     }
 
-    /// Scan a single commit for secrets
-    fn scan_commit(
+    /// Get lines added in a commit for scanning
+    fn get_commit_lines(
         &self,
         repo: &Repository,
-        commit: &Commit,
-        metadata: &CommitMetadata,
-    ) -> Result<Vec<SecretFinding>, GitScanError> {
-        let mut findings = Vec::new();
+        commit: &Commit<'_>,
+    ) -> Result<Vec<(PathBuf, String)>, GitScanError> {
+        let mut lines_to_scan: Vec<(PathBuf, String)> = Vec::new();
 
         // Get parent commit for diff
         let parent = if commit.parent_count() > 0 {
@@ -167,91 +202,29 @@ impl GitScanner {
             .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
             .map_err(GitScanError::GitError)?;
 
-        // Use a helper struct to avoid borrow checker issues with closures
-        struct DiffScanner<'a> {
-            scanner: &'a GitScanner,
-            metadata: &'a CommitMetadata,
-            findings: &'a mut Vec<SecretFinding>,
-        }
+        let mut file_cb = |_delta: DiffDelta<'_>, _progress: f32| true;
+        let mut line_cb =
+            |delta: DiffDelta<'_>, _hunk: Option<DiffHunk<'_>>, line: DiffLine<'_>| {
+                // Only scan added lines (new secrets)
+                if line.origin() == '+' {
+                    if let Ok(content) = std::str::from_utf8(line.content()) {
+                        let file_path = delta
+                            .new_file()
+                            .path()
+                            .or_else(|| delta.old_file().path())
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_else(|| PathBuf::from("unknown"));
 
-        let diff_scanner = DiffScanner {
-            scanner: self,
-            metadata,
-            findings: &mut findings,
-        };
+                        lines_to_scan.push((file_path, content.to_string()));
+                    }
+                }
+                true
+            };
 
-        // Scan each line in the diff
-        let mut file_cb = |_delta: DiffDelta, _progress: f32| true;
-        let mut line_cb = |delta: DiffDelta, _hunk: Option<DiffHunk>, line: DiffLine| {
-            diff_scanner.scanner.scan_diff_line(
-                delta,
-                line,
-                diff_scanner.metadata,
-                diff_scanner.findings,
-            );
-            true
-        };
         diff.foreach(&mut file_cb, None, None, Some(&mut line_cb))
             .map_err(GitScanError::GitError)?;
 
-        Ok(findings)
-    }
-
-    /// Scan a diff line for secrets
-    fn scan_diff_line(
-        &self,
-        delta: DiffDelta,
-        line: DiffLine,
-        metadata: &CommitMetadata,
-        findings: &mut Vec<SecretFinding>,
-    ) {
-        // Only scan added lines (new secrets)
-        if line.origin() != '+' {
-            return;
-        }
-
-        let content = match std::str::from_utf8(line.content()) {
-            Ok(s) => s,
-            Err(_) => return, // Skip binary or invalid UTF-8
-        };
-
-        let file_path = delta
-            .new_file()
-            .path()
-            .or_else(|| delta.old_file().path())
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("unknown"));
-
-        // Run detector on the line
-        let line_findings = self.detector_engine.detect_in_file(&file_path, content);
-
-        // Convert to git history findings with commit metadata
-        for finding in line_findings {
-            findings.push(SecretFinding {
-                id: format!("{}-{}", metadata.hash, finding.id),
-                rule_id: finding.rule_id,
-                secret_type: finding.secret_type,
-                location: Location {
-                    file_path: format!("{}:{}", metadata.hash, finding.location.file_path),
-                    line: finding.location.line,
-                    column: finding.location.column,
-                    end_line: finding.location.end_line,
-                    end_column: finding.location.end_column,
-                },
-                severity: finding.severity,
-                confidence: finding.confidence,
-                description: format!(
-                    "{} (Found in commit {} by {} on {})",
-                    finding.description,
-                    &metadata.hash[..8],
-                    metadata.author,
-                    metadata.date.format("%Y-%m-%d")
-                ),
-                recommendation: finding.recommendation,
-                matched_secret: finding.matched_secret,
-                entropy: finding.entropy,
-            });
-        }
+        Ok(lines_to_scan)
     }
 }
 

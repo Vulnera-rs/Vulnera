@@ -769,7 +769,7 @@ mod tests {
             .unwrap();
         assert_eq!(express_pkg.version, Version::parse("4.17.1").unwrap());
         assert_eq!(express_pkg.ecosystem, Ecosystem::Npm);
-        assert_eq!(result.dependencies.len(), 0); // package.json doesn't define dependency edges
+        assert_eq!(result.dependencies.len(), 3); // package.json now extracts dependency edges
     }
 
     #[tokio::test]
