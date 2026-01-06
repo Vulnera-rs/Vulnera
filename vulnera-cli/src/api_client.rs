@@ -184,9 +184,9 @@ impl VulneraClient {
     /// Create with a full URL (for testing)
     pub fn with_url(base_url: String, api_key: Option<String>) -> Result<Self> {
         let client = Client::builder()
-            .timeout(Duration::from_secs(600))
-            .connect_timeout(Duration::from_secs(10))
-            .user_agent(format!("vulnera-cli/{}", env!("CARGO_PKG_VERSION")))
+            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS))
+            .user_agent(USER_AGENT)
             .build()
             .context("Failed to create HTTP client")?;
 

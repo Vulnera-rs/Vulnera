@@ -20,6 +20,7 @@ pub mod credentials;
 pub mod executor;
 pub mod output;
 pub mod quota_tracker;
+pub mod severity;
 
 pub use context::CliContext;
 pub use credentials::CredentialManager;

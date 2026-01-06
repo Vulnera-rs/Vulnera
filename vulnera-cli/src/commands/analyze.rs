@@ -15,7 +15,7 @@ use clap::Args;
 use serde::Serialize;
 use uuid::Uuid;
 use vulnera_api::module::ApiSecurityModule;
-use vulnera_core::domain::module::{AnalysisModule, FindingSeverity, ModuleConfig};
+use vulnera_core::domain::module::{AnalysisModule, ModuleConfig};
 use vulnera_sast::module::SastModule;
 use vulnera_secrets::module::SecretDetectionModule;
 
@@ -23,6 +23,7 @@ use crate::Cli;
 use crate::context::CliContext;
 use crate::exit_codes;
 use crate::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
+use crate::severity::{parse_severity, severity_meets_minimum_str};
 
 /// Arguments for the analyze command
 #[derive(Args, Debug)]
@@ -154,7 +155,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
         None
     };
 
-    let min_severity = parse_severity(&args.min_severity);
+    let _min_severity = parse_severity(&args.min_severity);
 
     let mut result = AnalysisResult {
         path: path.clone(),
@@ -178,7 +179,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
             p.set_message("Running static analysis (SAST)...");
         }
 
-        run_sast_analysis(&path, &mut result, &min_severity).await;
+        run_sast_analysis(&path, &mut result).await;
         result.modules_run.push("sast".to_string());
     }
 
@@ -188,7 +189,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
             p.set_message("Detecting secrets...");
         }
 
-        run_secrets_analysis(&path, &mut result, &min_severity).await;
+        run_secrets_analysis(&path, &mut result).await;
         result.modules_run.push("secrets".to_string());
     }
 
@@ -198,7 +199,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
             p.set_message("Analyzing API endpoints...");
         }
 
-        run_api_analysis(&path, &mut result, &min_severity).await;
+        run_api_analysis(&path, &mut result).await;
         result.modules_run.push("api".to_string());
     }
 
@@ -295,11 +296,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &AnalyzeArgs) -> Result<i32>
 }
 
 /// Run SAST analysis
-async fn run_sast_analysis(
-    path: &PathBuf,
-    result: &mut AnalysisResult,
-    min_severity: &FindingSeverity,
-) {
+async fn run_sast_analysis(path: &PathBuf, result: &mut AnalysisResult) {
     let sast_module = SastModule::new();
     let config = ModuleConfig {
         job_id: Uuid::new_v4(),
@@ -308,11 +305,11 @@ async fn run_sast_analysis(
         config: Default::default(),
     };
 
-    if let Ok(res) = sast_module.execute(&config).await {
-        result.summary.files_scanned += res.metadata.files_scanned;
+    match sast_module.execute(&config).await {
+        Ok(res) => {
+            result.summary.files_scanned += res.metadata.files_scanned;
 
-        for finding in res.findings {
-            if severity_meets_minimum(&finding.severity, min_severity) {
+            for finding in res.findings {
                 result.vulnerabilities.push(VulnerabilityInfo {
                     id: finding.rule_id.unwrap_or_else(|| finding.id.clone()),
                     severity: format!("{:?}", finding.severity).to_lowercase(),
@@ -331,15 +328,14 @@ async fn run_sast_analysis(
                 });
             }
         }
+        Err(e) => {
+            result.warnings.push(format!("SAST analysis failed: {}", e));
+        }
     }
 }
 
 /// Run secrets analysis
-async fn run_secrets_analysis(
-    path: &PathBuf,
-    result: &mut AnalysisResult,
-    min_severity: &FindingSeverity,
-) {
+async fn run_secrets_analysis(path: &PathBuf, result: &mut AnalysisResult) {
     let secrets_module = SecretDetectionModule::new();
     let config = ModuleConfig {
         job_id: Uuid::new_v4(),
@@ -348,11 +344,11 @@ async fn run_secrets_analysis(
         config: Default::default(),
     };
 
-    if let Ok(res) = secrets_module.execute(&config).await {
-        result.summary.files_scanned += res.metadata.files_scanned;
+    match secrets_module.execute(&config).await {
+        Ok(res) => {
+            result.summary.files_scanned += res.metadata.files_scanned;
 
-        for finding in res.findings {
-            if severity_meets_minimum(&finding.severity, min_severity) {
+            for finding in res.findings {
                 result.vulnerabilities.push(VulnerabilityInfo {
                     id: finding.rule_id.unwrap_or_else(|| finding.id.clone()),
                     severity: format!("{:?}", finding.severity).to_lowercase(),
@@ -371,15 +367,16 @@ async fn run_secrets_analysis(
                 });
             }
         }
+        Err(e) => {
+            result
+                .warnings
+                .push(format!("Secret detection failed: {}", e));
+        }
     }
 }
 
 /// Run API analysis
-async fn run_api_analysis(
-    path: &PathBuf,
-    result: &mut AnalysisResult,
-    min_severity: &FindingSeverity,
-) {
+async fn run_api_analysis(path: &PathBuf, result: &mut AnalysisResult) {
     let api_module = ApiSecurityModule::new();
     let config = ModuleConfig {
         job_id: Uuid::new_v4(),
@@ -388,9 +385,9 @@ async fn run_api_analysis(
         config: Default::default(),
     };
 
-    if let Ok(res) = api_module.execute(&config).await {
-        for finding in res.findings {
-            if severity_meets_minimum(&finding.severity, min_severity) {
+    match api_module.execute(&config).await {
+        Ok(res) => {
+            for finding in res.findings {
                 result.vulnerabilities.push(VulnerabilityInfo {
                     id: finding.rule_id.unwrap_or_else(|| finding.id.clone()),
                     severity: format!("{:?}", finding.severity).to_lowercase(),
@@ -407,6 +404,15 @@ async fn run_api_analysis(
                     fix_available: finding.recommendation.is_some(),
                     fixed_version: None,
                 });
+            }
+        }
+        Err(e) => {
+            // Check if it's just "no spec found" vs actual error
+            let err_msg = e.to_string();
+            if !err_msg.contains("No OpenAPI specification found") {
+                result
+                    .warnings
+                    .push(format!("API security analysis failed: {}", e));
             }
         }
     }
@@ -462,43 +468,6 @@ async fn run_deps_analysis(
                 .push(format!("Dependency analysis failed: {}", e));
         }
     }
-}
-
-/// Parse severity string to FindingSeverity
-fn parse_severity(s: &str) -> FindingSeverity {
-    match s.to_lowercase().as_str() {
-        "critical" => FindingSeverity::Critical,
-        "high" => FindingSeverity::High,
-        "medium" => FindingSeverity::Medium,
-        "low" => FindingSeverity::Low,
-        _ => FindingSeverity::Low,
-    }
-}
-
-/// Check if finding severity meets minimum threshold
-fn severity_meets_minimum(severity: &FindingSeverity, minimum: &FindingSeverity) -> bool {
-    let severity_order = |s: &FindingSeverity| match s {
-        FindingSeverity::Critical => 4,
-        FindingSeverity::High => 3,
-        FindingSeverity::Medium => 2,
-        FindingSeverity::Low => 1,
-        FindingSeverity::Info => 0,
-    };
-
-    severity_order(severity) >= severity_order(minimum)
-}
-
-/// Check if severity string meets minimum threshold
-fn severity_meets_minimum_str(severity: &str, minimum: &str) -> bool {
-    let severity_order = |s: &str| match s.to_lowercase().as_str() {
-        "critical" => 4,
-        "high" => 3,
-        "medium" => 2,
-        "low" => 1,
-        _ => 0,
-    };
-
-    severity_order(severity) >= severity_order(minimum)
 }
 
 #[cfg(test)]
