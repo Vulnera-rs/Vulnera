@@ -19,10 +19,11 @@ use crate::domain::{
 /// Service for resolving dependencies and building dependency graphs
 #[async_trait]
 pub trait DependencyResolverService: Send + Sync {
-    /// Build a dependency graph from parsed packages
+    /// Build a dependency graph from parsed packages and dependencies
     async fn build_graph(
         &self,
         packages: Vec<Package>,
+        dependencies: Vec<vulnera_core::domain::vulnerability::entities::Dependency>,
         ecosystem: Ecosystem,
     ) -> Result<DependencyGraph, ApplicationError>;
 
@@ -52,6 +53,7 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
     async fn build_graph(
         &self,
         packages: Vec<Package>,
+        dependencies: Vec<vulnera_core::domain::vulnerability::entities::Dependency>,
         _ecosystem: Ecosystem,
     ) -> Result<DependencyGraph, ApplicationError> {
         let mut graph = DependencyGraph::new();
@@ -62,9 +64,26 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
             graph.add_node(node);
         }
 
-        // For now, we don't have dependency relationships from the parsers
-        // This would need to be enhanced to extract dependencies from lockfiles
-        // or resolve them from registries
+        // Add dependency edges from the provided dependencies
+        for dep in dependencies {
+            let from_id = PackageId::from_package(&dep.from);
+            let to_id = PackageId::from_package(&dep.to);
+
+            // Ensure nodes exist in graph (they should be in packages, but safety first)
+            if graph.get_node(&from_id).is_none() {
+                graph.add_node(PackageNode::new(dep.from.clone()));
+            }
+            if graph.get_node(&to_id).is_none() {
+                graph.add_node(PackageNode::new(dep.to.clone()));
+            }
+
+            // Create constraint from requirement string
+            let constraint =
+                VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+
+            let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
+            graph.add_edge(edge);
+        }
 
         Ok(graph)
     }
@@ -154,22 +173,17 @@ pub async fn build_graph_from_lockfile(
         graph.add_node(node.clone());
     }
 
-    // TODO: Extract dependency relationships from lockfile structure
-    // This requires parser-specific logic to understand the lockfile format.
-    // Different lockfile formats have different structures:
-    // - package-lock.json: dependencies are nested under each package
-    // - yarn.lock: dependencies are listed with "^" references
-    // - Cargo.lock: dependencies are listed in [[package]] sections with dependencies array
-    // - go.sum: doesn't contain dependency relationships, only checksums
-    //
-    // To implement this properly, we would need to:
-    // 1. Enhance parsers to return dependency relationships along with packages
-    // 2. Or parse the lockfile structure directly here (ecosystem-specific)
-    // 3. Create DependencyEdge objects for each relationship
-    // 4. Add edges to the graph using graph.add_edge()
-    //
-    // For now, the graph contains all packages as nodes but no edges.
-    // This is still useful for package enumeration, but doesn't show the dependency tree.
+    // Extract dependency relationships from lockfile structure
+    for dep in packages.dependencies {
+        let from_id = PackageId::from_package(&dep.from);
+        let to_id = PackageId::from_package(&dep.to);
+
+        let constraint =
+            VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+
+        let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
+        graph.add_edge(edge);
+    }
 
     Ok(graph)
 }
@@ -203,6 +217,18 @@ pub async fn build_graph_from_manifest(
 
         let node = PackageNode::new(package.clone()).with_metadata(metadata);
         graph.add_node(node);
+    }
+
+    // Add edges from manifest (direct dependencies)
+    for dep in packages.dependencies {
+        let from_id = PackageId::from_package(&dep.from);
+        let to_id = PackageId::from_package(&dep.to);
+
+        let constraint =
+            VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+
+        let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
+        graph.add_edge(edge);
     }
 
     // If registry is available, resolve transitive dependencies
@@ -268,7 +294,7 @@ mod tests {
         ];
 
         let graph = resolver
-            .build_graph(packages, Ecosystem::Npm)
+            .build_graph(packages, vec![], Ecosystem::Npm)
             .await
             .unwrap();
 

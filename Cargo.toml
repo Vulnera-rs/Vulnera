@@ -148,7 +148,7 @@ chrono = { version = "0.4.42", features = ["serde"] }
 
 # UUID generation
 uuid = { version = "1.19.0", features = ["v4", "serde"] }
-url = "2.5.7"
+url = "2.5.8"
 
 # Hashing for cache keys
 sha2 = "0.10.9"
