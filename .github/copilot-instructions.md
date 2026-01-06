@@ -7,7 +7,7 @@ Vulnera is a multi-module async Rust vulnerability analysis platform (MSRV 1.82+
 **Workspace structure** (dependency order):
 
 ```
-vulnera-rust (binary + CLI)
+vulnera-rust (binary - HTTP API server)
   ├─ vulnera-orchestrator  [async job orchestration, HTTP API, middleware]
   │  ├─ vulnera-deps       [dependency scanning, cross-ecosystem]
   │  ├─ vulnera-sast       [Python/JS/Rust static analysis]
@@ -15,6 +15,8 @@ vulnera-rust (binary + CLI)
   │  ├─ vulnera-api        [OpenAPI spec analysis]
   │  └─ vulnera-llm        [LLM-powered explanations & fixes]
   └─ vulnera-core          [domain models, shared traits, infra]
+
+vulnera-cli (standalone CLI binary - offline analysis + server API calls)
 ```
 
 **Why this matters**: `src/app.rs` is the **single composition root** where all services (PgPool, DragonflyCache, HTTP clients, module registry) are instantiated and injected via `OrchestratorState`. Never instantiate services inside crate internals—wire everything at the top level.
@@ -45,34 +47,30 @@ vulnera-rust (binary + CLI)
   - E.g., `VULNERA__AUTH__JWT_SECRET`, `VULNERA__CACHE__DRAGONFLY_URL`
 - **Required at startup**: `DATABASE_URL` (PostgreSQL), `VULNERA__AUTH__JWT_SECRET` (min 32 chars in production)
 - **Cache backend**: Only Dragonfly/Redis supported (`Config.cache.dragonfly_url`); don't add alternatives
-- **SQLx query validation**: Requires `DATABASE_URL` at compile time; run `scripts/prepare-sqlx.sh` if offline
+- **SQLx query validation**: Requires `DATABASE_URL` at compile time; run `sqlx migrate run` to prepare
 
 ## Essential Developer Commands
 
 ```bash
-# Quick iteration (from repo root, make targets in scripts/build_workflow/Makefile)
-cd scripts/build_workflow && make help    # See all available targets
-make format                  # cargo fmt
-make lint                    # cargo clippy
-make check                   # cargo check
-make pre-commit              # format + lint + test (quick validation)
-make ci-check                # format-check + lint + test
-
-# Database (required for integration tests)
+# Database setup (required for integration tests)
 export DATABASE_URL='postgresql://user:pass@localhost/vulnera'
-sqlx migrate run             # Apply pending migrations via sqlx-cli
+sqlx migrate run
 
 # Server with hot-reload
 cargo run                    # Load .env via dotenvy
 cargo watch -x run           # Auto-rebuild on file changes
 
-# Testing specifics
+# Testing
 cargo nextest run --workspace              # Run tests (respects nextest.toml: 3x retries, 300s timeout)
 cargo nextest run -p vulnera-deps          # Run single crate tests
 cargo insta review                         # Review snapshot test changes after API updates
 cargo test --test proptest_*               # Property-based tests (version/parser edge cases)
 cargo test --test datatest_*               # Data-driven tests (SAST/deps analysis)
 cargo test --features cli                  # Test CLI commands locally
+
+# Formatting and linting
+cargo fmt
+cargo clippy
 ```
 
 **Test organization**:
@@ -140,12 +138,12 @@ cargo test --features cli                  # Test CLI commands locally
 ### Database & Queries
 
 - **All SQLx queries**: In `infrastructure/` module with `sqlx::query!` or `sqlx::query_as!` macros (compile-time validated)
-- **Migrations**: In `migrations/` numbered sequentially; run `make migrate` before tests
+- **Migrations**: In `migrations/` numbered sequentially; run `sqlx migrate run` before tests
 - **Repositories**: All DB access abstracted via repository traits (`IUserRepository`, `IOrganizationRepository`, etc.)
 
 ### External APIs
 
-- **Circuit breaker pattern**: Use existing `crate::infrastructure::api_clients` wrappers (HTTP clients pre-configured with retry/timeout)
+- **Circuit breaker pattern**: Use existing `vulnera-core/infrastructure/api_clients` wrappers (HTTP clients pre-configured with retry/timeout)
 - **Resilience config**: `CircuitBreakerConfigSerializable` and `RetryConfigSerializable` in config; never instantiate ad-hoc clients
 - **Cache layer**: Use `CacheServiceImpl` wrapper; configure TTL via `Config.cache.ttl_hours`; backend is Dragonfly/Redis only
 
@@ -167,11 +165,11 @@ cargo test --features cli                  # Test CLI commands locally
 
 ## Testing & Pre-Commit Checklist
 
-- [ ] `make quick-check` passes (fmt + clippy + fast tests)
+- [ ] `cargo fmt && cargo clippy` passes
 - [ ] New public APIs annotated with `#[openapi(...)]` and `#[derive(ToSchema)]`
 - [ ] Snapshot tests updated: `cargo insta review` if API responses changed
 - [ ] Config changes merged into `config/default.toml` with sensible defaults
-- [ ] Database migrations tested: `make migrate-reset && make migrate` for integration tests
+- [ ] Database migrations tested: `sqlx migrate run` before integration tests
 - [ ] Concurrency limits use `Config.*`, not hardcoded values
 - [ ] External API calls wrapped with existing circuit breaker clients from `vulnera-core/infrastructure/api_clients`
 - [ ] Service injection: all dependencies `Arc<dyn Trait + Send + Sync>` in `OrchestratorState`
