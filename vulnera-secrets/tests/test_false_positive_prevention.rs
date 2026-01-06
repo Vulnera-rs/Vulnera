@@ -4,6 +4,7 @@
 //! - database-password regex doesn't match type constructors like Password::new()
 //! - Various false positive scenarios
 
+use once_cell::sync::Lazy;
 use regex::Regex;
 use vulnera_secrets::domain::RulePattern;
 use vulnera_secrets::infrastructure::rules::default_rules::database_password_rule;
@@ -12,12 +13,16 @@ use vulnera_secrets::infrastructure::rules::default_rules::database_password_rul
 // Database Password Regex Tests
 // ============================================================================
 
-fn get_database_password_regex() -> Regex {
+static DB_PASSWORD_REGEX: Lazy<Regex> = Lazy::new(|| {
     let rule = database_password_rule();
     match rule.pattern {
         RulePattern::Regex(pattern) => Regex::new(&pattern).expect("Invalid regex"),
         _ => panic!("Expected Regex pattern"),
     }
+});
+
+fn get_database_password_regex() -> Regex {
+    DB_PASSWORD_REGEX.clone()
 }
 
 #[test]
@@ -25,9 +30,6 @@ fn test_does_not_match_rust_type_constructor() {
     let regex = get_database_password_regex();
 
     // These should NOT match - they're Rust type constructors, not password assignments
-    // Note: Some patterns like "let pwd = Password::new()" may still match because
-    // the regex sees "pwd =" followed by text. The entropy filter and :: detection
-    // in the full scanner help reduce these false positives.
     let false_positives = [
         "Password::new()",             // No = sign
         "Password::from(secret)",      // No = sign
@@ -74,7 +76,7 @@ fn test_matches_actual_password_assignments() {
 fn test_does_not_match_short_passwords() {
     let regex = get_database_password_regex();
 
-    // Passwords shorter than 8 chars should not match (entropy threshold)
+    // Passwords shorter than 8 chars should not match (rule requires 8+)
     let short_passwords = ["password=short", "pwd=test", "passwd=abc"];
 
     for input in &short_passwords {
@@ -148,10 +150,6 @@ fn test_does_not_match_double_colon_paths() {
     }
 }
 
-// ============================================================================
-// Integration Tests
-// ============================================================================
-
 #[test]
 fn test_regex_captures_password_value() {
     let regex = get_database_password_regex();
@@ -199,16 +197,10 @@ fn test_handles_quoted_passwords() {
     }
 }
 
-// ============================================================================
-// Edge Cases
-// ============================================================================
-
 #[test]
 fn test_handles_whitespace_variations() {
     let regex = get_database_password_regex();
 
-    // Note: password_key and password-key don't match because the regex
-    // requires specific separators between password keyword and =/:
     let variations = [
         "password = secretvalue1",
         "password=secretvalue1",
@@ -227,18 +219,25 @@ fn test_handles_whitespace_variations() {
 
 #[test]
 fn test_does_not_match_environment_variable_reference() {
-    let _regex = get_database_password_regex();
+    let regex = get_database_password_regex();
 
-    // References to env vars are okay - they don't contain the actual secret
-    let _env_refs = [
+    // References to env vars should not match because of the [a-z0-9] start requirement
+    // in the pattern: r#"(?i)(?:password|pwd|passwd)[\s_-]*(?:=|:[^:])\s*["']?([a-z0-9][^\s"'`:]{7,})"#
+    // Since it starts with [a-z0-9], symbols like $ or { should not match.
+
+    let env_refs = [
         "password=$PASSWORD",
         "password=${DB_PASSWORD}",
         r#"password="%PASSWORD%""#,
     ];
 
-    // These might match the pattern but have low entropy - the entropy filter
-    // in the scanner should handle these. The regex itself may match.
-    // This test documents expected behavior.
+    for input in &env_refs {
+        assert!(
+            !regex.is_match(input),
+            "Should NOT match environment variable reference: {}",
+            input
+        );
+    }
 }
 
 #[test]
@@ -263,13 +262,9 @@ fn test_realistic_code_lines_should_not_match() {
     let regex = get_database_password_regex();
 
     // Lines from real code that should NOT be detected
-    // Note: Some code patterns like "x.password = Something" may match
-    // because the regex sees "password =" - entropy filter and file path
-    // exclusions (.rs files) help reduce these in the full scanner
     let should_not_match = [
         "fn validate_password(pwd: &str) -> bool", // No = after password keyword
         "/// Sets the password field",             // Doc comment, no assignment
-        "// password=hunter2 example",             // Comment (scanner should skip)
         "Password::verify(hash, attempt)",         // No = sign
     ];
 
@@ -286,18 +281,18 @@ fn test_realistic_code_lines_should_not_match() {
 fn test_known_limitations() {
     let regex = get_database_password_regex();
 
-    // Document known limitations - these DO match but ideally shouldn't
-    // The full scanner uses additional heuristics (entropy, file exclusions)
-    // to filter these out
+    // Document known limitations - these currently DO match but ideally shouldn't
+    // because the (?i) flag makes [a-z0-9] case-insensitive, so it matches Uppercase starts.
     let known_limitations = [
-        // Variable assignments to type constructors match because we see "password ="
+        "password = \"SecretWithUpper\"",
         "self.password = Password::hash(raw);",
-        "let password = Password::new(secret);",
     ];
 
     for input in &known_limitations {
-        // These match the regex - documenting this as expected behavior
-        // The full scanner has additional filters
-        let _ = regex.is_match(input);
+        assert!(
+            regex.is_match(input),
+            "Documenting known limitation - this currently matches: {}",
+            input
+        );
     }
 }

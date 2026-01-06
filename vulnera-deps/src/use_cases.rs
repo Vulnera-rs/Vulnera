@@ -201,9 +201,11 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             && filename.map(|f| f.ends_with("Cargo.toml")).unwrap_or(false);
 
         // Parse the dependency file
-        let mut packages = self
+        let parse_result = self
             .parse_dependencies(file_content, ecosystem.clone(), filename)
             .await?;
+        let mut packages = parse_result.packages;
+        let dependencies = parse_result.dependencies;
 
         if packages.is_empty() {
             warn!("No packages found in dependency file");
@@ -223,7 +225,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         // Build dependency graph using DependencyResolverService
         let mut dependency_graph = self
             .dependency_resolver
-            .build_graph(packages.clone(), ecosystem.clone())
+            .build_graph(packages.clone(), dependencies, ecosystem.clone())
             .await?;
 
         // If the graph is empty (manifest-only project without lockfile),
@@ -240,14 +242,6 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             {
                 Ok(res) => {
                     dependency_graph = res.graph;
-                    // Sync packages vector with the newly discovered transitive nodes
-                    for node in dependency_graph.nodes.values() {
-                        if !packages.iter().any(|p| {
-                            p.name == node.package.name && p.version == node.package.version
-                        }) {
-                            packages.push(node.package.clone());
-                        }
-                    }
                     debug!(
                         "Recursive resolution completed: {} packages, {} dependencies",
                         dependency_graph.package_count(),
@@ -268,6 +262,45 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 dependency_graph.dependency_count()
             );
         }
+
+        // Final synchronization: ensure the packages list matches the nodes in the graph.
+        // This ensures that any packages discovered during resolution are included in the analysis.
+        // We filter out the project root node if it's present in the graph but not in the original
+        // packages list, as it's typically the starting point rather than a dependency to be scanned.
+        let mut final_packages = Vec::new();
+        let initial_package_ids: std::collections::HashSet<_> =
+            packages.iter().map(PackageId::from_package).collect();
+
+        for node in dependency_graph.nodes.values() {
+            let pkg = &node.package;
+            let id = &node.id;
+
+            // Include if it's an original package OR discovered transitive dependency (has incoming edges).
+            let has_incoming = dependency_graph.edges.iter().any(|e| &e.to == id);
+
+            if initial_package_ids.contains(id) || has_incoming {
+                if !final_packages
+                    .iter()
+                    .any(|p: &Package| p.name == pkg.name && p.version == pkg.version)
+                {
+                    final_packages.push(pkg.clone());
+                }
+            }
+        }
+        packages = final_packages;
+
+        // Keep the graph in sync with the filtered packages list
+        let final_package_ids: std::collections::HashSet<_> =
+            packages.iter().map(PackageId::from_package).collect();
+        dependency_graph
+            .nodes
+            .retain(|id, _| final_package_ids.contains(id));
+        dependency_graph
+            .edges
+            .retain(|e| final_package_ids.contains(&e.from) && final_package_ids.contains(&e.to));
+        dependency_graph
+            .root_packages
+            .retain(|id| final_package_ids.contains(id));
 
         // Resolve Cargo.toml minor/major specs to latest available version from crates.io (caret semantics)
         // Use parallel processing for better performance
@@ -522,7 +555,7 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         file_content: &str,
         ecosystem: Ecosystem,
         filename: Option<&str>,
-    ) -> Result<Vec<Package>, ApplicationError> {
+    ) -> Result<vulnera_core::infrastructure::parsers::ParseResult, ApplicationError> {
         // Try to find a parser based on filename first
         if let Some(filename) = filename {
             if let Some(parser) = self.parser_factory.create_parser(filename) {
@@ -530,7 +563,6 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 return parser
                     .parse_file(file_content)
                     .await
-                    .map(|result| result.packages)
                     .map_err(ApplicationError::Parse);
             }
         }
@@ -563,7 +595,6 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 return parser
                     .parse_file(file_content)
                     .await
-                    .map(|result| result.packages)
                     .map_err(ApplicationError::Parse);
             }
         }

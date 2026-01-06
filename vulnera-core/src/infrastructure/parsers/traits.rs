@@ -44,36 +44,6 @@ impl ParserFactory {
     pub fn new() -> Self {
         let mut parsers: Vec<Box<dyn PackageFileParser>> = Vec::new();
 
-        // Tree-sitter parsers (higher priority for better error recovery)
-        // JSON parsers
-        if let Ok(parser) =
-            crate::infrastructure::parsers::tree_sitter::TreeSitterJsonPackageParser::new(
-                crate::domain::vulnerability::value_objects::Ecosystem::Npm,
-                "package.json".to_string(),
-                25, // High priority
-            )
-        {
-            parsers.push(Box::new(parser));
-        }
-        // TOML parsers - disabled due to tree-sitter version mismatch (0.20 vs 0.25)
-        // The existing CargoParser using toml crate is more robust
-        // if let Ok(parser) = crate::infrastructure::parsers::tree_sitter::TreeSitterTomlPackageParser::new(
-        //     crate::domain::vulnerability::value_objects::Ecosystem::Cargo,
-        //     "Cargo.toml".to_string(),
-        //     25,
-        // ) {
-        //     parsers.push(Box::new(parser));
-        // }
-        // Go parsers
-        if let Ok(parser) =
-            crate::infrastructure::parsers::tree_sitter::TreeSitterGoPackageParser::new(
-                crate::domain::vulnerability::value_objects::Ecosystem::Go,
-                "go.mod".to_string(),
-                25,
-            )
-        {
-            parsers.push(Box::new(parser));
-        }
         // Note: XML parsing uses the existing MavenParser (quick-xml based) which is more robust
 
         // Fallback parsers (original implementations)
@@ -138,6 +108,28 @@ impl ParserFactory {
         parsers.push(Box::new(
             crate::infrastructure::parsers::ruby::GemfileParser::new(),
         ));
+
+        // Tree-sitter parsers (Lowered priority to prefer fallback parsers with edge extraction)
+        // JSON parsers
+        if let Ok(parser) =
+            crate::infrastructure::parsers::tree_sitter::TreeSitterJsonPackageParser::new(
+                crate::domain::vulnerability::value_objects::Ecosystem::Npm,
+                "package.json".to_string(),
+                0,
+            )
+        {
+            parsers.push(Box::new(parser));
+        }
+        // Go parsers
+        if let Ok(parser) =
+            crate::infrastructure::parsers::tree_sitter::TreeSitterGoPackageParser::new(
+                crate::domain::vulnerability::value_objects::Ecosystem::Go,
+                "go.mod".to_string(),
+                0,
+            )
+        {
+            parsers.push(Box::new(parser));
+        }
 
         // Build index for fast lookups of common exact filename matches
         let mut parser_index = std::collections::HashMap::new();

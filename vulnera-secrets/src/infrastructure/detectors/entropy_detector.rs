@@ -1,15 +1,19 @@
 //! Entropy-based secret detector
 
 use crate::domain::value_objects::{Entropy, EntropyEncoding};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use tracing::debug;
+
+static CANDIDATE_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"[A-Za-z0-9+/=_-]{20,}").expect("Failed to compile entropy candidate regex")
+});
 
 /// Entropy detector for high-entropy strings
 #[derive(Clone)]
 pub struct EntropyDetector {
     base64_threshold: f64,
     hex_threshold: f64,
-    candidate_regex: Regex,
 }
 
 impl EntropyDetector {
@@ -17,10 +21,6 @@ impl EntropyDetector {
         Self {
             base64_threshold,
             hex_threshold,
-            // Match sequences of potential secret characters (Base64/Hex/URL-safe)
-            // Minimum length 20 to avoid noise
-            candidate_regex: Regex::new(r"[A-Za-z0-9+/=_-]{20,}")
-                .expect("Failed to compile entropy candidate regex"),
         }
     }
 
@@ -28,7 +28,7 @@ impl EntropyDetector {
     pub fn detect(&self, content: &str, line_number: u32) -> Vec<EntropyMatch> {
         let mut matches = Vec::new();
 
-        for mat in self.candidate_regex.find_iter(content) {
+        for mat in CANDIDATE_REGEX.find_iter(content) {
             let word = mat.as_str();
 
             // Check Base64-like strings
