@@ -17,27 +17,44 @@ A comprehensive guide to using the Vulnera command-line interface for vulnerabil
 
 ## Installation
 
+### From Pre-built Binaries
+
+The easiest way to get Vulnera is to download the latest binary for your platform from the [GitHub Releases](https://github.com/k5602/Vulnera/releases) page:
+
+```bash
+# Linux (x86_64)
+curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+chmod +x vulnera
+sudo mv vulnera /usr/local/bin/
+
+# macOS (universal)
+curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-macos -o vulnera
+chmod +x vulnera
+sudo mv vulnera /usr/local/bin/
+```
+
 ### Building from Source
+
+If you have Rust installed, you can build the CLI directly from the source:
 
 ```bash
 # Clone the repository
 git clone https://github.com/k5602/Vulnera.git
-cd Vulnera
+cd Vulnera/vulnera-cli
 
-# Build with CLI feature enabled
-cargo build --release --features cli
+# Build the standalone CLI
+cargo build --release
 
-# The binary will be at ./target/release/vulnera-rust
-# Optionally, add to PATH or create an alias
-alias vulnera='./target/release/vulnera-rust'
-there will be a better distribution method in the future.
+# The binary will be at ./target/release/vulnera
+# Optionally, install it to your cargo bin directory
+cargo install --path .
 ```
 
 ### Verify Installation
 
 ```bash
-vulnera-rust --version
-vulnera-rust --help
+vulnera --version
+vulnera --help
 ```
 
 ---
@@ -49,7 +66,7 @@ vulnera-rust --help
 Before running scans, check your available quota:
 
 ```bash
-vulnera-rust quota
+vulnera quota
 ```
 
 Output:
@@ -68,35 +85,35 @@ Analyze a project directory for all vulnerabilities:
 
 ```bash
 # Full analysis (dependencies + SAST + secrets + API)
-vulnera-rust analyze /path/to/project
+vulnera analyze /path/to/project
 
 # Or use the short alias
-vulnera-rust a /path/to/project
+vulnera a /path/to/project
 ```
 
 ### 3. Scan Dependencies Only
 
 ```bash
 # Scan current directory
-vulnera-rust deps .
+vulnera deps .
 
 # Scan a specific manifest file
-vulnera-rust deps --file package.json
+vulnera deps --file package.json
 
 # Scan with specific severity threshold
-vulnera-rust deps . --severity high
+vulnera deps . --severity high
 ```
 
 ### 4. Run SAST (Static Analysis)
 
 ```bash
-vulnera-rust sast /path/to/project
+vulnera sast /path/to/project
 ```
 
 ### 5. Detect Secrets
 
 ```bash
-vulnera-rust secrets /path/to/project
+vulnera secrets /path/to/project
 ```
 
 ---
@@ -105,30 +122,30 @@ vulnera-rust secrets /path/to/project
 
 ### Why Authenticate?
 
-| Feature | Unauthenticated | Authenticated |
-|---------|-----------------|---------------|
-| Daily requests | 10 | 40 |
-| Vulnerability data | Cached only | Live + cached |
-| Priority support | ❌ | ✅ |
+| Feature            | Unauthenticated | Authenticated |
+| ------------------ | --------------- | ------------- |
+| Daily requests     | 10              | 40            |
+| Vulnerability data | Cached only     | Live + cached |
+| Priority support   | ❌              | ✅            |
 
 ### Login with API Key
 
 ```bash
 # Interactive login (prompts for API key)
-vulnera-rust auth login
+vulnera auth login
 
 # Login with API key directly
-vulnera-rust auth login --api-key YOUR_API_KEY
+vulnera auth login --api-key YOUR_API_KEY
 
 # In CI/CD, use environment variable
 export VULNERA_API_KEY=your_api_key
-vulnera-rust --ci auth login
+vulnera --ci auth login
 ```
 
 ### Check Authentication Status
 
 ```bash
-vulnera-rust auth status
+vulnera auth status
 ```
 
 Output:
@@ -144,7 +161,7 @@ Server connection: Online
 ### Logout
 
 ```bash
-vulnera-rust auth logout
+vulnera auth logout
 ```
 
 ### Credential Storage
@@ -161,7 +178,7 @@ Vulnera stores credentials securely:
 Check where credentials are stored:
 
 ```bash
-vulnera-rust auth info
+vulnera auth info
 ```
 
 ---
@@ -173,15 +190,15 @@ vulnera-rust auth info
 Run all analysis types on a project.
 
 ```bash
-vulnera-rust analyze [OPTIONS] [PATH]
+vulnera analyze [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust analyze .                    # Current directory
-vulnera-rust analyze /path/to/project     # Specific path
-vulnera-rust a . --severity critical      # Only critical issues
-vulnera-rust a . --skip-deps              # Skip dependency analysis
-vulnera-rust a . --skip-sast              # Skip SAST
-vulnera-rust a . --skip-secrets           # Skip secret detection
+vulnera analyze .                    # Current directory
+vulnera analyze /path/to/project     # Specific path
+vulnera a . --severity critical      # Only critical issues
+vulnera a . --skip-deps              # Skip dependency analysis
+vulnera a . --skip-sast              # Skip SAST
+vulnera a . --skip-secrets           # Skip secret detection
 ```
 
 Options:
@@ -197,13 +214,13 @@ Options:
 Scan dependencies for known vulnerabilities.
 
 ```bash
-vulnera-rust deps [OPTIONS] [PATH]
+vulnera deps [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust deps .                       # Scan current directory
-vulnera-rust deps --file Cargo.toml       # Specific manifest
-vulnera-rust deps . --ecosystem npm       # Force ecosystem detection
-vulnera-rust d . --severity high          # High+ severity only
+vulnera deps .                       # Scan current directory
+vulnera deps --file Cargo.toml       # Specific manifest
+vulnera deps . --ecosystem npm       # Force ecosystem detection
+vulnera d . --severity high          # High+ severity only
 ```
 
 Supported ecosystems:
@@ -222,12 +239,12 @@ Supported ecosystems:
 Run static application security testing.
 
 ```bash
-vulnera-rust sast [OPTIONS] [PATH]
+vulnera sast [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust sast .                       # Current directory
-vulnera-rust sast src/                    # Specific folder
-vulnera-rust s . --severity medium        # Medium+ severity
+vulnera sast .                       # Current directory
+vulnera sast src/                    # Specific folder
+vulnera s . --severity medium        # Medium+ severity
 ```
 
 Detects:
@@ -244,12 +261,12 @@ Detects:
 Find hardcoded secrets and credentials.
 
 ```bash
-vulnera-rust secrets [OPTIONS] [PATH]
+vulnera secrets [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust secrets .                    # Current directory
-vulnera-rust secrets --include-tests      # Include test files
-vulnera-rust sec . --severity high        # High+ severity only
+vulnera secrets .                    # Current directory
+vulnera secrets --include-tests      # Include test files
+vulnera sec . --severity high        # High+ severity only
 ```
 
 Detects:
@@ -266,11 +283,11 @@ Detects:
 Analyze API endpoints for security issues.
 
 ```bash
-vulnera-rust api [OPTIONS] [PATH]
+vulnera api [OPTIONS] [PATH]
 
 # Examples
-vulnera-rust api .                        # Scan for API definitions
-vulnera-rust api --file openapi.yaml      # Specific OpenAPI spec
+vulnera api .                        # Scan for API definitions
+vulnera api --file openapi.yaml      # Specific OpenAPI spec
 ```
 
 ### `quota` - Quota Management
@@ -278,13 +295,13 @@ vulnera-rust api --file openapi.yaml      # Specific OpenAPI spec
 View and manage your usage quota.
 
 ```bash
-vulnera-rust quota [COMMAND]
+vulnera quota [COMMAND]
 
 # Commands
-vulnera-rust quota              # Show quota status (default)
-vulnera-rust quota show         # Show quota status
-vulnera-rust quota sync         # Sync with server
-vulnera-rust q                  # Short alias
+vulnera quota              # Show quota status (default)
+vulnera quota show         # Show quota status
+vulnera quota sync         # Sync with server
+vulnera q                  # Short alias
 ```
 
 ### `config` - Configuration Management
@@ -292,16 +309,16 @@ vulnera-rust q                  # Short alias
 View and modify configuration.
 
 ```bash
-vulnera-rust config [COMMAND]
+vulnera config [COMMAND]
 
 # Commands
-vulnera-rust config show        # Show current configuration
-vulnera-rust config path        # Show config file locations
-vulnera-rust config get server.port       # Get specific value
-vulnera-rust config set server.port 8080  # Set value
-vulnera-rust config init        # Create default config file
-vulnera-rust config init --local          # Create in project directory
-vulnera-rust config reset       # Reset to defaults
+vulnera config show        # Show current configuration
+vulnera config path        # Show config file locations
+vulnera config get server.port       # Get specific value
+vulnera config set server.port 8080  # Set value
+vulnera config init        # Create default config file
+vulnera config init --local          # Create in project directory
+vulnera config reset       # Reset to defaults
 ```
 
 ---
@@ -313,7 +330,7 @@ vulnera-rust config reset       # Reset to defaults
 Human-readable tabular format, ideal for terminal use.
 
 ```bash
-vulnera-rust deps .
+vulnera deps .
 ```
 
 ```
@@ -332,7 +349,7 @@ Found 2 vulnerabilities (1 critical, 1 high)
 Machine-readable JSON output for scripting and integrations.
 
 ```bash
-vulnera-rust --format json deps .
+vulnera --format json deps .
 ```
 
 ```json
@@ -361,7 +378,7 @@ vulnera-rust --format json deps .
 Minimal text output without formatting.
 
 ```bash
-vulnera-rust --format plain deps .
+vulnera --format plain deps .
 ```
 
 ```
@@ -374,7 +391,7 @@ axios@0.21.0 - HIGH - CVE-2021-3749
 Static Analysis Results Interchange Format for IDE integration.
 
 ```bash
-vulnera-rust --format sarif deps . > results.sarif
+vulnera --format sarif deps . > results.sarif
 ```
 
 Compatible with:
@@ -400,12 +417,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install Vulnera CLI
         run: |
           curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-amd64 -o vulnera
           chmod +x vulnera
-      
+
       - name: Run vulnerability scan
         env:
           VULNERA_API_KEY: ${{ secrets.VULNERA_API_KEY }}
@@ -413,7 +430,7 @@ jobs:
         run: |
           ./vulnera analyze . --format sarif > results.sarif
         continue-on-error: true
-      
+
       - name: Upload SARIF results
         uses: github/codeql-action/upload-sarif@v2
         with:
@@ -430,8 +447,8 @@ security-scan:
     VULNERA_CI: "true"
     VULNERA_API_KEY: $VULNERA_API_KEY
   script:
-    - cargo install --git https://github.com/k5602/Vulnera --features cli
-    - vulnera-rust analyze . --format json > vulnera-report.json
+    - cargo install --git https://github.com/k5602/Vulnera --target-dir vulnera-cli
+    - vulnera analyze . --format json > vulnera-report.json
   artifacts:
     reports:
       security: vulnera-report.json
@@ -449,7 +466,7 @@ repos:
     hooks:
       - id: vulnera-secrets
         name: Check for secrets
-        entry: vulnera-rust secrets . --ci
+        entry: vulnera secrets . --ci
         language: system
         pass_filenames: false
         always_run: true
@@ -464,7 +481,7 @@ set -e
 echo "Running Vulnera security checks..."
 
 # Check for secrets (critical only to avoid false positives)
-vulnera-rust --ci secrets . --severity critical
+vulnera --ci secrets . --severity critical
 if [ $? -ne 0 ]; then
     echo "❌ Secrets detected! Please remove them before committing."
     exit 1
@@ -477,20 +494,20 @@ echo "✅ Security checks passed"
 
 Use exit codes in CI pipelines:
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success - no issues found |
-| 1 | Vulnerabilities found (at or above threshold) |
-| 2 | Configuration or input error |
-| 3 | Network error (when online mode required) |
-| 4 | Quota exceeded |
-| 5 | Authentication required |
-| 99 | Internal error |
+| Code | Meaning                                       |
+| ---- | --------------------------------------------- |
+| 0    | Success - no issues found                     |
+| 1    | Vulnerabilities found (at or above threshold) |
+| 2    | Configuration or input error                  |
+| 3    | Network error (when online mode required)     |
+| 4    | Quota exceeded                                |
+| 5    | Authentication required                       |
+| 99   | Internal error                                |
 
 Example usage:
 
 ```bash
-vulnera-rust --ci deps . --severity high
+vulnera --ci deps . --severity high
 case $? in
     0) echo "No vulnerabilities found" ;;
     1) echo "Vulnerabilities found - failing build" && exit 1 ;;
@@ -570,7 +587,7 @@ Run analysis without network connectivity:
 
 ```bash
 # Force offline mode
-vulnera-rust --offline analyze .
+vulnera --offline analyze .
 
 # Or set environment variable
 export VULNERA_OFFLINE=true
@@ -637,21 +654,21 @@ sudo dnf install gnome-keyring  # Fedora
 For debugging, enable verbose mode:
 
 ```bash
-vulnera-rust -v analyze .      # Verbose
-vulnera-rust -vv analyze .     # Very verbose (if supported)
+vulnera -v analyze .      # Verbose
+vulnera -vv analyze .     # Very verbose (if supported)
 ```
 
 ### Check System Info
 
 ```bash
 # Show version
-vulnera-rust --version
+vulnera --version
 
 # Show config locations
-vulnera-rust config path
+vulnera config path
 
 # Show auth storage method
-vulnera-rust auth info
+vulnera auth info
 ```
 
 ---
@@ -662,13 +679,13 @@ vulnera-rust auth info
 
 ```bash
 cd my-node-project
-vulnera-rust analyze . --format json > security-report.json
+vulnera analyze . --format json > security-report.json
 ```
 
 ### Scan Only for Critical Issues
 
 ```bash
-vulnera-rust deps . --severity critical
+vulnera deps . --severity critical
 ```
 
 ### CI Pipeline with Failure Threshold
@@ -676,7 +693,7 @@ vulnera-rust deps . --severity critical
 ```bash
 #!/bin/bash
 # Fail if any high or critical vulnerabilities found
-vulnera-rust --ci analyze . --severity high
+vulnera --ci analyze . --severity high
 exit_code=$?
 
 if [ $exit_code -eq 1 ]; then
@@ -694,7 +711,7 @@ fi
 ### Generate SARIF Report for VS Code
 
 ```bash
-vulnera-rust --format sarif analyze . > .vscode/vulnera.sarif
+vulnera --format sarif analyze . > .vscode/vulnera.sarif
 ```
 
 Then install the "SARIF Viewer" VS Code extension to see results inline.
@@ -705,16 +722,16 @@ Then install the "SARIF Viewer" VS Code extension to see results inline.
 
 ```bash
 # General help
-vulnera-rust --help
+vulnera --help
 
 # Command-specific help
-vulnera-rust analyze --help
-vulnera-rust deps --help
-vulnera-rust auth --help
+vulnera analyze --help
+vulnera deps --help
+vulnera auth --help
 
 # Check quota and status
-vulnera-rust quota
-vulnera-rust auth status
+vulnera quota
+vulnera auth status
 ```
 
 ## Feedback

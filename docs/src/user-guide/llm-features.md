@@ -4,7 +4,7 @@ Vulnera goes beyond vulnerability detection. Get instant, human-readable explana
 
 ## What Is LLM-Based Analysis?
 
-LLM (Large Language Model) features use advanced AI—specifically **Huawei Cloud Pangu**—to provide:
+LLM (Large Language Model) features use advanced AI—specifically **Google Gemini**—to provide:
 
 - **Vulnerability Explanations** — Why a finding matters and what risks it poses
 - **Code Fix Suggestions** — Concrete code snippets showing how to remediate the issue
@@ -146,8 +146,8 @@ vulnera analyze /path/to/project --format json \
 ```bash
 # Enable LLM
 export VULNERA_LLM_ENABLED=true
-export VULNERA_LLM_PROVIDER=huawei-pangu
-export VULNERA_LLM_API_KEY=your_key_here
+export VULNERA_LLM_PROVIDER=gemini
+export VULNERA_LLM_GEMINI_API_KEY=your_key_here
 
 # Use in CLI
 vulnera analyze /path/to/project --enhance-with-explanations
@@ -183,7 +183,7 @@ vulnera llm query "What is YAML injection and why is it dangerous?"
 
 | Aspect       | Detection Modules           | LLM Features                  |
 | ------------ | --------------------------- | ----------------------------- |
-| **Method**   | Rule-based, ML models       | LLM (Huawei Pangu)            |
+| **Method**   | Rule-based, ML models       | LLM (Google Gemini)           |
 | **Offline**  | ✅ Yes (SAST, secrets, API) | ❌ Requires network           |
 | **Cost**     | 3 tokens                    | 6 tokens                      |
 | **Use Case** | Find vulnerabilities        | Understand & remediate        |

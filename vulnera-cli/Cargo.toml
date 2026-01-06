@@ -1,6 +1,6 @@
 [package]
 name = "vulnera-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Vulnera-Team"]
 license = "AGPL-3.0-or-later"
@@ -9,7 +9,7 @@ keywords = ["security", "vulnerability", "analysis", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 description = "Standalone CLI for Vulnera vulnerability analysis - offline SAST, secrets, and API security scanning"
 
-# Standalone workspace 
+# Standalone workspace
 [workspace]
 
 [[bin]]
