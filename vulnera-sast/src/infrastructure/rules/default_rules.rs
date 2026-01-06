@@ -502,9 +502,36 @@ pub fn js_path_traversal_rule() -> Rule {
         description: "Archive extraction without path validation may allow writing files outside target directory".to_string(),
         severity: Severity::High,
         languages: vec![Language::JavaScript],
-        // Matches: path.join with entry.path/fileName/entryName without prior validation
+        // Matches: fs.readFileSync/writeFileSync with string concatenation (potential path traversal)
+        // Also matches path.join with user-controlled input
         pattern: Pattern::TreeSitterQuery(
-            r#"(comment) @ignore"#.to_string(),
+            r#"[
+              (call_expression
+                function: (member_expression
+                  object: (identifier) @obj
+                  property: (property_identifier) @fn
+                )
+                arguments: (arguments
+                  (binary_expression
+                    operator: "+"
+                  ) @concat
+                )
+                (#eq? @obj "fs")
+                (#match? @fn "^(readFileSync|writeFileSync|readFile|writeFile|createReadStream|createWriteStream)$")
+              ) @call
+              (call_expression
+                function: (member_expression
+                  object: (identifier) @obj
+                  property: (property_identifier) @fn
+                )
+                arguments: (arguments
+                  (template_string) @template
+                )
+                (#eq? @obj "fs")
+                (#match? @fn "^(readFileSync|writeFileSync|readFile|writeFile|createReadStream|createWriteStream)$")
+              ) @call
+            ]"#
+                .to_string(),
         ),
         options: RuleOptions::default(),
         cwe_ids: vec!["CWE-22".to_string(), "CWE-73".to_string()],
@@ -1473,12 +1500,36 @@ pub fn go_ssrf_rule() -> Rule {
         description: "Potential SSRF using net/http or other HTTP clients".to_string(),
         severity: Severity::High,
         languages: vec![Language::Go],
-        pattern: Pattern::TreeSitterQuery(r#"(comment) @ignore"#.to_string()),
+        // Matches: http.Get(), http.Post(), http.NewRequest() with variable URL
+        pattern: Pattern::TreeSitterQuery(
+            r#"[
+              (call_expression
+                function: (selector_expression
+                  operand: (identifier) @pkg
+                  field: (field_identifier) @fn
+                )
+                (#eq? @pkg "http")
+                (#match? @fn "^(Get|Post|Head|PostForm)$")
+              ) @call
+              (call_expression
+                function: (selector_expression
+                  operand: (identifier) @pkg
+                  field: (field_identifier) @fn
+                )
+                arguments: (argument_list
+                  (identifier) @url_var
+                )
+                (#eq? @pkg "http")
+                (#eq? @fn "NewRequest")
+              ) @call
+            ]"#
+                .to_string(),
+        ),
         options: RuleOptions::default(),
         cwe_ids: vec!["CWE-918".to_string()],
         owasp_categories: vec!["A10:2021 - Server-Side Request Forgery".to_string()],
         tags: vec!["ssrf".to_string(), "network".to_string(), "go".to_string()],
-        message: None,
+        message: Some("Validate and sanitize user-controlled URLs before making HTTP requests. Use allowlists for permitted domains.".to_string()),
         fix: None,
     }
 }
