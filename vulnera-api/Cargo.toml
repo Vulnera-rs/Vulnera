@@ -23,6 +23,9 @@ serde_yml = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 
+# Utilities
+regex = { workspace = true }
+
 # Logging
 tracing = { workspace = true }
 

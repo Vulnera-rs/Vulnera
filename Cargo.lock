@@ -6942,6 +6942,7 @@ dependencies = [
  "futures",
  "insta",
  "oas3",
+ "regex",
  "rstest",
  "serde",
  "serde_json",

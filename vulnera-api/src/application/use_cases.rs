@@ -12,6 +12,7 @@ use crate::infrastructure::parser::OpenApiParser;
 #[derive(Debug)]
 pub struct ScanResult {
     pub findings: Vec<ApiFinding>,
+    pub score: u8,
 }
 
 /// Use case for scanning an API specification
@@ -149,13 +150,31 @@ impl ScanApiSpecificationUseCase {
             }
         }
 
+        // Calculate security score (Contract Integrity Score)
+        // Base: 100
+        // Deductions: Critical=25, High=15, Medium=5, Low=1
+        let mut deduction = 0;
+        for finding in &all_findings {
+            match finding.severity {
+                FindingSeverity::Critical => deduction += 25,
+                FindingSeverity::High => deduction += 15,
+                FindingSeverity::Medium => deduction += 5,
+                FindingSeverity::Low => deduction += 1,
+                FindingSeverity::Info => {}
+            }
+        }
+
+        let score = (100_i32 - deduction).max(0) as u8;
+
         info!(
             finding_count = all_findings.len(),
+            score = score,
             "API security scan completed"
         );
 
         Ok(ScanResult {
             findings: all_findings,
+            score,
         })
     }
 

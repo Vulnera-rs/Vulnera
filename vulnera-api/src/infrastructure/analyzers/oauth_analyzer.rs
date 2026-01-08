@@ -65,6 +65,69 @@ impl OAuthAnalyzer {
             }
         }
 
+        // Check scope granularity
+        let mut all_scopes = std::collections::HashSet::new();
+        let mut endpoint_count = 0;
+
+        for path in &spec.paths {
+            for operation in &path.operations {
+                endpoint_count += 1;
+                for req in &operation.security {
+                    for scope in &req.scopes {
+                        all_scopes.insert(scope.clone());
+
+                        // Check for admin scope leakage (admin scope on non-admin path)
+                        if scope.contains("admin")
+                            && !path.path.contains("admin")
+                            && !path.path.contains("internal")
+                        {
+                            findings.push(ApiFinding {
+                                id: format!("admin-scope-leak-{}-{}", path.path, operation.method),
+                                vulnerability_type: ApiVulnerabilityType::BolaRisk,
+                                location: ApiLocation {
+                                    file_path: "openapi.yaml".to_string(),
+                                    line: None,
+                                    path: Some(path.path.clone()),
+                                    operation: Some(operation.method.clone()),
+                                },
+                                severity: FindingSeverity::Medium,
+                                description: format!(
+                                    "Administrative scope '{}' used on apparent non-admin endpoint {} {}",
+                                    scope, operation.method, path.path
+                                ),
+                                recommendation: "Ensure administrative scopes are only used on privileged endpoints".to_string(),
+                                path: Some(path.path.clone()),
+                                method: Some(operation.method.clone()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Single Scope Anti-Pattern
+        // If API has > 5 endpoints but uses only 1 scope, it likely has poor granularity
+        if endpoint_count > 5 && all_scopes.len() == 1 {
+            findings.push(ApiFinding {
+                id: "single-scope-anti-pattern".to_string(),
+                vulnerability_type: ApiVulnerabilityType::IneffectiveScopeHierarchy, // Need to ensure this enum variant exists or use similar
+                location: ApiLocation {
+                    file_path: "openapi.yaml".to_string(),
+                    line: None,
+                    path: None,
+                    operation: None,
+                },
+                severity: FindingSeverity::Medium,
+                description: format!(
+                    "API contains {} endpoints but uses only 1 OAuth scope ('{}'). This indicates ineffective authorization granularity.",
+                    endpoint_count, all_scopes.iter().next().unwrap()
+                ),
+                recommendation: "Define granular scopes (e.g., read:users, write:orders) to follow Least Privilege principle".to_string(),
+                path: None,
+                method: None,
+            });
+        }
+
         findings
     }
 }

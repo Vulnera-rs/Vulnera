@@ -148,6 +148,13 @@ impl AnalysisModule for ApiSecurityModule {
 
         let duration = start_time.elapsed();
 
+        // Expose score in metadata
+        let mut additional_info = std::collections::HashMap::new();
+        additional_info.insert(
+            "contract_integrity_score".to_string(),
+            scan_result.score.to_string(),
+        );
+
         Ok(ModuleResult {
             job_id: config.job_id,
             module_type: self.module_type(),
@@ -155,7 +162,7 @@ impl AnalysisModule for ApiSecurityModule {
             metadata: ModuleResultMetadata {
                 files_scanned: 1, // Single OpenAPI spec file
                 duration_ms: duration.as_millis() as u64,
-                additional_info: std::collections::HashMap::new(),
+                additional_info,
             },
             error: None,
         })

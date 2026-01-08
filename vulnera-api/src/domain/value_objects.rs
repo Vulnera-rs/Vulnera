@@ -15,34 +15,44 @@ pub enum ApiVulnerabilityType {
     MissingAuthorization,
     OverlyPermissiveAccess,
     MissingRbac,
+    BolaRisk,        // NEW: Broken Object Level Authorization
+    ScopeEscalation, // NEW: Over-permissive scopes
 
     // Input validation
     MissingRequestValidation,
     MissingInputSanitization,
     MissingFileUploadSizeLimit,
     SqlInjectionRisk,
+    WeakSchemaValidation, // NEW: Missing pattern/constraints
+    MassAssignmentRisk,   // NEW: additionalProperties: true
+    UnboundedInput,       // NEW: No min/max length
 
     // Data exposure
     SensitiveDataInUrl,
     SensitiveDataInHeaders,
     MissingEncryption,
     PiiWithoutConsent,
+    ExposedSecretInSpec, // NEW: JWT/key in example/default
 
     // Security headers
     MissingSecurityHeaders,
     InsecureCors,
     MissingRateLimitingHeaders,
+    CorsWildcard,  // NEW: CORS: *
+    VerbTampering, // NEW: TRACE enabled
 
     // API design
     VersioningIssues,
     MissingErrorHandling,
     InformationDisclosure,
     MissingPagination,
+    ResourceExhaustion, // NEW: No pagination/limits
 
     // OAuth/OIDC
     InsecureOAuthFlow,
     MissingTokenValidation,
     InsecureRedirectUri,
+    IneffectiveScopeHierarchy,
 }
 
 /// OpenAPI specification model (simplified)
@@ -118,19 +128,55 @@ pub struct ApiHeader {
     pub schema: Option<ApiSchema>,
 }
 
-/// API schema
-#[derive(Debug, Clone, Default)]
+/// API schema with validation constraints for security analysis
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ApiSchema {
+    // Core schema fields
     pub schema_type: Option<String>,
     pub format: Option<String>,
     pub properties: Vec<ApiProperty>,
     pub required: Vec<String>,
     pub summary: Option<String>,
     pub description: Option<String>,
+
+    // Validation constraints (for schema "tightness" analysis)
+    pub pattern: Option<String>,          // Regex pattern for strings
+    pub minimum: Option<f64>,             // Minimum value for numbers
+    pub maximum: Option<f64>,             // Maximum value for numbers
+    pub min_length: Option<u32>,          // Minimum string length
+    pub max_length: Option<u32>,          // Maximum string length
+    pub enum_values: Option<Vec<String>>, // Allowed enumerated values
+    pub multiple_of: Option<f64>,         // Number must be multiple of this
+    pub min_items: Option<u32>,           // Minimum array items
+    pub max_items: Option<u32>,           // Maximum array items
+
+    // Logical constraints (composition)
+    pub one_of: Vec<ApiSchema>,
+    pub any_of: Vec<ApiSchema>,
+    pub all_of: Vec<ApiSchema>,
+
+    // Security-relevant metadata
+    pub example: Option<serde_json::Value>,
+    pub default: Option<serde_json::Value>,
+    pub read_only: bool,
+    pub write_only: bool,
+    pub additional_properties: AdditionalProperties,
+}
+
+/// Controls whether additional properties are allowed in object schemas
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum AdditionalProperties {
+    /// Additional properties are allowed (default, less secure)
+    #[default]
+    Allowed,
+    /// Additional properties are denied (more secure)
+    Denied,
+    /// Additional properties must match a specific schema
+    Schema(Box<ApiSchema>),
 }
 
 /// API property
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ApiProperty {
     pub name: String,
     pub schema: ApiSchema,
