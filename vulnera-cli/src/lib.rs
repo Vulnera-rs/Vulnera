@@ -18,9 +18,13 @@ pub mod constants;
 pub mod context;
 pub mod credentials;
 pub mod executor;
+pub mod file_cache;
+pub mod fix_generator;
+pub mod manifest_cache;
 pub mod output;
 pub mod quota_tracker;
 pub mod severity;
+pub mod watcher;
 
 pub use context::CliContext;
 pub use credentials::CredentialManager;
