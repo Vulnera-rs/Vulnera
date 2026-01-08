@@ -107,46 +107,9 @@ async fn test_new_damn_repo_detects_eval_injection() {
     );
 }
 
-#[tokio::test]
-async fn test_new_damn_repo_detects_hardcoded_secret() {
-    let repo_path = get_test_repo_path();
-    if !repo_path.exists() {
-        eprintln!(
-            "Skipping test: ex/new-damn-repo not found at {:?}",
-            repo_path
-        );
-        return;
-    }
-
-    let result = run_sast_on_dir(&repo_path).await;
-
-    // Should detect hardcoded secret in secret.js
-    let secret_findings: Vec<_> = result
-        .findings
-        .iter()
-        .filter(|f| f.rule_id.as_deref() == Some("js-hardcoded-secret"))
-        .collect();
-
-    assert!(
-        !secret_findings.is_empty(),
-        "Should detect js-hardcoded-secret in secret.js. Found rules: {:?}",
-        result
-            .findings
-            .iter()
-            .filter_map(|f| f.rule_id.clone())
-            .collect::<Vec<_>>()
-    );
-
-    // The secret finding should be on line 4 of secret.js (STRIPE_API_KEY)
-    let secret_in_correct_file = secret_findings
-        .iter()
-        .any(|f| f.location.path.ends_with("secret.js") && f.location.line == Some(4));
-
-    assert!(
-        secret_in_correct_file,
-        "js-hardcoded-secret should be detected on line 4 of secret.js"
-    );
-}
+// NOTE: test_new_damn_repo_detects_hardcoded_secret has been removed.
+// Secret detection is now handled by vulnera-secrets module, not SAST.
+// See vulnera-secrets/tests/test_new_damn_repo.rs for secret detection E2E tests.
 
 #[tokio::test]
 async fn test_new_damn_repo_no_false_positives_on_comments() {
@@ -388,25 +351,8 @@ async fn test_new_damn_repo_detects_python_ssti() {
     );
 }
 
-#[tokio::test]
-async fn test_new_damn_repo_detects_python_hardcoded_password() {
-    let repo_path = get_test_repo_path();
-    if !repo_path.exists() {
-        return;
-    }
-
-    let result = run_sast_on_dir(&repo_path).await;
-
-    assert!(
-        has_finding(&result, "python-hardcoded-password", "vulnerable.py"),
-        "Should detect python-hardcoded-password in vulnerable.py. Found: {:?}",
-        result
-            .findings
-            .iter()
-            .filter_map(|f| f.rule_id.clone())
-            .collect::<Vec<_>>()
-    );
-}
+// NOTE: test_new_damn_repo_detects_python_hardcoded_password has been removed.
+// Secret detection is now handled by vulnera-secrets module, not SAST.
 
 #[tokio::test]
 async fn test_new_damn_repo_detects_python_weak_crypto() {
@@ -834,10 +780,11 @@ async fn test_new_damn_repo_comprehensive_coverage() {
     println!("Rules found: {:?}", found_rules);
 
     // We should detect a significant number of different rule types
-    // across all our test files
+    // across all our test files (note: secret detection rules have been
+    // migrated to vulnera-secrets module)
     assert!(
-        found_rules.len() >= 10,
-        "Expected at least 10 different rules to be triggered. Found only {}: {:?}",
+        found_rules.len() >= 8,
+        "Expected at least 8 different SAST rules to be triggered (secrets are handled by vulnera-secrets). Found only {}: {:?}",
         found_rules.len(),
         found_rules
     );

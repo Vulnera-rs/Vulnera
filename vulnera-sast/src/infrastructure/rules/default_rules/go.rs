@@ -253,42 +253,6 @@ pub fn go_weak_crypto_rule() -> Rule {
     }
 }
 
-// ============================================================================
-// Secrets and Credentials Rules
-// ============================================================================
-
-/// Hardcoded credentials
-pub fn go_hardcoded_credentials_rule() -> Rule {
-    Rule {
-        id: "go-hardcoded-credentials".to_string(),
-        name: "Hardcoded Credentials".to_string(),
-        description: "Potential hardcoded password or secret".to_string(),
-        severity: Severity::High,
-        languages: vec![Language::Go],
-        pattern: Pattern::TreeSitterQuery(
-            r#"(short_var_declaration
-              left: (expression_list
-                (identifier) @name
-              )
-              right: (expression_list
-                (interpreted_string_literal) @value
-              )
-              (#match? @name "(?i)(password|passwd|secret|api_key|apikey|token|auth)")
-            ) @decl"#
-                .to_string(),
-        ),
-        options: RuleOptions::default(),
-        cwe_ids: vec!["CWE-798".to_string()],
-        owasp_categories: vec!["A07:2021 - Identification and Authentication Failures".to_string()],
-        tags: vec![
-            "secrets".to_string(),
-            "credentials".to_string(),
-            "go".to_string(),
-        ],
-        message: Some("Store secrets in environment variables or a secrets manager.".to_string()),
-        fix: None,
-    }
-}
 
 // ============================================================================
 // Path Traversal Rules
@@ -469,8 +433,7 @@ pub fn get_go_rules() -> Vec<Rule> {
         // Cryptography
         go_math_rand_rule(),
         go_weak_crypto_rule(),
-        // Secrets
-        go_hardcoded_credentials_rule(),
+        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Path traversal
         go_path_traversal_rule(),
         // Templates
