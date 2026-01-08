@@ -121,9 +121,6 @@ pub struct SeverityCounts {
 
 /// Run the secrets command
 pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32> {
-    let start = std::time::Instant::now();
-
-    // Resolve path
     let path = if args.path.is_absolute() {
         args.path.clone()
     } else {
@@ -136,11 +133,40 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
         return Ok(exit_codes::CONFIG_ERROR);
     }
 
-    // Secrets detection works fully offline
+    // Handle watch mode
+    if args.watch {
+        return run_watch_mode(ctx, cli, args, &path).await;
+    }
+
+    // Single scan
+    run_single_scan(ctx, cli, args, &path).await
+}
+
+/// Run a single secrets scan with cache integration
+async fn run_single_scan(
+    ctx: &CliContext,
+    cli: &Cli,
+    args: &SecretsArgs,
+    path: &PathBuf,
+) -> Result<i32> {
+    use crate::file_cache::{CachedFinding, FileCache};
+
+    let start = std::time::Instant::now();
+
     if !cli.quiet {
         ctx.output.header("Secret Detection");
         ctx.output.info(&format!("Scanning: {:?}", path));
     }
+
+    // Initialize file cache unless --no-cache
+    let mut file_cache = if !args.no_cache {
+        FileCache::new(path).ok()
+    } else {
+        if cli.verbose {
+            ctx.output.info("Cache disabled (--no-cache)");
+        }
+        None
+    };
 
     // Create progress indicator
     let progress = if !cli.quiet && !cli.ci {
@@ -174,7 +200,7 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
                     id: f.id,
                     secret_type: f.rule_id.unwrap_or_else(|| "unknown".to_string()),
                     severity: format!("{:?}", f.severity).to_lowercase(),
-                    file: f.location.path,
+                    file: f.location.path.clone(),
                     line: f.location.line.unwrap_or(0),
                     column: f.location.column,
                     match_text: String::new(), // Redacted for security
@@ -185,6 +211,44 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
                     }),
                 })
                 .collect();
+
+            // Update file cache with findings
+            if let Some(ref mut cache) = file_cache {
+                let mut findings_by_file: std::collections::HashMap<String, Vec<CachedFinding>> =
+                    std::collections::HashMap::new();
+
+                for finding in &findings {
+                    let cached = CachedFinding {
+                        id: finding.id.clone(),
+                        rule_id: Some(finding.secret_type.clone()),
+                        severity: finding.severity.clone(),
+                        description: finding.description.clone(),
+                        line: Some(finding.line),
+                        column: finding.column,
+                        module: "secrets".to_string(),
+                    };
+                    findings_by_file
+                        .entry(finding.file.clone())
+                        .or_default()
+                        .push(cached);
+                }
+
+                for (file, file_findings) in findings_by_file {
+                    let file_path = std::path::Path::new(&file);
+                    if file_path.exists() {
+                        let _ = cache.update_file(file_path, file_findings);
+                    }
+                }
+
+                if let Err(e) = cache.save() {
+                    if cli.verbose {
+                        ctx.output.warn(&format!("Failed to save cache: {}", e));
+                    }
+                } else if cli.verbose {
+                    ctx.output
+                        .info(&format!("Cache updated ({} entries)", cache.len()));
+                }
+            }
 
             let mut by_type: HashMap<String, usize> = HashMap::new();
             let mut by_severity = SeverityCounts {
@@ -224,24 +288,82 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
     };
 
     // Output results
+    output_results(ctx, cli, args, &result, start.elapsed())
+}
+
+/// Run watch mode - continuously monitor for file changes
+async fn run_watch_mode(
+    ctx: &CliContext,
+    cli: &Cli,
+    args: &SecretsArgs,
+    path: &PathBuf,
+) -> Result<i32> {
+    use crate::watcher::FileWatcher;
+
+    if !cli.quiet {
+        ctx.output.header("Secret Detection - Watch Mode");
+        ctx.output.info(&format!("Watching: {:?}", path));
+    }
+
+    // Run initial scan
+    let initial_result = run_single_scan(ctx, cli, args, path).await?;
+    if initial_result != exit_codes::SUCCESS && args.fail_on_secret {
+        ctx.output.warn("Secrets found in initial scan");
+    }
+
+    // Start file watcher
+    let watcher = FileWatcher::new(path, 500)?;
+
+    ctx.output.info("Watching for changes... (Ctrl+C to stop)");
+
+    // Watch loop
+    watcher.start(|event| {
+        println!("\n📝 {} file(s) changed", event.paths.len());
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let scan_result = rt.block_on(async { run_single_scan(ctx, cli, args, path).await });
+
+        match scan_result {
+            Ok(code) => {
+                if code == exit_codes::VULNERABILITIES_FOUND {
+                    println!("⚠ Secrets detected");
+                }
+            }
+            Err(e) => {
+                eprintln!("Scan error: {}", e);
+            }
+        }
+
+        true
+    })?;
+
+    Ok(exit_codes::SUCCESS)
+}
+
+/// Output results in the appropriate format
+fn output_results(
+    ctx: &CliContext,
+    cli: &Cli,
+    args: &SecretsArgs,
+    result: &SecretsResult,
+    duration: std::time::Duration,
+) -> Result<i32> {
     match ctx.output.format() {
         OutputFormat::Json => {
-            ctx.output.json(&result)?;
+            ctx.output.json(result)?;
         }
         OutputFormat::Sarif => {
             ctx.output
                 .sarif(&result.findings, "vulnera-secrets", "1.0.0")?;
         }
         OutputFormat::Table | OutputFormat::Plain => {
-            let duration = start.elapsed();
-
             if result.findings.is_empty() {
                 ctx.output.success(&format!(
                     "No secrets found in {} files ({:.2}s)",
                     result.files_scanned,
                     duration.as_secs_f64()
                 ));
-            } else {
+            } else if !cli.quiet {
                 ctx.output.print_findings_table(&result.findings);
 
                 ctx.output.print(&format!(
@@ -266,7 +388,6 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &SecretsArgs) -> Result<i32>
                     duration.as_secs_f64()
                 ));
 
-                // Security recommendation
                 ctx.output.warn(
                     "⚠ IMPORTANT: Rotate all detected credentials immediately. \
                      Secrets may have been exposed in version control history.",
