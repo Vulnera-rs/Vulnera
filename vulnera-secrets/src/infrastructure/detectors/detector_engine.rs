@@ -1,7 +1,9 @@
 //! Detector engine that orchestrates multiple detectors
 
 use crate::domain::entities::{Location, SecretFinding, SecretType, Severity};
-use crate::domain::value_objects::{Confidence, SecretRule};
+use crate::domain::value_objects::{Confidence, SecretRule, ValidationResult};
+use crate::infrastructure::detectors::ast_extractor::AstContextExtractor;
+use crate::infrastructure::detectors::semantic_validator::{HeuristicValidator, SemanticValidator};
 use crate::infrastructure::detectors::{EntropyDetector, RegexDetector, RegexMatch};
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::verification::{VerificationResult, VerificationService};
@@ -16,6 +18,7 @@ use tracing::debug;
 pub struct DetectorEngine {
     regex_detector: RegexDetector,
     entropy_detector: Option<EntropyDetector>,
+    heuristic_validator: HeuristicValidator,
     #[allow(dead_code)]
     rule_repository: RuleRepository,
     verification_service: Option<Arc<VerificationService>>,
@@ -79,6 +82,7 @@ impl DetectorEngine {
         Self {
             regex_detector,
             entropy_detector,
+            heuristic_validator: HeuristicValidator,
             rule_repository,
             verification_service,
             path_matchers,
@@ -130,8 +134,52 @@ impl DetectorEngine {
 
         // Pass 2: Process regex findings with verification using collected context
         for (line_number, regex_match) in all_regex_matches {
+            // Stage 2: AST Analysis
+            let semantic_context = AstContextExtractor::extract_context(
+                content,
+                line_number,
+                regex_match.start_pos as u32 + 1,
+                file_path,
+            );
+
             let mut confidence = self.calculate_confidence_for_regex_match(&regex_match);
             let severity = self.determine_severity(&regex_match.rule.secret_type);
+
+            // Stage 3: Semantic Validation
+            let mut temp_finding = SecretFinding {
+                id: String::new(),
+                rule_id: regex_match.rule_id.clone(),
+                secret_type: regex_match.rule.secret_type.clone(),
+                location: Location {
+                    file_path: file_path_str.clone(),
+                    line: line_number,
+                    column: Some(regex_match.start_pos as u32 + 1),
+                    end_line: Some(line_number),
+                    end_column: Some(regex_match.end_pos as u32 + 1),
+                },
+                severity: severity.clone(),
+                confidence,
+                description: regex_match.rule.description.clone(),
+                recommendation: None,
+                matched_secret: regex_match.matched_text.clone(),
+                entropy: None,
+            };
+
+            let validation_result = self
+                .heuristic_validator
+                .validate(&mut temp_finding, &semantic_context)
+                .await;
+
+            if validation_result == ValidationResult::FalsePositive {
+                debug!(
+                    rule_id = %regex_match.rule_id,
+                    line = line_number,
+                    "Discarding regex match as false positive via semantic analysis"
+                );
+                continue;
+            }
+
+            confidence = temp_finding.confidence;
 
             // Verify secret if verification is enabled
             let mut is_verified = false;
@@ -192,6 +240,14 @@ impl DetectorEngine {
 
         // Pass 3: Process entropy findings (check overlap with regex findings)
         for (line_number, entropy_match) in all_entropy_matches {
+            // Stage 2: AST Analysis for entropy
+            let semantic_context = AstContextExtractor::extract_context(
+                content,
+                line_number,
+                entropy_match.start_pos as u32 + 1,
+                file_path,
+            );
+
             // Check if this entropy match overlaps with any regex match
             let overlaps = findings.iter().any(|f| {
                 f.location.line == line_number
@@ -210,7 +266,7 @@ impl DetectorEngine {
                     crate::domain::value_objects::EntropyEncoding::Generic => SecretType::Other,
                 };
 
-                findings.push(SecretFinding {
+                let mut entropy_finding = SecretFinding {
                     id: format!(
                         "entropy-{}-{}-{}",
                         file_path_str, line_number, entropy_match.start_pos
@@ -241,7 +297,22 @@ impl DetectorEngine {
                     ),
                     matched_secret: Self::redact_secret(&entropy_match.matched_text),
                     entropy: Some(entropy_match.entropy),
-                });
+                };
+
+                // Stage 3: Semantic Validation for entropy
+                let validation_result = self
+                    .heuristic_validator
+                    .validate(&mut entropy_finding, &semantic_context)
+                    .await;
+
+                if validation_result != ValidationResult::FalsePositive {
+                    findings.push(entropy_finding);
+                } else {
+                    debug!(
+                        line = line_number,
+                        "Discarding entropy match as false positive via semantic analysis"
+                    );
+                }
             }
         }
 

@@ -3,12 +3,31 @@
 use crate::domain::entities::SecretType;
 use serde::{Deserialize, Serialize};
 
-/// Confidence level for findings
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+/// Confidence level of a finding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Confidence {
     High,
     Medium,
     Low,
+}
+
+/// Result of semantic validation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ValidationResult {
+    Verified,      // High confidence, verified via API
+    Confirmed,     // High confidence, semantic match
+    Potential,     // Medium confidence, regex match
+    FalsePositive, // Discarded
+}
+
+/// Contextual metadata about where a secret was found
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticContext {
+    pub node_type: String,            // tree-sitter node type (e.g. "comment")
+    pub lhs_variable: Option<String>, // Variable name secret is assigned to
+    pub rhs_value: Option<String>,    // Actual value assigned (from AST)
+    pub is_test_context: bool,        // Found in a test file or mock
+    pub entropy: Option<f64>,
 }
 
 /// Entropy calculation utilities
