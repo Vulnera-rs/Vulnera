@@ -2,7 +2,13 @@
 //!
 //! Scans project dependencies for known vulnerabilities.
 //! REQUIRES server connection - cannot run offline.
+//!
+//! ## Caching
+//!
+//! This command caches analysis results based on manifest file hashes.
+//! Use `--force-rescan` to bypass the cache.
 
+use std::fs;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -13,6 +19,7 @@ use crate::Cli;
 use crate::api_client::VulneraClient;
 use crate::context::CliContext;
 use crate::exit_codes;
+use crate::manifest_cache::{CachedDepsResult, ManifestCache};
 use crate::output::{OutputFormat, ProgressIndicator, VulnerabilityDisplay};
 
 /// Arguments for the deps command
@@ -41,6 +48,10 @@ pub struct DepsArgs {
     /// Check for outdated dependencies (not just vulnerable ones)
     #[arg(long)]
     pub check_outdated: bool,
+
+    /// Force re-scan even if manifest is unchanged (bypass cache)
+    #[arg(long)]
+    pub force_rescan: bool,
 }
 
 /// Dependency vulnerability result
@@ -155,6 +166,46 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &DepsArgs) -> Result<i32> {
         ctx.output
             .info("Supported: package.json, Cargo.toml, requirements.txt, pom.xml, go.mod");
         return Ok(exit_codes::SUCCESS);
+    }
+
+    let manifest_name = manifest_file.clone().unwrap();
+    let manifest_path = path.join(&manifest_name);
+
+    // Initialize manifest cache
+    let cache = ManifestCache::new().ok();
+
+    // Read manifest content for hashing
+    let manifest_content = fs::read_to_string(&manifest_path).unwrap_or_default();
+
+    // Check cache unless --force-rescan is specified
+    if !args.force_rescan {
+        if let Some(ref cache) = cache {
+            if let Ok(Some(cached_entry)) =
+                cache.get_if_unchanged(&manifest_path, &manifest_content)
+            {
+                // Cache hit - return cached result
+                if cli.verbose {
+                    ctx.output.info(&format!(
+                        "Using cached result (cached at {})",
+                        chrono::DateTime::from_timestamp(cached_entry.cached_at, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    ));
+                }
+
+                let result = convert_cached_result(
+                    &cached_entry.result,
+                    &path,
+                    manifest_file.clone(),
+                    package_manager.clone(),
+                    &args.min_severity,
+                );
+
+                return output_result(ctx, cli, args, &result, start.elapsed(), true);
+            }
+        }
+    } else if cli.verbose {
+        ctx.output.info("Cache bypassed (--force-rescan)");
     }
 
     // Create API client
@@ -280,76 +331,19 @@ pub async fn run(ctx: &CliContext, cli: &Cli, args: &DepsArgs) -> Result<i32> {
         }
     };
 
-    // Output results
-    match ctx.output.format() {
-        OutputFormat::Json => {
-            ctx.output.json(&result)?;
-        }
-        OutputFormat::Sarif => {
-            ctx.output
-                .sarif(&result.vulnerabilities, "vulnera-deps", "1.0.0")?;
-        }
-        OutputFormat::Table | OutputFormat::Plain => {
-            let duration = start.elapsed();
-
-            if result.vulnerabilities.is_empty() {
-                ctx.output.success(&format!(
-                    "No vulnerable dependencies found in {} packages ({:.2}s)",
-                    result.summary.total_dependencies,
-                    duration.as_secs_f64()
-                ));
-            } else {
-                ctx.output.print_findings_table(&result.vulnerabilities);
-
-                ctx.output.print(&format!(
-                    "\nSummary: {} vulnerabilities in {} packages",
-                    result.vulnerabilities.len(),
-                    result.summary.vulnerable_dependencies
-                ));
-                ctx.output.print(&format!(
-                    "Severity: {} critical, {} high, {} medium, {} low",
-                    result.summary.critical,
-                    result.summary.high,
-                    result.summary.medium,
-                    result.summary.low
-                ));
-
-                // Show fixable count
-                let fixable = result
-                    .vulnerabilities
-                    .iter()
-                    .filter(|v| v.fix_available)
-                    .count();
-                if fixable > 0 {
-                    ctx.output
-                        .info(&format!("{} vulnerabilities have fixes available", fixable));
-                }
-
-                ctx.output.print(&format!(
-                    "\nAnalyzed {} dependencies ({} direct, {} transitive) in {:.2}s",
-                    result.summary.total_dependencies,
-                    result.summary.direct_dependencies,
-                    result.summary.transitive_dependencies,
-                    duration.as_secs_f64()
-                ));
+    // Store result in cache for future use
+    if let Some(ref cache) = cache {
+        if let Err(e) = cache.store_from_deps_result(&manifest_path, &manifest_content, &result) {
+            if cli.verbose {
+                ctx.output.warn(&format!("Failed to cache result: {}", e));
             }
-
-            // Show outdated if requested
-            if args.check_outdated && result.summary.outdated_dependencies > 0 {
-                ctx.output.warn(&format!(
-                    "{} dependencies are outdated",
-                    result.summary.outdated_dependencies
-                ));
-            }
+        } else if cli.verbose {
+            ctx.output.info("Result cached for future use");
         }
     }
 
-    // Determine exit code
-    if args.fail_on_vuln && !result.vulnerabilities.is_empty() {
-        Ok(exit_codes::VULNERABILITIES_FOUND)
-    } else {
-        Ok(exit_codes::SUCCESS)
-    }
+    // Output results and return exit code
+    output_result(ctx, cli, args, &result, start.elapsed(), false)
 }
 
 /// Detect package manager and manifest file
@@ -391,4 +385,143 @@ fn severity_meets_minimum(severity: &str, minimum: &str) -> bool {
     };
 
     severity_order(severity) >= severity_order(minimum)
+}
+
+/// Convert cached result back to DepsResult
+fn convert_cached_result(
+    cached: &CachedDepsResult,
+    path: &PathBuf,
+    manifest_file: Option<String>,
+    package_manager: Option<String>,
+    min_severity: &str,
+) -> DepsResult {
+    let vulnerabilities: Vec<DepsVulnerability> = cached
+        .vulnerabilities
+        .iter()
+        .filter(|v| severity_meets_minimum(&v.severity, min_severity))
+        .map(|v| DepsVulnerability {
+            id: v.id.clone(),
+            severity: v.severity.clone(),
+            package: v.package_name.clone(),
+            version: v.package_version.clone(),
+            description: v.description.clone().unwrap_or_default(),
+            cve: Some(v.id.clone()),
+            cvss_score: None,
+            fix_available: v.fixed_version.is_some(),
+            fixed_version: v.fixed_version.clone(),
+            references: Vec::new(),
+        })
+        .collect();
+
+    let mut summary = DepsSummary {
+        total_dependencies: cached.total_dependencies,
+        direct_dependencies: 0,
+        transitive_dependencies: 0,
+        vulnerable_dependencies: cached.vulnerable_dependencies,
+        outdated_dependencies: 0,
+        critical: 0,
+        high: 0,
+        medium: 0,
+        low: 0,
+    };
+
+    for vuln in &vulnerabilities {
+        match vuln.severity.to_lowercase().as_str() {
+            "critical" => summary.critical += 1,
+            "high" => summary.high += 1,
+            "medium" => summary.medium += 1,
+            "low" => summary.low += 1,
+            _ => {}
+        }
+    }
+
+    DepsResult {
+        path: path.clone(),
+        manifest_file,
+        package_manager,
+        dependencies: Vec::new(), // Cached result doesn't include full dependency list
+        vulnerabilities,
+        summary,
+    }
+}
+
+/// Output the result and return exit code
+fn output_result(
+    ctx: &CliContext,
+    _cli: &Cli,
+    args: &DepsArgs,
+    result: &DepsResult,
+    duration: std::time::Duration,
+    from_cache: bool,
+) -> Result<i32> {
+    match ctx.output.format() {
+        OutputFormat::Json => {
+            ctx.output.json(result)?;
+        }
+        OutputFormat::Sarif => {
+            ctx.output
+                .sarif(&result.vulnerabilities, "vulnera-deps", "1.0.0")?;
+        }
+        OutputFormat::Table | OutputFormat::Plain => {
+            let cache_indicator = if from_cache { " (cached)" } else { "" };
+
+            if result.vulnerabilities.is_empty() {
+                ctx.output.success(&format!(
+                    "No vulnerable dependencies found in {} packages ({:.2}s){}",
+                    result.summary.total_dependencies,
+                    duration.as_secs_f64(),
+                    cache_indicator
+                ));
+            } else {
+                ctx.output.print_findings_table(&result.vulnerabilities);
+
+                ctx.output.print(&format!(
+                    "\nSummary: {} vulnerabilities in {} packages{}",
+                    result.vulnerabilities.len(),
+                    result.summary.vulnerable_dependencies,
+                    cache_indicator
+                ));
+                ctx.output.print(&format!(
+                    "Severity: {} critical, {} high, {} medium, {} low",
+                    result.summary.critical,
+                    result.summary.high,
+                    result.summary.medium,
+                    result.summary.low
+                ));
+
+                // Show fixable count
+                let fixable = result
+                    .vulnerabilities
+                    .iter()
+                    .filter(|v| v.fix_available)
+                    .count();
+                if fixable > 0 {
+                    ctx.output
+                        .info(&format!("{} vulnerabilities have fixes available", fixable));
+                }
+
+                ctx.output.print(&format!(
+                    "\nAnalyzed {} dependencies in {:.2}s{}",
+                    result.summary.total_dependencies,
+                    duration.as_secs_f64(),
+                    cache_indicator
+                ));
+            }
+
+            // Show outdated if requested
+            if args.check_outdated && result.summary.outdated_dependencies > 0 {
+                ctx.output.warn(&format!(
+                    "{} dependencies are outdated",
+                    result.summary.outdated_dependencies
+                ));
+            }
+        }
+    }
+
+    // Determine exit code
+    if args.fail_on_vuln && !result.vulnerabilities.is_empty() {
+        Ok(exit_codes::VULNERABILITIES_FOUND)
+    } else {
+        Ok(exit_codes::SUCCESS)
+    }
 }

@@ -67,6 +67,10 @@ hex = "0.4.3"
 # File system traversal
 walkdir = "2.5"
 
+# File system watching (for --watch mode)
+notify = "6.1"
+notify-debouncer-mini = "0.4"
+
 # Base64 encoding
 base64 = "0.22"
 

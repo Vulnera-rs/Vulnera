@@ -49,6 +49,14 @@ pub struct SecretsArgs {
     /// Show entropy-based detections (more false positives)
     #[arg(long)]
     pub include_entropy: bool,
+
+    /// Disable incremental caching (re-scan all files)
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Watch for file changes and re-scan automatically
+    #[arg(long)]
+    pub watch: bool,
 }
 
 /// Secrets detection result

@@ -52,6 +52,18 @@ pub struct SastArgs {
     /// Enable specific rule categories
     #[arg(long, value_delimiter = ',')]
     pub rules: Vec<String>,
+
+    /// Disable incremental caching (re-scan all files)
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Watch for file changes and re-scan automatically
+    #[arg(long)]
+    pub watch: bool,
+
+    /// Generate LLM-powered fix suggestions (requires online mode, SARIF output)
+    #[arg(long)]
+    pub fix: bool,
 }
 
 /// SAST analysis result
