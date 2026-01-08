@@ -36,7 +36,6 @@ impl std::fmt::Display for PackageId {
     }
 }
 
-// VersionConstraint is now imported from version_constraint module
 
 /// Dependency edge in the graph
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
