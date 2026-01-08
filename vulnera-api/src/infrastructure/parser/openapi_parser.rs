@@ -511,14 +511,63 @@ impl OpenApiParser {
                     .collect();
 
                 let schema_type = obj_schema.schema_type.as_ref().map(|t| format!("{:?}", t));
+                let pattern = obj_schema.pattern.clone();
+                let min_length = obj_schema.min_length.map(|v| v as u32);
+                let max_length = obj_schema.max_length.map(|v| v as u32);
+                let min_items = obj_schema.min_items.map(|v| v as u32);
+                let max_items = obj_schema.max_items.map(|v| v as u32);
+
+                // Map logical constraints
+                let all_of: Vec<ApiSchema> = obj_schema
+                    .all_of
+                    .iter()
+                    .map(|s| Self::parse_schema(s, schema_resolver))
+                    .collect();
+                let one_of: Vec<ApiSchema> = obj_schema
+                    .one_of
+                    .iter()
+                    .map(|s| Self::parse_schema(s, schema_resolver))
+                    .collect();
+                let any_of: Vec<ApiSchema> = obj_schema
+                    .any_of
+                    .iter()
+                    .map(|s| Self::parse_schema(s, schema_resolver))
+                    .collect();
+
+                // enum values access is unclear from oas3 docs without internet, skipping for now
+                // will rely on schema_resolver for deep inspection
+                let enum_values = None;
+
+                // numeric constraints
+                let minimum = obj_schema.minimum.as_ref().and_then(|n| n.as_f64());
+                let maximum = obj_schema.maximum.as_ref().and_then(|n| n.as_f64());
+                let multiple_of = obj_schema.multiple_of.as_ref().and_then(|n| n.as_f64());
+
+                // Simple metadata
+                let read_only = obj_schema.read_only.unwrap_or(false);
+                let write_only = obj_schema.write_only.unwrap_or(false);
+                // example/default might be complex in oas3, skipping for now to rely on defaults or simple mapping if easy
 
                 ApiSchema {
                     schema_type,
                     format: obj_schema.format.clone(),
                     properties,
                     required: obj_schema.required.clone(),
-                    summary: None,
-                    description: None,
+                    pattern,
+                    minimum,
+                    maximum,
+                    min_length,
+                    max_length,
+                    min_items,
+                    max_items,
+                    enum_values,
+                    multiple_of,
+                    read_only,
+                    write_only,
+                    all_of,
+                    one_of,
+                    any_of,
+                    ..Default::default()
                 }
             }
             oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {

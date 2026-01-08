@@ -125,11 +125,7 @@ impl SchemaRefResolver {
                 warn!(ref_path = ref_path, "Failed to resolve schema reference");
                 ApiSchema {
                     schema_type: Some("ref_unresolved".to_string()),
-                    format: None,
-                    properties: Vec::new(),
-                    required: Vec::new(),
-                    summary: None,
-                    description: None,
+                    ..Default::default()
                 }
             });
         }
@@ -170,13 +166,83 @@ impl SchemaRefResolver {
             })
             .unwrap_or_default();
 
+        // Extract validation constraints
+        let pattern = schema_json
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let minimum = schema_json.get("minimum").and_then(|v| v.as_f64());
+        let maximum = schema_json.get("maximum").and_then(|v| v.as_f64());
+        let min_length = schema_json
+            .get("minLength")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let max_length = schema_json
+            .get("maxLength")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let min_items = schema_json
+            .get("minItems")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let max_items = schema_json
+            .get("maxItems")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+
+        let enum_values = schema_json
+            .get("enum")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            });
+
+        // Extract security-relevant metadata
+        let example = schema_json.get("example").cloned();
+        let default = schema_json.get("default").cloned();
+        let read_only = schema_json
+            .get("readOnly")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let write_only = schema_json
+            .get("writeOnly")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Parse additionalProperties
+        use crate::domain::value_objects::AdditionalProperties;
+        let additional_properties = match schema_json.get("additionalProperties") {
+            Some(JsonValue::Bool(false)) => AdditionalProperties::Denied,
+            Some(JsonValue::Bool(true)) => AdditionalProperties::Allowed,
+            Some(obj) if obj.is_object() => {
+                let inner_schema = self.parse_schema_from_json(obj);
+                AdditionalProperties::Schema(Box::new(inner_schema))
+            }
+            _ => AdditionalProperties::Allowed, // Default
+        };
+
         ApiSchema {
             schema_type,
             format,
             properties,
             required,
-            summary: None,
-            description: None,
+            pattern,
+            minimum,
+            maximum,
+            min_length,
+            max_length,
+            min_items,
+            max_items,
+            enum_values,
+            example,
+            default,
+            read_only,
+            write_only,
+            additional_properties,
+            ..Default::default()
         }
     }
 

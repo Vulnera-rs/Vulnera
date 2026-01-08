@@ -19,7 +19,8 @@ impl AuthorizationAnalyzer {
                 if !has_scopes
                     && (operation.method == "POST"
                         || operation.method == "PUT"
-                        || operation.method == "DELETE")
+                        || operation.method == "DELETE"
+                        || operation.method == "PATCH")
                 {
                     findings.push(ApiFinding {
                         id: format!("authz-missing-{}-{}", path.path, operation.method),
@@ -40,6 +41,43 @@ impl AuthorizationAnalyzer {
                         path: Some(path.path.clone()),
                         method: Some(operation.method.clone()),
                     });
+                }
+
+                // BOLA Detection: ID in path but generic or missing scopes
+                let id_pattern = regex::Regex::new(r"\{[a-zA-Z]*[Ii]d\}").unwrap();
+                if id_pattern.is_match(&path.path) {
+                    let is_bola_prone = if !has_scopes {
+                        true
+                    } else {
+                        // Check if scopes are generic
+                        let generic_scopes = ["read", "write", "user", "access"];
+                        operation.security.iter().any(|req| {
+                            req.scopes
+                                .iter()
+                                .any(|s| generic_scopes.contains(&s.as_str()))
+                        })
+                    };
+
+                    if is_bola_prone {
+                        findings.push(ApiFinding {
+                            id: format!("bola-risk-{}-{}", path.path, operation.method),
+                            vulnerability_type: ApiVulnerabilityType::BolaRisk,
+                            location: ApiLocation {
+                                file_path: "openapi.yaml".to_string(),
+                                line: None,
+                                path: Some(path.path.clone()),
+                                operation: Some(operation.method.clone()),
+                            },
+                            severity: FindingSeverity::High,
+                            description: format!(
+                                "Endpoint {} {} contains ID in path but uses generic/no scopes, indicating BOLA risk",
+                                operation.method, path.path
+                            ),
+                            recommendation: "Use resource-specific scopes (e.g., 'read:orders') or implement fine-grained owner checks".to_string(),
+                            path: Some(path.path.clone()),
+                            method: Some(operation.method.clone()),
+                        });
+                    }
                 }
             }
         }
