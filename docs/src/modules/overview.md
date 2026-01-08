@@ -4,12 +4,12 @@ Vulnera provides four specialized security analysis modules that can work indepe
 
 ## Module Summary
 
-| Module | Purpose | Languages/Ecosystems |
-|--------|---------|---------------------|
-| [Dependency Analysis](dependency-analysis.md) | Scan dependencies for known vulnerabilities | npm, PyPI, Maven, Cargo, Go, Packagist, Ruby, .NET |
-| [SAST](sast.md) | Static code analysis for security issues | Python, JavaScript, Rust |
-| [Secrets Detection](secrets-detection.md) | Find exposed credentials and API keys | All text files |
-| [API Security](api-security.md) | Analyze OpenAPI specifications | OpenAPI 3.x |
+| Module                                        | Purpose                                     | Languages/Ecosystems                         |
+| --------------------------------------------- | ------------------------------------------- | -------------------------------------------- |
+| [Dependency Analysis](dependency-analysis.md) | Scan dependencies for known vulnerabilities | npm, PyPI, Maven, Cargo, Go, PHP, Ruby, .NET |
+| [SAST](sast.md)                               | Static code analysis for security issues    | Rust, Python, JS/TS, Go, C, C++              |
+| [Secrets Detection](secrets-detection.md)     | Find exposed credentials and API keys       | All text files                               |
+| [API Security](api-security.md)               | Analyze OpenAPI specifications              | OpenAPI 3.x                                  |
 
 ## Unified Orchestrator
 
@@ -17,34 +17,32 @@ The orchestrator automatically selects and executes appropriate modules based on
 
 ### Analysis Depth Levels
 
-| Level | Description | Use Case |
-|-------|-------------|----------|
-| `minimal` | Fast analysis with essential checks only | Quick CI checks |
-| `standard` | Balanced analysis with comprehensive checks | Default for most projects |
-| `full` | Deep analysis including optional checks | Security audits, compliance |
+| Level      | Description                                 | Use Case                    |
+| ---------- | ------------------------------------------- | --------------------------- |
+| `minimal`  | Fast analysis with essential checks only    | Quick CI checks             |
+| `standard` | Balanced analysis with comprehensive checks | Default for most projects   |
+| `full`     | Deep analysis including optional checks     | Security audits, compliance |
 
 ### Example: Full Repository Analysis
-
 
 This automatically:
 
 1. Detects project type and dependency files
 2. Runs Dependency Analysis if dependency files are found
-3. Runs SAST for supported languages (Python, JavaScript, Rust)
+3. Runs SAST for supported languages (Rust, Python, JS/TS, Go, C, C++)
 4. Runs Secrets Detection across all files
 5. Runs API Security if OpenAPI specs are detected
 6. Aggregates all findings into a unified report
-
 
 ## Data Sources
 
 Vulnera aggregates vulnerability data from multiple authoritative sources:
 
-| Source | Type | Coverage |
-|--------|------|----------|
-| **OSV** | Open Source Vulnerabilities | Multi-ecosystem, maintained by Google |
-| **NVD** | National Vulnerability Database | Comprehensive CVE database |
-| **GHSA** | GitHub Security Advisories | GitHub-curated advisories |
+| Source   | Type                            | Coverage                              |
+| -------- | ------------------------------- | ------------------------------------- |
+| **OSV**  | Open Source Vulnerabilities     | Multi-ecosystem, maintained by Google |
+| **NVD**  | National Vulnerability Database | Comprehensive CVE database            |
+| **GHSA** | GitHub Security Advisories      | GitHub-curated advisories             |
 
 ## Module Selection Logic
 

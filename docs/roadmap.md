@@ -19,13 +19,15 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
 - **Dragonfly DB Caching:** High-performance caching for vulnerability data
 - **OpenAPI Documentation:** Auto-generated Swagger UI
 - **Authentication & Authorization:** JWT tokens and API keys with Argon2id hashing (OWASP-recommended)
+- **CLI Tool:** Standalone binary with hybrid offline/online execution model
 
 #### Analysis Modules
 
-- **Dependency Analysis:** Multi-ecosystem support (npm, PyPI, Maven/Gradle, Cargo, Go, Packagist, Ruby, .NET)
-- **SAST Module:** Static code analysis for Python, JavaScript, and Rust
-- **Secrets Detection:** Regex-based and entropy-based secret detection
-- **API Security:** OpenAPI 3.x specification analysis
+- **Dependency Analysis:** Graph-based analysis with lockfile-first transitive resolution support
+- **SAST Module:** High-speed Tree-Sitter based analysis for Rust, Python, JS/TS, Go, C, and C++
+- **Deep Taint Analysis:** Inter-procedural data flow analysis and function summaries
+- **Secrets Detection:** AST-context aware + entropy-based detection
+- **API Security:** Deep OpenAPI 3.x specification auditing (Auth, Data Exposure, Design)
 
 #### Data Sources
 
@@ -59,23 +61,22 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
   - Pub (Dart/Flutter)
   - Conan (C/C++)
 
-- [ ] **Dependency Graph Analysis:**
-  - Transitive dependency vulnerability detection
-  - Dependency tree visualization
+- [ ] **Enhanced Dependency Resolution:**
+  - Recursive manifest resolution for all supported ecosystems
+  - Dependency tree visualization in CLI/Web
   - Impact analysis for dependency updates
 
 #### SAST Module Enhancements
 
 - [ ] **Expanded Language Support:**
   - Java (via tree-sitter-java)
-  - C/C++ (via tree-sitter-cpp)
-  - Go (via tree-sitter-go)
-  - TypeScript (enhanced support)
+  - Ruby (via tree-sitter-ruby)
+  - PHP (via tree-sitter-php)
 
 - [ ] **Advanced Pattern Matching:**
-  - Custom pattern matchers
+  - YAML-based custom rule loader (Semgrep-compatible)
   - Context-aware analysis
-  - Data flow analysis for taint tracking
+  - Path-sensitive analysis for branching logic
 
 #### Secrets Detection Improvements
 
@@ -139,10 +140,10 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
 
 #### Developer Experience
 
-- [ ] **CLI Tool:**
-  - Command-line interface for local analysis
-  - CI/CD integration helpers
-  - Configuration management
+- [ ] **CLI Enhancements:**
+  - Watch mode for live security linting
+  - Incremental scan caching for local development
+  - Interactive remediation prompts
 
 - [ ] **SDK Development:**
   - Rust SDK
@@ -225,10 +226,9 @@ Vulnera currently provides a comprehensive vulnerability analysis platform with 
 
 #### Advanced SAST Capabilities
 
-- [ ] **Inter-Procedural Analysis:**
-  - Cross-function analysis
-  - Call graph construction
-  - Advanced taint tracking
+- [ ] **Cross-File Resolution:**
+  - LSIF/SCIP indexing for massive monorepos
+  - Global symbol table for accurate multi-crate analysis
 
 - [ ] **Semantic Analysis:**
   - Code semantics understanding
