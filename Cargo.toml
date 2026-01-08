@@ -7,6 +7,7 @@ members = [
     "vulnera-secrets",
     "vulnera-api",
     "vulnera-llm",
+    "vulnera-sandbox",
 ]
 exclude = ["vulnera-cli"]
 
@@ -38,6 +39,7 @@ vulnera-sast = { path = "vulnera-sast" }
 vulnera-secrets = { path = "vulnera-secrets" }
 vulnera-api = { path = "vulnera-api" }
 vulnera-llm = { path = "vulnera-llm" }
+vulnera-sandbox = { path = "vulnera-sandbox" }
 
 # Web framework
 axum = { workspace = true }

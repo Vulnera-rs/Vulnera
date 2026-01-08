@@ -103,6 +103,7 @@ pub struct Config {
     pub analytics: AnalyticsConfig,
     pub popular_packages: Option<PopularPackagesConfig>,
     pub llm: LlmConfig,
+    pub sandbox: SandboxConfig,
 }
 
 /// Popular packages configuration for vulnerability listing
@@ -1010,6 +1011,34 @@ impl Default for AnalyticsConfig {
     }
 }
 
+/// Sandbox configuration for module execution isolation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SandboxConfig {
+    /// Enable sandboxing for module execution (default: true, near-zero overhead with Landlock)
+    pub enabled: bool,
+    /// Sandbox backend preference: "auto", "landlock", "process", "wasm"
+    pub backend: String,
+    /// Maximum execution time per module in milliseconds
+    pub timeout_ms: u64,
+    /// Memory limit per module in bytes
+    pub max_memory_bytes: u64,
+    /// Allow network access for modules (not recommended)
+    pub allow_network: bool,
+}
+
+impl Default for SandboxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true, // Enabled by default (near-zero overhead with Landlock!)
+            backend: "auto".to_string(),
+            timeout_ms: 30_000,
+            max_memory_bytes: 256 * 1024 * 1024, // 256MB
+            allow_network: false,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -1092,6 +1121,7 @@ impl Default for Config {
             analytics: AnalyticsConfig::default(),
             popular_packages: None,
             llm: LlmConfig::default(),
+            sandbox: SandboxConfig::default(),
         }
     }
 }

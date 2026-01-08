@@ -1,0 +1,31 @@
+[package]
+name = "vulnera-sandbox"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords = ["security", "sandbox", "landlock", "seccomp"]
+categories = ["os::linux-apis", "security"]
+description = "Hybrid kernel sandboxing for Vulnera security modules"
+
+[dependencies]
+# Shared dependencies
+vulnera-core = { path = "../vulnera-core" }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+seccompiler = "0.5.0"
+nix = { version = "0.30.0", features = ["process", "signal", "resource"] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+wasmtime = "40"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+tempfile = { workspace = true }

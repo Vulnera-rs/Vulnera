@@ -115,7 +115,10 @@ pub async fn create_app(
         project_detector,
         module_selector,
     ));
-    let execute_job_use_case = Arc::new(ExecuteAnalysisJobUseCase::new(modules.registry.clone()));
+    let execute_job_use_case = Arc::new(ExecuteAnalysisJobUseCase::new(
+        modules.registry.clone(),
+        config.sandbox.clone(),
+    ));
     let aggregate_results_use_case = Arc::new(AggregateResultsUseCase::new());
 
     // 6. Initialize Analytics & Reporting
