@@ -393,40 +393,6 @@ pub fn js_open_redirect_rule() -> Rule {
     }
 }
 
-// ============================================================================
-// Secrets and Credentials Rules
-// ============================================================================
-
-/// Hardcoded secrets/API keys
-pub fn js_hardcoded_secret_rule() -> Rule {
-    Rule {
-        id: "js-hardcoded-secret".to_string(),
-        name: "Hardcoded Secret".to_string(),
-        description: "Potential hardcoded secret or API key".to_string(),
-        severity: Severity::High,
-        languages: vec![Language::JavaScript],
-        pattern: Pattern::TreeSitterQuery(
-            r#"(variable_declarator
-              name: (identifier) @name
-              value: (string) @value
-              (#match? @name "(?i)(api_key|apikey|secret|password|token|auth|credential|private)")
-            ) @decl"#
-                .to_string(),
-        ),
-        options: RuleOptions::default(),
-        cwe_ids: vec!["CWE-798".to_string()],
-        owasp_categories: vec!["A07:2021 - Identification and Authentication Failures".to_string()],
-        tags: vec![
-            "secrets".to_string(),
-            "credentials".to_string(),
-            "javascript".to_string(),
-        ],
-        message: Some(
-            "Store secrets in environment variables or a secrets manager, not in code.".to_string(),
-        ),
-        fix: None,
-    }
-}
 
 // ============================================================================
 // Cryptography Rules
@@ -706,8 +672,7 @@ pub fn get_javascript_rules() -> Vec<Rule> {
         js_prototype_pollution_rule(),
         // Open redirect
         js_open_redirect_rule(),
-        // Secrets
-        js_hardcoded_secret_rule(),
+        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Cryptography
         js_insecure_randomness_rule(),
         js_weak_crypto_rule(),

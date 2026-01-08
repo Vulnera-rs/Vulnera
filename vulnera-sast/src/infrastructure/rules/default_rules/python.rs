@@ -318,70 +318,6 @@ pub fn python_jinja_ssti_rule() -> Rule {
 }
 
 // ============================================================================
-// Secrets and Credentials Rules
-// ============================================================================
-
-/// Hardcoded password
-pub fn python_hardcoded_password_rule() -> Rule {
-    Rule {
-        id: "python-hardcoded-password".to_string(),
-        name: "Hardcoded Password".to_string(),
-        description: "Potential hardcoded password or credential".to_string(),
-        severity: Severity::High,
-        languages: vec![Language::Python],
-        pattern: Pattern::TreeSitterQuery(
-            r#"(assignment
-              left: (identifier) @name
-              right: (string) @value
-              (#match? @name "(?i)(password|passwd|pwd|secret|api_key|apikey|token|auth)")
-            ) @assign"#
-                .to_string(),
-        ),
-        options: RuleOptions::default(),
-        cwe_ids: vec!["CWE-798".to_string()],
-        owasp_categories: vec!["A07:2021 - Identification and Authentication Failures".to_string()],
-        tags: vec![
-            "secrets".to_string(),
-            "credentials".to_string(),
-            "python".to_string(),
-        ],
-        message: Some("Store secrets in environment variables or a secrets manager.".to_string()),
-        fix: None,
-    }
-}
-
-/// Flask secret key hardcoded
-pub fn python_flask_secret_key_rule() -> Rule {
-    Rule {
-        id: "python-flask-secret-key".to_string(),
-        name: "Flask Secret Key Hardcoded".to_string(),
-        description: "Flask SECRET_KEY should not be hardcoded".to_string(),
-        severity: Severity::High,
-        languages: vec![Language::Python],
-        pattern: Pattern::TreeSitterQuery(
-            r#"(assignment
-              left: (subscript
-                subscript: (string) @key
-              )
-              right: (string) @value
-              (#match? @key "(?i)secret")
-            ) @assign"#
-                .to_string(),
-        ),
-        options: RuleOptions::default(),
-        cwe_ids: vec!["CWE-798".to_string()],
-        owasp_categories: vec!["A02:2021 - Cryptographic Failures".to_string()],
-        tags: vec![
-            "flask".to_string(),
-            "secrets".to_string(),
-            "python".to_string(),
-        ],
-        message: Some("Load Flask SECRET_KEY from environment variables.".to_string()),
-        fix: None,
-    }
-}
-
-// ============================================================================
 // Cryptography Rules
 // ============================================================================
 
@@ -705,9 +641,7 @@ pub fn get_python_rules() -> Vec<Rule> {
         // SSTI
         python_ssti_rule(),
         python_jinja_ssti_rule(),
-        // Secrets
-        python_hardcoded_password_rule(),
-        python_flask_secret_key_rule(),
+        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Cryptography
         python_weak_crypto_rule(),
         python_insecure_random_rule(),
