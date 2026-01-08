@@ -15,6 +15,8 @@ use crate::domain::entities::{
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
 use crate::infrastructure::ModuleRegistry;
+use vulnera_core::config::SandboxConfig;
+use vulnera_sandbox::{SandboxExecutor, SandboxPolicy, SandboxSelector};
 
 /// Use case for creating a new analysis job
 pub struct CreateAnalysisJobUseCase {
@@ -60,11 +62,21 @@ impl CreateAnalysisJobUseCase {
 /// Use case for executing an analysis job
 pub struct ExecuteAnalysisJobUseCase {
     module_registry: Arc<ModuleRegistry>,
+    executor: Arc<SandboxExecutor>,
+    config: SandboxConfig,
 }
 
 impl ExecuteAnalysisJobUseCase {
-    pub fn new(module_registry: Arc<ModuleRegistry>) -> Self {
-        Self { module_registry }
+    pub fn new(module_registry: Arc<ModuleRegistry>, config: SandboxConfig) -> Self {
+        // Select backend based on config (auto, landlock, process, wasm)
+        let backend = SandboxSelector::select_by_name(&config.backend)
+            .unwrap_or_else(|| SandboxSelector::select());
+
+        Self {
+            module_registry,
+            executor: Arc::new(SandboxExecutor::new(backend)),
+            config,
+        }
     }
 
     #[instrument(skip(self, job, project), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
@@ -120,15 +132,56 @@ impl ExecuteAnalysisJobUseCase {
                 let module_type_clone = module_type.clone();
                 let module_arc = Arc::clone(&module);
 
+                let executor = self.executor.clone();
+                let sandbox_timeout = std::time::Duration::from_millis(self.config.timeout_ms);
+                let sandbox_mem_bytes = self.config.max_memory_bytes;
+                let sandbox_config = self.config.clone();
+
                 debug!(
                     job_id = %job.job_id,
                     module = ?module_type_clone,
-                    "Spawning module execution task"
+                    "Spawning sandboxed module execution task"
                 );
 
                 join_set.spawn(async move {
                     let module_start = std::time::Instant::now();
-                    let result = module_arc.execute(&config).await;
+
+                    // Build sandbox policy
+                    let mut policy = SandboxPolicy::default()
+                        .with_timeout(sandbox_timeout)
+                        .with_memory_limit(sandbox_mem_bytes);
+
+                    // Add read-only access to source URI (if it's a file path)
+                    if std::path::Path::new(&config.source_uri).exists() {
+                        policy = policy.with_readonly_path(&config.source_uri);
+                    }
+
+                    // Configure network access if enabled
+                    if sandbox_config.allow_network {
+                        // Allow common ports for now if network is enabled
+                        policy.allowed_ports = vec![80, 443, 8080];
+                    }
+
+                    // Execute within sandbox
+                    let result = executor
+                        .execute_module(&*module_arc, &config, &policy)
+                        .await
+                        .map_err(|e| match e {
+                            // Convert sandboxed error to generic execution error string
+                            vulnera_sandbox::SandboxedExecutionError::Timeout(_) => {
+                                ModuleExecutionError::ExecutionFailed(
+                                    "Module execution timed out".to_string(),
+                                )
+                            }
+                            vulnera_sandbox::SandboxedExecutionError::ModuleFailed(e) => e,
+                            vulnera_sandbox::SandboxedExecutionError::Sandbox(e) => {
+                                ModuleExecutionError::ExecutionFailed(format!(
+                                    "Sandbox error: {}",
+                                    e
+                                ))
+                            }
+                        });
+
                     let module_duration = module_start.elapsed();
 
                     match &result {

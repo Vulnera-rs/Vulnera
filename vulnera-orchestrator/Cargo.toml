@@ -12,6 +12,7 @@ categories.workspace = true
 vulnera-core = { path = "../vulnera-core" }
 vulnera-deps = { path = "../vulnera-deps" }
 vulnera-llm = { path = "../vulnera-llm" }
+vulnera-sandbox = { path = "../vulnera-sandbox" }
 sqlx = { workspace = true }
 
 # Web framework
