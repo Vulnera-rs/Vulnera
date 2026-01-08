@@ -4,15 +4,20 @@ The SAST Module performs static code analysis to detect security vulnerabilities
 
 ## Supported Languages
 
-| Language | Parser | File Extensions |
-|----------|--------|-----------------|
-| **Python** | tree-sitter-python | `.py` |
+| Language                  | Parser                 | File Extensions              |
+| ------------------------- | ---------------------- | ---------------------------- |
+| **Python**                | tree-sitter-python     | `.py`                        |
 | **JavaScript/TypeScript** | tree-sitter-javascript | `.js`, `.ts`, `.jsx`, `.tsx` |
-| **Rust** | syn crate (proc-macro) | `.rs` |
+| **Rust**                  | tree-sitter-rust       | `.rs`                        |
+| **Go**                    | tree-sitter-go         | `.go`                        |
+| **C**                     | tree-sitter-c          | `.c`, `.h`                   |
+| **C++**                   | tree-sitter-cpp        | `.cpp`, `.cc`, `.hpp`        |
 
 ## Features
 
-- **AST-Based Analysis** — Deep understanding of code structure
+- **AST-Based Analysis** — Deep understanding of code structure using high-speed tree-sitter parsers
+- **Inter-procedural Taint Analysis** — Tracks sensitive data flow across function boundaries and across files
+- **Incremental Scanning** — Only re-analyzes modified files to provide near-instant feedback
 - **Configurable Rule Repository** — Load custom security rules from TOML or JSON
 - **Default Rule Set** — Built-in rules for common vulnerabilities
 - **Pattern-Based Detection** — Multiple matcher types for flexible rule definition
@@ -78,18 +83,18 @@ pattern = { FunctionCall = "eval" }
 
 ## Confidence Levels
 
-| Level | Description |
-|-------|-------------|
-| **High** | Strong match, high likelihood of true positive |
-| **Medium** | Moderate match, may require manual review |
-| **Low** | Weak match, higher chance of false positive |
+| Level      | Description                                    |
+| ---------- | ---------------------------------------------- |
+| **High**   | Strong match, high likelihood of true positive |
+| **Medium** | Moderate match, may require manual review      |
+| **Low**    | Weak match, higher chance of false positive    |
 
 ## Severity Classification
 
-| Severity | Description | Examples |
-|----------|-------------|----------|
-| **Critical** | Immediate exploitation risk | SQL injection, command injection |
-| **High** | Significant security risk | Hardcoded credentials, unsafe deserialization |
-| **Medium** | Moderate security concern | Missing input validation |
-| **Low** | Minor security issue | Information disclosure |
-| **Info** | Best practice recommendation | Code quality suggestions |
+| Severity     | Description                  | Examples                                      |
+| ------------ | ---------------------------- | --------------------------------------------- |
+| **Critical** | Immediate exploitation risk  | SQL injection, command injection              |
+| **High**     | Significant security risk    | Hardcoded credentials, unsafe deserialization |
+| **Medium**   | Moderate security concern    | Missing input validation                      |
+| **Low**      | Minor security issue         | Information disclosure                        |
+| **Info**     | Best practice recommendation | Code quality suggestions                      |
