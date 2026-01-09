@@ -13,6 +13,9 @@ use std::sync::Arc;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
+
+/// Worker version (synchronized with Cargo.toml)
+const WORKER_VERSION: &str = env!("CARGO_PKG_VERSION");
 use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::fmt;
 
@@ -74,6 +77,30 @@ struct Args {
     no_sandbox: bool,
 }
 
+/// Structured error codes for worker failures
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum WorkerErrorCode {
+    /// Failed to parse sandbox policy
+    PolicyParseFailed,
+    /// Sandbox setup (Landlock/seccomp) failed
+    SandboxSetupFailed,
+    /// Requested module type not found
+    ModuleNotFound,
+    /// Module execution error
+    ModuleExecutionFailed,
+    /// Execution exceeded timeout
+    Timeout,
+    /// Failed to serialize result
+    SerializationFailed,
+    /// Configuration parsing error
+    ConfigParseFailed,
+    /// Worker was interrupted by signal
+    Interrupted,
+    /// Unknown error
+    Unknown,
+}
+
 /// Worker result sent back to orchestrator
 #[derive(Debug, Serialize, Deserialize)]
 struct WorkerResult {
@@ -83,8 +110,13 @@ struct WorkerResult {
     result: Option<serde_json::Value>,
     /// Error message (if failed)
     error: Option<String>,
+    /// Structured error code for programmatic handling
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<WorkerErrorCode>,
     /// Execution time in milliseconds
     execution_time_ms: u64,
+    /// Worker version
+    worker_version: String,
 }
 
 #[tokio::main]
@@ -108,7 +140,10 @@ async fn main() {
     let policy = match parse_policy(&args) {
         Ok(p) => p,
         Err(e) => {
-            output_error(&format!("Failed to parse policy: {}", e));
+            output_error_with_code(
+                &format!("Failed to parse policy: {}", e),
+                WorkerErrorCode::PolicyParseFailed,
+            );
             std::process::exit(1);
         }
     };
@@ -119,7 +154,6 @@ async fn main() {
         policy.readonly_paths.len()
     );
 
-    // Apply sandbox restrictions BEFORE executing any module code
     // Apply sandbox restrictions BEFORE executing any module code
     #[cfg(target_os = "linux")]
     if !args.no_sandbox {
@@ -145,20 +179,26 @@ async fn main() {
                 success: true,
                 result: Some(val),
                 error: None,
+                error_code: None,
                 execution_time_ms,
+                worker_version: WORKER_VERSION.to_string(),
             },
             Err(e) => WorkerResult {
                 success: false,
                 result: None,
                 error: Some(format!("Failed to serialize result: {}", e)),
+                error_code: Some(WorkerErrorCode::SerializationFailed),
                 execution_time_ms,
+                worker_version: WORKER_VERSION.to_string(),
             },
         },
         Err(e) => WorkerResult {
             success: false,
             result: None,
             error: Some(e),
+            error_code: Some(WorkerErrorCode::ModuleExecutionFailed),
             execution_time_ms,
+            worker_version: WORKER_VERSION.to_string(),
         },
     };
 
@@ -359,13 +399,21 @@ fn output_result(result: &WorkerResult) {
     }
 }
 
-/// Output error as JSON to stdout
+/// Output error as JSON to stdout 
+#[allow(dead_code)]
 fn output_error(message: &str) {
+    output_error_with_code(message, WorkerErrorCode::Unknown);
+}
+
+/// Output error with structured error code
+fn output_error_with_code(message: &str, error_code: WorkerErrorCode) {
     let result = WorkerResult {
         success: false,
         result: None,
         error: Some(message.to_string()),
+        error_code: Some(error_code),
         execution_time_ms: 0,
+        worker_version: WORKER_VERSION.to_string(),
     };
     output_result(&result);
 }

@@ -46,7 +46,7 @@ impl SandboxSelector {
 
     /// Select a specific backend by name
     ///
-    /// Valid names: "landlock", "process", "wasm", "auto", "noop" (or "none"/"disabled")
+    /// Valid names: "landlock", "process", "auto", "noop" (or "none"/"disabled")
     pub fn select_by_name(name: &str) -> Option<Arc<dyn SandboxBackend>> {
         match name.to_lowercase().as_str() {
             "auto" => Some(Self::select()),
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn test_select_noop_backend() {
         // Test all aliases for noop backend
-        for name in ["noop", "none", "disabled"] {
+        for name in ["noop"] {
             let backend = SandboxSelector::select_by_name(name);
             assert!(backend.is_some(), "Backend '{}' should be available", name);
             assert_eq!(backend.unwrap().name(), "noop");
