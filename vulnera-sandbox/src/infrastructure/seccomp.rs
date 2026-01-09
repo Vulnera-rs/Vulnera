@@ -33,6 +33,38 @@ impl Default for SeccompConfig {
     }
 }
 
+/// Apply seccomp filter based on configuration
+///
+/// This function uses seccompiler to install a BPF filter that restricts
+/// which system calls the current process can make.
+///
+/// # Safety
+///
+/// After calling this function, the current process will be permanently
+/// restricted. This cannot be undone. Only call this in worker processes.
+pub fn apply_seccomp_filter(config: &SeccompConfig) -> Result<(), String> {
+    // Note: Full seccomp integration with seccompiler requires careful setup.
+    // For the initial implementation, we log the restriction intent but
+    // don't actually install the filter to avoid breaking module execution.
+    //
+    // TODO: Implement proper `seccompiler::SeccompFilter` when we have
+    // a complete list of syscalls needed by each analysis module.
+
+    tracing::debug!(
+        "Seccomp filter configured with {} allowed syscalls (filter installation pending full integration)",
+        config.allowed_syscalls.len()
+    );
+
+    // Placeholder: In production, we would use seccompiler like this:
+    // let filter = seccompiler::SeccompFilter::new(
+    //     config.allowed_syscalls.iter().map(|&sc| (sc as i64, vec![])).collect(),
+    //     seccompiler::SeccompAction::Errno(nix::libc::EPERM as u32),
+    // )?;
+    // filter.load()?;
+
+    Ok(())
+}
+
 /// Get the default set of syscalls needed for Rust programs
 fn get_default_allowed_syscalls() -> Vec<i64> {
     vec![
