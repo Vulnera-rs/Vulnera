@@ -36,7 +36,6 @@ impl std::fmt::Display for PackageId {
     }
 }
 
-
 /// Dependency edge in the graph
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DependencyEdge {

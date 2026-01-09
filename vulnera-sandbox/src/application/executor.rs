@@ -162,13 +162,20 @@ impl SandboxExecutor {
         })?;
 
         let module_type = format!("{:?}", module.module_type());
+        let config_json = serde_json::to_string(&config.config).map_err(|e| {
+            SandboxedExecutionError::Sandbox(SandboxError::CreationFailed(format!(
+                "Failed to serialize module config: {}",
+                e
+            )))
+        })?;
 
         debug!(
             "Spawning worker: {} --module {} --source-uri {}",
             worker_path, module_type, config.source_uri
         );
 
-        let child = Command::new(worker_path)
+        let mut command = Command::new(worker_path);
+        command
             .arg("--module")
             .arg(&module_type)
             .arg("--source-uri")
@@ -177,8 +184,16 @@ impl SandboxExecutor {
             .arg(&config.project_id)
             .arg("--job-id")
             .arg(&config.job_id.to_string())
+            .arg("--module-config")
+            .arg(&config_json)
             .arg("--policy")
-            .arg(&policy_json)
+            .arg(&policy_json);
+
+        if self.backend.name() == "noop" {
+            command.arg("--no-sandbox");
+        }
+
+        let child = command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)

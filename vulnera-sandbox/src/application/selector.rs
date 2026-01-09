@@ -19,7 +19,6 @@ use crate::infrastructure::wasm::WasmSandbox;
 /// Automatically chooses the best available sandbox backend:
 /// 1. Landlock (Linux 5.13+) - fastest, kernel-enforced
 /// 2. Process isolation (older Linux) - resource limits
-/// 3. WASM (Windows/macOS) - software sandbox
 pub struct SandboxSelector;
 
 impl SandboxSelector {
@@ -47,10 +46,16 @@ impl SandboxSelector {
 
     /// Select a specific backend by name
     ///
-    /// Valid names: "landlock", "process", "wasm", "auto"
+    /// Valid names: "landlock", "process", "wasm", "auto", "noop" (or "none"/"disabled")
     pub fn select_by_name(name: &str) -> Option<Arc<dyn SandboxBackend>> {
         match name.to_lowercase().as_str() {
             "auto" => Some(Self::select()),
+
+            // No-op backend for when sandboxing is disabled
+            "noop" => {
+                debug!("Using no-op sandbox backend (sandboxing disabled)");
+                Some(Arc::new(crate::infrastructure::noop::NoOpSandbox::new()))
+            }
 
             #[cfg(target_os = "linux")]
             "landlock" => {
@@ -114,5 +119,15 @@ mod tests {
     fn test_select_unknown() {
         let backend = SandboxSelector::select_by_name("unknown");
         assert!(backend.is_none());
+    }
+
+    #[test]
+    fn test_select_noop_backend() {
+        // Test all aliases for noop backend
+        for name in ["noop", "none", "disabled"] {
+            let backend = SandboxSelector::select_by_name(name);
+            assert!(backend.is_some(), "Backend '{}' should be available", name);
+            assert_eq!(backend.unwrap().name(), "noop");
+        }
     }
 }

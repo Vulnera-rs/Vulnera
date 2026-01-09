@@ -1148,7 +1148,7 @@ impl Default for SandboxConfig {
             enabled: true, // Enabled by default (near-zero overhead with Landlock!)
             backend: "auto".to_string(),
             timeout_ms: 30_000,
-            max_memory_bytes: 256 * 1024 * 1024, // 256MB
+            max_memory_bytes: 1024 * 1024 * 1024, // 1GB
             allow_network: false,
         }
     }
