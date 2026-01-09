@@ -1,6 +1,7 @@
-use crate::domain::{LlmRequest, Message};
+//! Use case for natural language queries about findings
+
+use crate::domain::{CompletionRequest, LlmError, LlmProvider};
 use crate::infrastructure::prompts::PromptBuilder;
-use crate::infrastructure::providers::LlmProvider;
 use std::sync::Arc;
 use vulnera_core::config::LlmConfig;
 
@@ -14,29 +15,16 @@ impl NaturalLanguageQueryUseCase {
         Self { provider, config }
     }
 
-    pub async fn execute(&self, query: &str, findings_json: &str) -> Result<String, anyhow::Error> {
-        let model = &self.config.default_model;
+    pub async fn execute(&self, query: &str, findings_json: &str) -> Result<String, LlmError> {
         let user_prompt = PromptBuilder::build_nl_query_prompt(query, findings_json);
 
-        let request = LlmRequest {
-            model: model.to_string(),
-            messages: vec![Message::new("user", user_prompt)],
-            max_tokens: Some(self.config.max_tokens),
-            temperature: Some(self.config.temperature),
-            top_p: Some(0.95),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            stream: Some(false),
-        };
+        let request = CompletionRequest::new()
+            .with_model(&self.config.default_model)
+            .with_user(user_prompt)
+            .with_max_tokens(self.config.max_tokens)
+            .with_temperature(self.config.temperature);
 
-        let response = self.provider.generate(request).await?;
-
-        response
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
-            .map(|m| m.full_response())
-            .ok_or_else(|| anyhow::anyhow!("No content in LLM response"))
+        let response = self.provider.complete(request).await?;
+        Ok(response.text())
     }
 }

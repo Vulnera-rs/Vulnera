@@ -16,39 +16,68 @@
 //!
 //! - `domain/` — Core entities and traits for LLM operations
 //! - `application/` — Use cases orchestrating LLM workflows
-//! - `infrastructure/` — Provider implementations (Gemini, etc.)
+//! - `infrastructure/` — Provider implementations and registry
+//!
+//! # Providers
+//!
+//! Supported LLM providers:
+//!
+//! - **Google AI Studio** — Via [`GoogleAIProvider`]
+//! - **OpenAI** — Via [`OpenAIProvider`]
+//! - **Azure OpenAI** — Via [`OpenAIProvider::azure`]
+//!
+//! All providers can be wrapped with [`ResilientProvider`] for circuit breaker and retry logic.
 //!
 //! # Usage
 //!
 //! ```rust,ignore
-//! use vulnera_llm::{EnrichFindingsUseCase, LlmProvider, GeminiLlmProvider};
+//! use vulnera_llm::{GoogleAIProvider, ResilientProvider, CompletionRequest, LlmProvider};
 //!
-//! // Create provider
-//! let provider = GeminiLlmProvider::new(config);
+//! // Create provider with resilience
+//! let inner = GoogleAIProvider::new("api-key", "gemini-2.0-flash");
+//! let provider = ResilientProvider::with_defaults(inner);
 //!
-//! // Create use case
-//! let use_case = EnrichFindingsUseCase::new(provider);
+//! // Make a completion request
+//! let request = CompletionRequest::new()
+//!     .with_system("You are a security expert.")
+//!     .with_user("Explain SQL injection vulnerabilities.");
 //!
-//! // Enrich findings
-//! let enriched = use_case.execute(findings).await?;
+//! let response = provider.complete(request).await?;
+//! println!("{}", response.text());
 //! ```
 //!
-//! # Providers
+//! # Provider Registry
 //!
-//! Currently supported LLM providers:
+//! Use [`ProviderRegistry`] to manage multiple providers:
 //!
-//! - **Google Gemini** — Via `GeminiLlmProvider`
+//! ```rust,ignore
+//! use vulnera_llm::{ProviderRegistry, ProviderConfig};
 //!
-//! Additional providers can be added by implementing the [`LlmProvider`] trait.
+//! let mut registry = ProviderRegistry::new();
+//! registry.register_from_config("main", ProviderConfig::google_ai("key", "gemini-2.0-flash"))?;
+//!
+//! let provider = registry.default().unwrap();
+//! ```
 
 pub mod application;
 pub mod domain;
 pub mod infrastructure;
 
+// Domain re-exports
+pub use domain::{
+    CodeFix, CompletionRequest, CompletionResponse, ContentBlock, Explanation, LlmError,
+    LlmProvider, Message, ProviderCapabilities, ProviderInfo, Role, StopReason, StreamChunk, Usage,
+};
+
+// Application re-exports
 pub use application::use_cases::{
     EnrichFindingsRequest, EnrichFindingsResponse, EnrichFindingsUseCase,
     ExplainVulnerabilityUseCase, GenerateCodeFixUseCase, NaturalLanguageQueryUseCase,
 };
-pub use domain::*;
+
+// Infrastructure re-exports
 pub use infrastructure::prompts;
-pub use infrastructure::providers::{GeminiLlmProvider, LlmProvider};
+pub use infrastructure::providers::{
+    GoogleAIProvider, OpenAIProvider, ResilienceConfig, ResilientProvider,
+};
+pub use infrastructure::registry::{ProviderConfig, ProviderRegistry, ProviderType};
