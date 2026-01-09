@@ -405,6 +405,162 @@ pub fn rust_static_mut_rule() -> Rule {
     }
 }
 
+// ============================================================================
+// NEW RULES
+// ============================================================================
+
+/// Box::leak - intentional memory leak
+pub fn rust_box_leak_rule() -> Rule {
+    Rule {
+        id: "rust-box-leak".to_string(),
+        name: "Box::leak Memory Leak".to_string(),
+        description: "Box::leak intentionally leaks memory".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::Rust],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (scoped_identifier
+                path: (identifier) @type
+                name: (identifier) @fn
+              )
+              (#eq? @type "Box")
+              (#eq? @fn "leak")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-401".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory".to_string(), "leak".to_string(), "rust".to_string()],
+        message: Some("Box::leak should only be used for truly static data. Consider Arc for shared ownership.".to_string()),
+        fix: None,
+    }
+}
+
+/// format! in SQL query construction
+pub fn rust_format_sql_rule() -> Rule {
+    Rule {
+        id: "rust-format-sql".to_string(),
+        name: "Format String SQL".to_string(),
+        description: "Using format! for SQL queries can lead to SQL injection".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Rust],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(macro_invocation
+              macro: (identifier) @macro
+              (token_tree
+                (string_literal) @sql
+              )
+              (#eq? @macro "format")
+              (#match? @sql "(?i)(SELECT|INSERT|UPDATE|DELETE|WHERE)")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "sql".to_string(),
+            "injection".to_string(),
+            "rust".to_string(),
+        ],
+        message: Some(
+            "Use parameterized queries with sqlx::query! or diesel instead of format!.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// User-controlled regex (potential ReDoS)
+pub fn rust_regex_user_input_rule() -> Rule {
+    Rule {
+        id: "rust-regex-user-input".to_string(),
+        name: "User-Controlled Regex".to_string(),
+        description: "Regex compiled from user input can cause ReDoS".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Rust],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (scoped_identifier
+                path: (identifier) @type
+                name: (identifier) @fn
+              )
+              (#eq? @type "Regex")
+              (#eq? @fn "new")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-1333".to_string(), "CWE-400".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["redos".to_string(), "regex".to_string(), "rust".to_string()],
+        message: Some(
+            "Use Regex::new with size limits or fancy_regex with backtrack limits.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// debug_assert! - removed in release builds
+pub fn rust_debug_assert_rule() -> Rule {
+    Rule {
+        id: "rust-debug-assert".to_string(),
+        name: "Debug Assert in Security Code".to_string(),
+        description: "debug_assert! is removed in release builds".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::Rust],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(macro_invocation
+              macro: (identifier) @macro
+              (#match? @macro "^debug_assert")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-617".to_string()],
+        owasp_categories: vec![],
+        tags: vec![
+            "assert".to_string(),
+            "debug".to_string(),
+            "rust".to_string(),
+        ],
+        message: Some(
+            "Use assert! for security-critical checks that must run in release builds.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// forget - prevents Drop from running
+pub fn rust_forget_rule() -> Rule {
+    Rule {
+        id: "rust-forget".to_string(),
+        name: "std::mem::forget".to_string(),
+        description: "forget() prevents Drop from running, potentially leaking resources"
+            .to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::Rust],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (scoped_identifier
+                name: (identifier) @fn
+              )
+              (#eq? @fn "forget")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-401".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory".to_string(), "drop".to_string(), "rust".to_string()],
+        message: Some(
+            "Use ManuallyDrop if you need to prevent Drop. Ensure resources are properly handled."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
 /// Get all Rust rules
 pub fn get_rust_rules() -> Vec<Rule> {
     vec![
@@ -428,5 +584,11 @@ pub fn get_rust_rules() -> Vec<Rule> {
         rust_weak_crypto_rule(),
         // Concurrency
         rust_static_mut_rule(),
+        // === NEW RULES ===
+        rust_box_leak_rule(),
+        rust_format_sql_rule(),
+        rust_regex_user_input_rule(),
+        rust_debug_assert_rule(),
+        rust_forget_rule(),
     ]
 }
