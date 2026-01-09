@@ -417,6 +417,250 @@ pub fn go_ignored_error_rule() -> Rule {
     }
 }
 
+// ============================================================================
+// NEW RULES
+// ============================================================================
+
+/// XXE via xml.Unmarshal
+pub fn go_xxe_rule() -> Rule {
+    Rule {
+        id: "go-xxe".to_string(),
+        name: "XML External Entity (XXE)".to_string(),
+        description: "XML parsing may be vulnerable to XXE attacks".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              (#eq? @pkg "xml")
+              (#match? @fn "^(Unmarshal|NewDecoder)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-611".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec!["xxe".to_string(), "xml".to_string(), "go".to_string()],
+        message: Some(
+            "Use encoding/xml with caution. Disable entity expansion if possible.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// TLS InsecureSkipVerify
+pub fn go_tls_skip_verify_rule() -> Rule {
+    Rule {
+        id: "go-tls-insecure-skip-verify".to_string(),
+        name: "TLS Certificate Verification Disabled".to_string(),
+        description: "InsecureSkipVerify disables TLS certificate validation".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(keyed_element
+              (field_identifier) @field
+              (true)
+              (#eq? @field "InsecureSkipVerify")
+            ) @config"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-295".to_string()],
+        owasp_categories: vec!["A07:2021 - Identification and Authentication Failures".to_string()],
+        tags: vec![
+            "tls".to_string(),
+            "certificate".to_string(),
+            "go".to_string(),
+        ],
+        message: Some(
+            "Never set InsecureSkipVerify: true in production. Use proper certificate validation."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// text/template injection (unescaped)
+pub fn go_text_template_rule() -> Rule {
+    Rule {
+        id: "go-text-template".to_string(),
+        name: "Text Template Injection".to_string(),
+        description: "text/template does not escape HTML - use html/template instead".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(import_spec
+              path: (interpreted_string_literal) @path
+              (#eq? @path "\"text/template\"")
+            ) @import"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-79".to_string(), "CWE-94".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["ssti".to_string(), "template".to_string(), "go".to_string()],
+        message: Some("Use html/template for HTML output to auto-escape content.".to_string()),
+        fix: None,
+    }
+}
+
+/// pprof enabled in production
+pub fn go_pprof_enabled_rule() -> Rule {
+    Rule {
+        id: "go-pprof-enabled".to_string(),
+        name: "pprof Debug Endpoint Enabled".to_string(),
+        description: "pprof endpoints expose sensitive profiling data".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(import_spec
+              path: (interpreted_string_literal) @path
+              (#eq? @path "\"net/http/pprof\"")
+            ) @import"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-200".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec!["pprof".to_string(), "debug".to_string(), "go".to_string()],
+        message: Some(
+            "Disable pprof in production or restrict access to authenticated users.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Timing attack via bytes.Equal or == for secrets
+pub fn go_timing_attack_rule() -> Rule {
+    Rule {
+        id: "go-timing-attack".to_string(),
+        name: "Timing Attack Vulnerability".to_string(),
+        description:
+            "Using bytes.Equal or == for secret comparison is vulnerable to timing attacks"
+                .to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              (#eq? @pkg "bytes")
+              (#eq? @fn "Equal")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-208".to_string()],
+        owasp_categories: vec!["A02:2021 - Cryptographic Failures".to_string()],
+        tags: vec!["timing".to_string(), "crypto".to_string(), "go".to_string()],
+        message: Some("Use subtle.ConstantTimeCompare() for secret comparison.".to_string()),
+        fix: None,
+    }
+}
+
+/// NoSQL injection (MongoDB mgo/mongo-driver)
+pub fn go_nosql_injection_rule() -> Rule {
+    Rule {
+        id: "go-nosql-injection".to_string(),
+        name: "NoSQL Injection".to_string(),
+        description: "MongoDB query with user input may be vulnerable".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                field: (field_identifier) @fn
+              )
+              (#match? @fn "^(Find|FindOne|UpdateOne|DeleteOne|Aggregate)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-943".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["nosql".to_string(), "mongodb".to_string(), "go".to_string()],
+        message: Some(
+            "Validate and sanitize user input before using in MongoDB queries.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Open redirect
+pub fn go_open_redirect_rule() -> Rule {
+    Rule {
+        id: "go-open-redirect".to_string(),
+        name: "Open Redirect".to_string(),
+        description: "http.Redirect with user-controlled URL can lead to phishing".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              (#eq? @pkg "http")
+              (#eq? @fn "Redirect")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-601".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "redirect".to_string(),
+            "phishing".to_string(),
+            "go".to_string(),
+        ],
+        message: Some(
+            "Validate redirect URLs against an allowlist of trusted domains.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Hardcoded IP binding
+pub fn go_hardcoded_bind_rule() -> Rule {
+    Rule {
+        id: "go-hardcoded-bind".to_string(),
+        name: "Hardcoded IP Binding".to_string(),
+        description: "Binding to 0.0.0.0 exposes the service to all interfaces".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::Go],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (selector_expression
+                operand: (identifier) @pkg
+                field: (field_identifier) @fn
+              )
+              arguments: (argument_list
+                (interpreted_string_literal) @addr
+              )
+              (#eq? @pkg "http")
+              (#match? @fn "^(ListenAndServe|ListenAndServeTLS)$")
+              (#match? @addr "0\\.0\\.0\\.0")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-668".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "network".to_string(),
+            "binding".to_string(),
+            "go".to_string(),
+        ],
+        message: Some("Bind to specific interfaces or use environment configuration.".to_string()),
+        fix: None,
+    }
+}
+
 /// Get all Go rules
 pub fn get_go_rules() -> Vec<Rule> {
     vec![
@@ -432,7 +676,6 @@ pub fn get_go_rules() -> Vec<Rule> {
         // Cryptography
         go_math_rand_rule(),
         go_weak_crypto_rule(),
-        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Path traversal
         go_path_traversal_rule(),
         // Templates
@@ -442,5 +685,14 @@ pub fn get_go_rules() -> Vec<Rule> {
         go_goroutine_leak_rule(),
         // Error handling
         go_ignored_error_rule(),
+        // === NEW CATASTROPHIC RULES ===
+        go_xxe_rule(),
+        go_tls_skip_verify_rule(),
+        go_text_template_rule(),
+        go_pprof_enabled_rule(),
+        go_timing_attack_rule(),
+        go_nosql_injection_rule(),
+        go_open_redirect_rule(),
+        go_hardcoded_bind_rule(),
     ]
 }

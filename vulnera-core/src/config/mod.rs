@@ -1269,7 +1269,6 @@ impl Validate for Config {
         validation::Validate::validate(&self.auth)?;
         validation::Validate::validate(&self.database)?;
         validation::Validate::validate(&self.server.rate_limit)?;
-        // LLM config validation is simple for now, but we could add more checks
         if self.llm.timeout_seconds == 0 {
             return Err(ValidationError::api("LLM timeout must be > 0"));
         }

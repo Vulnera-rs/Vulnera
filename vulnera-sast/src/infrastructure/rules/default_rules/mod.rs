@@ -107,10 +107,10 @@ mod tests {
     #[test]
     fn test_rule_count_increased() {
         let rules = get_default_rules();
-        // We should have at least 90
+        // We should have at least 120 rules now with expanded catastrophic vulnerability coverage
         assert!(
-            rules.len() >= 90,
-            "Expected at least 90 rules, got {}",
+            rules.len() >= 120,
+            "Expected at least 120 rules, got {}",
             rules.len()
         );
     }

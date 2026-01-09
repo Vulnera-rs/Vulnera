@@ -649,6 +649,495 @@ pub fn js_postmessage_rule() -> Rule {
     }
 }
 
+// ============================================================================
+// NoSQL Injection Rules
+// ============================================================================
+
+/// MongoDB/NoSQL operator injection
+pub fn js_nosql_injection_rule() -> Rule {
+    Rule {
+        id: "js-nosql-injection".to_string(),
+        name: "NoSQL Injection".to_string(),
+        description: "Potential NoSQL injection via MongoDB query operators ($gt, $ne, $regex, etc.)".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              arguments: (arguments
+                (object) @query
+              )
+              (#match? @fn "^(find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|aggregate)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-943".to_string(), "CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["nosql".to_string(), "mongodb".to_string(), "injection".to_string(), "javascript".to_string()],
+        message: Some("Validate and sanitize user input before using in MongoDB queries. Use explicit query operators and avoid passing raw user input.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// XML External Entity (XXE) Rules
+// ============================================================================
+
+/// XXE via XML parser
+pub fn js_xxe_rule() -> Rule {
+    Rule {
+        id: "js-xxe".to_string(),
+        name: "XML External Entity (XXE) Injection".to_string(),
+        description: "XML parser may be vulnerable to XXE attacks if external entities are not disabled".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              (#match? @fn "^(parseString|parseStringSync|parse|parseSync|parseXml|parseXmlString)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-611".to_string(), "CWE-827".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec!["xxe".to_string(), "xml".to_string(), "injection".to_string(), "javascript".to_string()],
+        message: Some("Disable external entity processing in XML parsers. Use {noent: false, noblanks: true} options.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// JWT Security Rules
+// ============================================================================
+
+/// JWT algorithm none bypass
+pub fn js_jwt_none_algorithm_rule() -> Rule {
+    Rule {
+        id: "js-jwt-none-algorithm".to_string(),
+        name: "JWT Algorithm None Bypass".to_string(),
+        description: "JWT verification without algorithm restriction allows signature bypass"
+            .to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              arguments: (arguments
+                (_)
+                (_)
+              )
+              (#match? @fn "^(verify|decode)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-347".to_string(), "CWE-327".to_string()],
+        owasp_categories: vec!["A02:2021 - Cryptographic Failures".to_string()],
+        tags: vec![
+            "jwt".to_string(),
+            "authentication".to_string(),
+            "crypto".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Always specify algorithms option: jwt.verify(token, secret, {algorithms: ['HS256']})"
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// Regular Expression DoS (ReDoS) Rules
+// ============================================================================
+
+/// ReDoS via catastrophic backtracking patterns
+pub fn js_regex_redos_rule() -> Rule {
+    Rule {
+        id: "js-regex-redos".to_string(),
+        name: "ReDoS Vulnerability".to_string(),
+        description: "Regular expression with potential catastrophic backtracking".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(new_expression
+              constructor: (identifier) @ctor
+              arguments: (arguments
+                (regex) @pattern
+              )
+              (#eq? @ctor "RegExp")
+            ) @redos"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-1333".to_string(), "CWE-400".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec!["redos".to_string(), "regex".to_string(), "dos".to_string(), "javascript".to_string()],
+        message: Some("Avoid nested quantifiers and overlapping patterns. Use safe-regex or re2 for user-controlled patterns.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// File Upload Security Rules
+// ============================================================================
+
+/// Unrestricted file upload
+pub fn js_file_upload_unsafe_rule() -> Rule {
+    Rule {
+        id: "js-file-upload-unsafe".to_string(),
+        name: "Unrestricted File Upload".to_string(),
+        description: "File upload without proper validation can lead to RCE".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#match? @fn "^(multer|upload|formidable)$")
+            ) @upload"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-434".to_string()],
+        owasp_categories: vec!["A04:2021 - Insecure Design".to_string()],
+        tags: vec![
+            "file-upload".to_string(),
+            "rce".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Validate file type, size, and content. Store uploads outside webroot.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// Cookie Security Rules
+// ============================================================================
+
+/// Cookie without HttpOnly flag
+pub fn js_cookie_no_httponly_rule() -> Rule {
+    Rule {
+        id: "js-cookie-no-httponly".to_string(),
+        name: "Cookie Missing HttpOnly".to_string(),
+        description: "Cookies without HttpOnly flag can be accessed via JavaScript XSS".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              arguments: (arguments
+                (string)
+                (string)
+                (object) @options
+              )
+              (#eq? @fn "cookie")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-1004".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "cookies".to_string(),
+            "httponly".to_string(),
+            "xss".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Set httpOnly: true for sensitive cookies to prevent XSS attacks.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Cookie without Secure flag
+pub fn js_cookie_no_secure_rule() -> Rule {
+    Rule {
+        id: "js-cookie-no-secure".to_string(),
+        name: "Cookie Missing Secure Flag".to_string(),
+        description: "Cookies without Secure flag can be transmitted over HTTP".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(assignment_expression
+              left: (member_expression
+                property: (property_identifier) @prop
+              )
+              (#eq? @prop "cookie")
+            ) @cookie"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-614".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "cookies".to_string(),
+            "secure".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Set secure: true for cookies to ensure they're only sent over HTTPS.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// CSRF Protection Rules
+// ============================================================================
+
+/// CSRF protection disabled
+pub fn js_csrf_disabled_rule() -> Rule {
+    Rule {
+        id: "js-csrf-disabled".to_string(),
+        name: "CSRF Protection Disabled".to_string(),
+        description: "CSRF protection explicitly disabled or not configured".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(object
+              (pair
+                key: (property_identifier) @key
+                value: (false)
+              )
+              (#match? @key "(?i)(csrf|csrfProtection|xsrfProtection)")
+            ) @config"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-352".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "csrf".to_string(),
+            "security".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some("Enable CSRF protection for state-changing operations.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// GraphQL Security Rules
+// ============================================================================
+
+/// GraphQL introspection enabled in production
+pub fn js_graphql_introspection_rule() -> Rule {
+    Rule {
+        id: "js-graphql-introspection".to_string(),
+        name: "GraphQL Introspection Enabled".to_string(),
+        description: "GraphQL introspection enabled - may expose schema details".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(object
+              (pair
+                key: (property_identifier) @key
+                value: (true)
+              )
+              (#eq? @key "introspection")
+            ) @config"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-200".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "graphql".to_string(),
+            "introspection".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some("Disable introspection in production: {introspection: false}".to_string()),
+        fix: None,
+    }
+}
+
+/// GraphQL query depth limit missing
+pub fn js_graphql_depth_limit_rule() -> Rule {
+    Rule {
+        id: "js-graphql-no-depth-limit".to_string(),
+        name: "GraphQL No Depth Limit".to_string(),
+        description: "GraphQL queries without depth limit are vulnerable to DoS".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#match? @fn "^(ApolloServer|GraphQLServer|graphqlHTTP)$")
+            ) @server"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-400".to_string(), "CWE-770".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "graphql".to_string(),
+            "dos".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some("Add depth limiting middleware: graphql-depth-limit or similar.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// Helmet/Security Headers Rules
+// ============================================================================
+
+/// Missing security headers (Helmet)
+pub fn js_helmet_missing_rule() -> Rule {
+    Rule {
+        id: "js-helmet-missing".to_string(),
+        name: "Missing Security Headers".to_string(),
+        description: "Express app without Helmet middleware for security headers".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "express")
+            ) @app"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-693".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "helmet".to_string(),
+            "headers".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some("Use Helmet middleware: app.use(helmet()) for security headers.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// Rate Limiting Rules
+// ============================================================================
+
+/// Missing rate limiting
+pub fn js_no_rate_limit_rule() -> Rule {
+    Rule {
+        id: "js-no-rate-limit".to_string(),
+        name: "Missing Rate Limiting".to_string(),
+        description: "API endpoint without rate limiting is vulnerable to brute force".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                object: (identifier) @app
+                property: (property_identifier) @method
+              )
+              (#match? @app "^(app|router)$")
+              (#match? @method "^(post|put|patch|delete)$")
+            ) @endpoint"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-307".to_string(), "CWE-799".to_string()],
+        owasp_categories: vec!["A04:2021 - Insecure Design".to_string()],
+        tags: vec![
+            "rate-limit".to_string(),
+            "brute-force".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some("Add rate limiting to sensitive endpoints: express-rate-limit.".to_string()),
+        fix: None,
+    }
+}
+
+// ============================================================================
+// SQL Injection (for JS SQL libraries)
+// ============================================================================
+
+/// SQL injection via string concatenation
+pub fn js_sql_injection_rule() -> Rule {
+    Rule {
+        id: "js-sql-injection".to_string(),
+        name: "SQL Injection".to_string(),
+        description: "SQL query built with string concatenation is vulnerable to injection"
+            .to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              arguments: (arguments
+                [(binary_expression) (template_string)]
+              )
+              (#match? @fn "^(query|execute|raw|prepare)$")
+            ) @sql"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "sql".to_string(),
+            "injection".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Use parameterized queries: db.query('SELECT * FROM users WHERE id = ?', [id])"
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Sequelize raw query without bind
+pub fn js_sequelize_raw_query_rule() -> Rule {
+    Rule {
+        id: "js-sequelize-raw".to_string(),
+        name: "Sequelize Raw Query".to_string(),
+        description: "Sequelize raw query without parameterization".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::JavaScript],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (member_expression
+                property: (property_identifier) @fn
+              )
+              arguments: (arguments
+                (template_string) @query
+              )
+              (#eq? @fn "query")
+            ) @raw"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-89".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "sql".to_string(),
+            "sequelize".to_string(),
+            "injection".to_string(),
+            "javascript".to_string(),
+        ],
+        message: Some(
+            "Use replacements or bind parameters: sequelize.query(sql, {replacements: {...}})"
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
 /// Get all JavaScript rules
 pub fn get_javascript_rules() -> Vec<Rule> {
     vec![
@@ -671,7 +1160,6 @@ pub fn get_javascript_rules() -> Vec<Rule> {
         js_prototype_pollution_rule(),
         // Open redirect
         js_open_redirect_rule(),
-        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Cryptography
         js_insecure_randomness_rule(),
         js_weak_crypto_rule(),
@@ -684,5 +1172,31 @@ pub fn get_javascript_rules() -> Vec<Rule> {
         js_unsafe_json_parse_rule(),
         // PostMessage
         js_postmessage_rule(),
+        // === NEW CATASTROPHIC RULES ===
+        // NoSQL injection
+        js_nosql_injection_rule(),
+        // XXE
+        js_xxe_rule(),
+        // JWT security
+        js_jwt_none_algorithm_rule(),
+        // ReDoS
+        js_regex_redos_rule(),
+        // File upload
+        js_file_upload_unsafe_rule(),
+        // Cookie security
+        js_cookie_no_httponly_rule(),
+        js_cookie_no_secure_rule(),
+        // CSRF
+        js_csrf_disabled_rule(),
+        // GraphQL
+        js_graphql_introspection_rule(),
+        js_graphql_depth_limit_rule(),
+        // Security headers
+        js_helmet_missing_rule(),
+        // Rate limiting
+        js_no_rate_limit_rule(),
+        // SQL injection
+        js_sql_injection_rule(),
+        js_sequelize_raw_query_rule(),
     ]
 }
