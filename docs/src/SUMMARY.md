@@ -43,5 +43,6 @@
 
 ## Reference
 
+- [Configuration](reference/configuration.md)
 - [System Architecture](reference/architecture.md)
 - [FAQ](reference/faq.md)

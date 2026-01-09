@@ -259,6 +259,96 @@ impl ProviderRegistry {
         self.providers.keys().collect()
     }
 
+    /// Create a registry with provider from LlmConfig
+    ///
+    /// Reads the active provider from config and creates the appropriate provider.
+    pub fn from_llm_config(config: &vulnera_core::config::LlmConfig) -> Result<Self, LlmError> {
+        let mut registry = Self::new();
+
+        let provider: Arc<dyn LlmProvider> = match config.provider.to_lowercase().as_str() {
+            "google_ai" | "gemini" | "google" => {
+                let api_key = config
+                    .google_ai
+                    .api_key
+                    .clone()
+                    .or_else(|| std::env::var("GOOGLE_AI_KEY").ok())
+                    .ok_or_else(|| {
+                        LlmError::Configuration(
+                            "Google AI API key not configured. Set google_ai.api_key or GOOGLE_AI_KEY env var".to_string(),
+                        )
+                    })?;
+
+                let mut provider = GoogleAIProvider::new(&api_key, &config.default_model);
+                if !config.google_ai.base_url.is_empty() {
+                    provider = provider.with_base_url(&config.google_ai.base_url);
+                }
+                Arc::new(provider)
+            }
+            "openai" | "gpt" => {
+                let api_key = config
+                    .openai
+                    .api_key
+                    .clone()
+                    .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                    .ok_or_else(|| {
+                        LlmError::Configuration(
+                            "OpenAI API key not configured. Set openai.api_key or OPENAI_API_KEY env var".to_string(),
+                        )
+                    })?;
+
+                let mut provider = OpenAIProvider::new(&api_key, &config.default_model);
+                if !config.openai.base_url.is_empty()
+                    && config.openai.base_url != "https://api.openai.com/v1"
+                {
+                    provider = provider.with_base_url(&config.openai.base_url);
+                }
+                if let Some(ref org) = config.openai.organization_id {
+                    provider = provider.with_organization(org);
+                }
+                Arc::new(provider)
+            }
+            "azure" | "azure_openai" => {
+                let api_key = config
+                    .azure
+                    .api_key
+                    .clone()
+                    .or_else(|| std::env::var("AZURE_OPENAI_KEY").ok())
+                    .ok_or_else(|| {
+                        LlmError::Configuration(
+                            "Azure OpenAI API key not configured. Set azure.api_key or AZURE_OPENAI_KEY env var".to_string(),
+                        )
+                    })?;
+
+                if config.azure.endpoint.is_empty() {
+                    return Err(LlmError::Configuration(
+                        "Azure endpoint not configured".to_string(),
+                    ));
+                }
+                if config.azure.deployment.is_empty() {
+                    return Err(LlmError::Configuration(
+                        "Azure deployment not configured".to_string(),
+                    ));
+                }
+
+                Arc::new(OpenAIProvider::azure(
+                    &config.azure.endpoint,
+                    &api_key,
+                    &config.azure.deployment,
+                    &config.azure.api_version,
+                ))
+            }
+            other => {
+                return Err(LlmError::ProviderNotFound(format!(
+                    "Unknown provider: {}. Valid options: google_ai, openai, azure",
+                    other
+                )));
+            }
+        };
+
+        registry.register("default", provider);
+        Ok(registry)
+    }
+
     /// Check if a provider is registered
     pub fn contains(&self, name: &str) -> bool {
         self.providers.contains_key(name)
