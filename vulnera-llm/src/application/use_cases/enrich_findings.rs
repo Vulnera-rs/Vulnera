@@ -1,8 +1,7 @@
 //! Use case for enriching security findings with LLM-generated insights
 
-use crate::domain::{LlmRequest, Message};
+use crate::domain::{CompletionRequest, LlmProvider};
 use crate::infrastructure::prompts::PromptBuilder;
-use crate::infrastructure::providers::LlmProvider;
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
@@ -155,31 +154,21 @@ impl EnrichFindingsUseCase {
 
         let prompt = PromptBuilder::build_enrichment_prompt(finding, code_context.as_deref());
 
-        let request = LlmRequest {
-            model: model.to_string(),
-            messages: vec![Message::new("user", prompt)],
-            max_tokens: Some(config.max_tokens),
-            temperature: Some(config.temperature),
-            top_p: Some(0.95),
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            stream: Some(false),
-        };
+        let request = CompletionRequest::new()
+            .with_model(model)
+            .with_user(prompt)
+            .with_max_tokens(config.max_tokens)
+            .with_temperature(config.temperature);
 
         debug!(finding_id = %finding.id, "Requesting LLM enrichment");
 
-        let response = provider.generate(request).await?;
+        let response = provider
+            .complete(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("LLM error: {}", e))?;
 
-        // Parse the response - use content_str() to handle Option<String>
-        let content = response
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
-            .map(|m| m.content_str())
-            .unwrap_or("");
-
-        Self::parse_enrichment_response(content)
+        let content = response.text();
+        Self::parse_enrichment_response(&content)
     }
 
     /// Parse LLM response into FindingEnrichment

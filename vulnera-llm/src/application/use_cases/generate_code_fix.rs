@@ -1,6 +1,7 @@
-use crate::domain::{CodeFix, LlmRequest, Message};
+//! Use case for generating code fixes for vulnerabilities
+
+use crate::domain::{CodeFix, CompletionRequest, LlmError, LlmProvider};
 use crate::infrastructure::prompts::CODE_FIX_SYSTEM_PROMPT;
-use crate::infrastructure::providers::LlmProvider;
 use std::sync::Arc;
 use vulnera_core::config::LlmConfig;
 
@@ -19,7 +20,7 @@ impl GenerateCodeFixUseCase {
         finding_id: &str,
         code_context: &str,
         vulnerability_description: &str,
-    ) -> Result<CodeFix, anyhow::Error> {
+    ) -> Result<CodeFix, LlmError> {
         let model = self
             .config
             .code_fix_model
@@ -32,37 +33,19 @@ impl GenerateCodeFixUseCase {
         );
 
         // Use lower temperature for code generation (more deterministic)
-        let code_temperature = 0.3;
+        let request = CompletionRequest::new()
+            .with_system(CODE_FIX_SYSTEM_PROMPT)
+            .with_user(user_prompt)
+            .with_model(model)
+            .with_max_tokens(self.config.max_tokens)
+            .with_temperature(0.3); // Lower temp for code
 
-        let request = LlmRequest {
-            model: model.to_string(),
-            messages: vec![
-                Message::new("system", CODE_FIX_SYSTEM_PROMPT),
-                Message::new("user", user_prompt),
-            ],
-            max_tokens: Some(self.config.max_tokens),
-            temperature: Some(code_temperature),
-            top_p: Some(0.9),
-            top_k: Some(40),
-            frequency_penalty: Some(0.0),
-            presence_penalty: Some(0.0),
-            stream: Some(false), // Non-streaming for JSON parsing simplicity in MVP
-        };
-
-        let response = self.provider.generate(request).await?;
-
-        let content = response
-            .choices
-            .first()
-            .and_then(|c| c.message.as_ref())
-            .map(|m| m.full_response())
-            .ok_or_else(|| anyhow::anyhow!("No content in LLM response"))?;
+        let response = self.provider.complete(request).await?;
+        let content = response.text();
 
         // Parse JSON from content (handling potential markdown code blocks)
         let json_str = if let Some(start) = content.find("```json") {
             if let Some(_end) = content[start..].find("```") {
-                // This logic is flawed if there are multiple blocks, but simple for now
-                // Actually, let's just try to find the first { and last }
                 let start_brace = content.find('{').unwrap_or(0);
                 let end_brace = content.rfind('}').unwrap_or(content.len());
                 &content[start_brace..=end_brace]
@@ -83,7 +66,9 @@ impl GenerateCodeFixUseCase {
             diff: String,
         }
 
-        let output: LlmOutput = serde_json::from_str(json_str)?;
+        let output: LlmOutput = serde_json::from_str(json_str).map_err(|e| {
+            LlmError::InvalidResponse(format!("Failed to parse code fix response: {}", e))
+        })?;
 
         Ok(CodeFix {
             finding_id: finding_id.to_string(),

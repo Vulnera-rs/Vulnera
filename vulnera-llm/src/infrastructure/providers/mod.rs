@@ -1,16 +1,18 @@
-use crate::domain::{LlmRequest, LlmResponse};
-use async_trait::async_trait;
-use tokio::sync::mpsc;
+//! LLM Provider implementations
+//!
+//! This module contains provider implementations for various LLM backends:
+//!
+//! - [`google_ai`] - Google AI Studio (Gemini)
+//! - [`openai`] - OpenAI and Azure OpenAI
+//! - [`resilient`] - Resilience wrapper (circuit breaker, retry)
 
-pub mod gemini;
+pub mod google_ai;
+pub mod openai;
+pub mod resilient;
 
-pub use gemini::GeminiLlmProvider;
+pub use google_ai::GoogleAIProvider;
+pub use openai::OpenAIProvider;
+pub use resilient::{ResilienceConfig, ResilientProvider};
 
-#[async_trait]
-pub trait LlmProvider: Send + Sync {
-    async fn generate(&self, request: LlmRequest) -> Result<LlmResponse, anyhow::Error>;
-    async fn generate_stream(
-        &self,
-        request: LlmRequest,
-    ) -> Result<mpsc::Receiver<Result<LlmResponse, anyhow::Error>>, anyhow::Error>;
-}
+// Re-export the provider trait from domain
+pub use crate::domain::{LlmProvider, ProviderCapabilities, ProviderInfo};
