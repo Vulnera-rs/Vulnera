@@ -187,6 +187,10 @@ fn get_default_allowed_syscalls() -> Vec<i64> {
         libc::SYS_ioctl, // Needed for terminal operations
         libc::SYS_getcwd,
         // === Thread/process operations (limited) ===
+        libc::SYS_clone,
+        libc::SYS_clone3,
+        libc::SYS_set_tid_address,
+        libc::SYS_wait4,
         libc::SYS_futex,
         libc::SYS_set_robust_list,
         libc::SYS_get_robust_list,

@@ -12,7 +12,7 @@ use std::time::Duration;
 /// - No filesystem access (except explicitly allowed paths)
 /// - No network access
 /// - 30 second timeout
-/// - 256MB memory limit
+/// - 1GB memory limit
 ///
 /// # Example
 ///
@@ -47,7 +47,7 @@ impl Default for SandboxPolicy {
             readwrite_paths: vec![],
             allowed_ports: vec![],
             timeout: Duration::from_secs(30),
-            max_memory: 256 * 1024 * 1024, // 256MB
+            max_memory: 1024 * 1024 * 1024, // 1GB
             allow_exec: false,
         }
     }

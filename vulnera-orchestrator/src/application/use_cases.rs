@@ -68,13 +68,21 @@ pub struct ExecuteAnalysisJobUseCase {
 
 impl ExecuteAnalysisJobUseCase {
     pub fn new(module_registry: Arc<ModuleRegistry>, config: SandboxConfig) -> Self {
-        // Select backend based on config (auto, landlock, process, wasm)
-        let backend = SandboxSelector::select_by_name(&config.backend)
-            .unwrap_or_else(|| SandboxSelector::select());
+        let executor = if !config.enabled {
+            tracing::info!("Sandbox is disabled, using NoOpSandbox");
+            Arc::new(SandboxExecutor::new(Arc::new(
+                vulnera_sandbox::infrastructure::noop::NoOpSandbox::new(),
+            )))
+        } else {
+            // Select backend based on config (auto, landlock, process, wasm)
+            let backend = SandboxSelector::select_by_name(&config.backend)
+                .unwrap_or_else(|| SandboxSelector::select());
+            Arc::new(SandboxExecutor::new(backend))
+        };
 
         Self {
             module_registry,
-            executor: Arc::new(SandboxExecutor::new(backend)),
+            executor,
             config,
         }
     }
@@ -147,9 +155,12 @@ impl ExecuteAnalysisJobUseCase {
                     let module_start = std::time::Instant::now();
 
                     // Build sandbox policy
+                    // Ensure a reasonable memory limit for sandboxed modules (at least 1GB)
+                    let effective_mem_limit = std::cmp::max(sandbox_mem_bytes, 1024 * 1024 * 1024);
+
                     let mut policy = SandboxPolicy::default()
                         .with_timeout(sandbox_timeout)
-                        .with_memory_limit(sandbox_mem_bytes);
+                        .with_memory_limit(effective_mem_limit);
 
                     // Add read-only access to source URI (if it's a file path)
                     if std::path::Path::new(&config.source_uri).exists() {
@@ -160,6 +171,13 @@ impl ExecuteAnalysisJobUseCase {
                     if sandbox_config.allow_network {
                         // Allow common ports for now if network is enabled
                         policy.allowed_ports = vec![80, 443, 8080];
+
+                        // DependencyAnalyzer needs to connect to Dragonfly (Redis)
+                        if module_type_clone
+                            == vulnera_core::domain::module::ModuleType::DependencyAnalyzer
+                        {
+                            policy.allowed_ports.push(6379);
+                        }
                     }
 
                     // Execute within sandbox
