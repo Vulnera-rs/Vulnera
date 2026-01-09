@@ -499,6 +499,247 @@ pub fn c_rand_rule() -> Rule {
     }
 }
 
+// ============================================================================
+// NEW RULES
+// ============================================================================
+
+/// mktemp - race condition vulnerability
+pub fn c_mktemp_rule() -> Rule {
+    Rule {
+        id: "c-mktemp".to_string(),
+        name: "Mktemp Race Condition".to_string(),
+        description: "mktemp() is vulnerable to race conditions".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "mktemp")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-377".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "race-condition".to_string(),
+            "tempfile".to_string(),
+            "c".to_string(),
+        ],
+        message: Some(
+            "Use mkstemp() instead of mktemp() to avoid TOCTOU race conditions.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// open() without mode when creating
+pub fn c_open_no_mode_rule() -> Rule {
+    Rule {
+        id: "c-open-no-mode".to_string(),
+        name: "Open Without Mode".to_string(),
+        description: "open() with O_CREAT should specify mode".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              arguments: (argument_list
+                (_)
+                (identifier) @flags
+              )
+              (#eq? @fn "open")
+              (#match? @flags "O_CREAT")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-732".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "file".to_string(),
+            "permissions".to_string(),
+            "c".to_string(),
+        ],
+        message: Some(
+            "When using O_CREAT, always specify mode argument: open(path, O_CREAT, 0600)."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Signal handler with async-signal-unsafe functions
+pub fn c_signal_unsafe_rule() -> Rule {
+    Rule {
+        id: "c-signal-unsafe".to_string(),
+        name: "Async-Signal-Unsafe Function".to_string(),
+        description: "Using non-reentrant functions in signal handlers is undefined behavior".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "signal")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-479".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["signal".to_string(), "async-safety".to_string(), "c".to_string()],
+        message: Some("Use sigaction() instead of signal(). Only call async-signal-safe functions in handlers.".to_string()),
+        fix: None,
+    }
+}
+
+/// Unchecked realloc - original pointer lost on failure
+pub fn c_realloc_unchecked_rule() -> Rule {
+    Rule {
+        id: "c-realloc-unchecked".to_string(),
+        name: "Unchecked Realloc".to_string(),
+        description: "realloc() return must be checked; original pointer is lost on failure".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(assignment_expression
+              left: (identifier) @ptr
+              right: (call_expression
+                function: (identifier) @fn
+                arguments: (argument_list
+                  (identifier) @same_ptr
+                )
+              )
+              (#eq? @fn "realloc")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-401".to_string(), "CWE-252".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["memory".to_string(), "leak".to_string(), "c".to_string()],
+        message: Some("Store realloc() result in temp variable and check for NULL before overwriting original pointer.".to_string()),
+        fix: None,
+    }
+}
+
+/// atoi/atol without error checking
+pub fn c_atoi_rule() -> Rule {
+    Rule {
+        id: "c-atoi-unchecked".to_string(),
+        name: "Unchecked atoi".to_string(),
+        description: "atoi/atol cannot detect conversion errors".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#match? @fn "^(atoi|atol|atoll|atof)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-252".to_string()],
+        owasp_categories: vec![],
+        tags: vec![
+            "conversion".to_string(),
+            "error-handling".to_string(),
+            "c".to_string(),
+        ],
+        message: Some(
+            "Use strtol/strtoll with errno checking for reliable conversion.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// strtok - not thread safe
+pub fn c_strtok_rule() -> Rule {
+    Rule {
+        id: "c-strtok".to_string(),
+        name: "Non-Thread-Safe strtok".to_string(),
+        description: "strtok() uses static buffer and is not thread-safe".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "strtok")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-362".to_string()],
+        owasp_categories: vec![],
+        tags: vec!["thread-safety".to_string(), "c".to_string()],
+        message: Some("Use strtok_r() for thread-safe string tokenization.".to_string()),
+        fix: None,
+    }
+}
+
+/// realpath with fixed buffer
+pub fn c_realpath_rule() -> Rule {
+    Rule {
+        id: "c-realpath-buffer".to_string(),
+        name: "Realpath Buffer Overflow".to_string(),
+        description: "realpath() with fixed buffer may overflow if path exceeds PATH_MAX"
+            .to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call_expression
+              function: (identifier) @fn
+              (#eq? @fn "realpath")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-120".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "buffer-overflow".to_string(),
+            "path".to_string(),
+            "c".to_string(),
+        ],
+        message: Some(
+            "Pass NULL as second argument to have realpath() allocate buffer dynamically."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// uninitialized variable declaration
+pub fn c_uninitialized_var_rule() -> Rule {
+    Rule {
+        id: "c-uninitialized-var".to_string(),
+        name: "Potentially Uninitialized Variable".to_string(),
+        description: "Stack variables without initialization contain garbage values".to_string(),
+        severity: Severity::Low,
+        languages: vec![Language::C, Language::Cpp],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(declaration
+              declarator: (init_declarator
+                declarator: (identifier) @var
+              )
+            ) @decl"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-457".to_string()],
+        owasp_categories: vec![],
+        tags: vec![
+            "memory".to_string(),
+            "uninitialized".to_string(),
+            "c".to_string(),
+        ],
+        message: Some(
+            "Initialize variables at declaration to prevent use of garbage values.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
 /// Get all C/C++ rules
 pub fn get_c_cpp_rules() -> Vec<Rule> {
     vec![
@@ -527,5 +768,14 @@ pub fn get_c_cpp_rules() -> Vec<Rule> {
         // Miscellaneous
         c_memcpy_rule(),
         c_rand_rule(),
+        // === NEW RULES ===
+        c_mktemp_rule(),
+        c_open_no_mode_rule(),
+        c_signal_unsafe_rule(),
+        c_realloc_unchecked_rule(),
+        c_atoi_rule(),
+        c_strtok_rule(),
+        c_realpath_rule(),
+        c_uninitialized_var_rule(),
     ]
 }
