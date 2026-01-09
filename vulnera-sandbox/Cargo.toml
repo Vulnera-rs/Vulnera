@@ -9,14 +9,22 @@ keywords = ["security", "sandbox", "landlock", "seccomp"]
 categories = ["os::linux-apis", "security"]
 description = "Hybrid kernel sandboxing for Vulnera security modules"
 
+[[bin]]
+name = "vulnera-worker"
+path = "src/bin/worker.rs"
+
 [dependencies]
 # Shared dependencies
 vulnera-core = { path = "../vulnera-core" }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+which = "7"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"

@@ -14,6 +14,22 @@ use tracing::{debug, info, warn};
 use crate::domain::policy::SandboxPolicy;
 use crate::domain::traits::{SandboxBackend, SandboxError, SandboxResult};
 
+/// Apply Landlock restrictions to the current process
+///
+/// This is the main entry point for sandboxing. Call this function
+/// to restrict the current process's capabilities based on the policy.
+///
+/// # Safety
+///
+/// After calling this function, the current process will be permanently
+/// restricted. This cannot be undone. Only call this in worker processes,
+/// never in the main orchestrator.
+pub fn apply_landlock_restrictions(policy: &SandboxPolicy) -> SandboxResult<()> {
+    let sandbox = LandlockSandbox::new();
+    sandbox.apply_landlock_rules(policy)?;
+    Ok(())
+}
+
 /// Landlock-based sandbox for Linux 5.13+
 ///
 /// This is the fastest sandboxing option, using kernel-level restrictions
@@ -49,8 +65,8 @@ impl LandlockSandbox {
             .is_ok()
     }
 
-    /// Apply Landlock restrictions to the current thread
-    fn apply_landlock_restrictions(&self, policy: &SandboxPolicy) -> SandboxResult<RulesetStatus> {
+    /// Apply Landlock restrictions to the current thread (internal)
+    fn apply_landlock_rules(&self, policy: &SandboxPolicy) -> SandboxResult<RulesetStatus> {
         // Define filesystem access flags
         let fs_read = AccessFs::ReadFile | AccessFs::ReadDir;
         let fs_write =
@@ -159,7 +175,7 @@ impl SandboxBackend for LandlockSandbox {
     }
 
     async fn apply_restrictions(&self, policy: &SandboxPolicy) -> SandboxResult<()> {
-        self.apply_landlock_restrictions(policy)?;
+        self.apply_landlock_rules(policy)?;
         Ok(())
     }
 }
