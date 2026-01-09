@@ -624,6 +624,379 @@ pub fn python_xxe_rule() -> Rule {
     }
 }
 
+// ============================================================================
+// NEW RULES
+// ============================================================================
+
+/// LDAP injection via python-ldap
+pub fn python_ldap_injection_rule() -> Rule {
+    Rule {
+        id: "python-ldap-injection".to_string(),
+        name: "LDAP Injection".to_string(),
+        description: "LDAP query with unvalidated user input can lead to authentication bypass"
+            .to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                attribute: (identifier) @fn
+              )
+              (#match? @fn "^(search|search_s|search_ext|search_ext_s)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-90".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "ldap".to_string(),
+            "injection".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Escape special LDAP characters using ldap.filter.escape_filter_chars().".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Timing attack via non-constant comparison
+pub fn python_timing_attack_rule() -> Rule {
+    Rule {
+        id: "python-timing-attack".to_string(),
+        name: "Timing Attack Vulnerability".to_string(),
+        description: "Using == for secret comparison is vulnerable to timing attacks".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(comparison_operator
+              (identifier) @left
+              (identifier) @right
+              (#match? @left "(?i)(password|token|secret|key|hash|signature)")
+            ) @compare"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-208".to_string()],
+        owasp_categories: vec!["A02:2021 - Cryptographic Failures".to_string()],
+        tags: vec![
+            "timing".to_string(),
+            "crypto".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Use hmac.compare_digest() or secrets.compare_digest() for constant-time comparison."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// NoSQL injection (MongoDB/PyMongo)
+pub fn python_nosql_injection_rule() -> Rule {
+    Rule {
+        id: "python-nosql-injection".to_string(),
+        name: "NoSQL Injection".to_string(),
+        description: "MongoDB query with user input can lead to NoSQL injection".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                attribute: (identifier) @fn
+              )
+              (#match? @fn "^(find|find_one|update|update_one|update_many|delete|delete_one|delete_many|aggregate)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-943".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec!["nosql".to_string(), "mongodb".to_string(), "injection".to_string(), "python".to_string()],
+        message: Some("Validate and sanitize user input. Avoid passing $where or user-controlled operators.".to_string()),
+        fix: None,
+    }
+}
+
+/// Path traversal via zipfile (Zip Slip)
+pub fn python_zipfile_path_traversal_rule() -> Rule {
+    Rule {
+        id: "python-zipfile-path-traversal".to_string(),
+        name: "Zip Slip Vulnerability".to_string(),
+        description: "Extracting zip files without path validation allows arbitrary file write".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                attribute: (identifier) @fn
+              )
+              (#match? @fn "^(extractall|extract)$")
+            ) @extract"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-22".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec!["zip-slip".to_string(), "path-traversal".to_string(), "python".to_string()],
+        message: Some("Validate extracted file paths start with the target directory using os.path.realpath().".to_string()),
+        fix: None,
+    }
+}
+
+/// Jinja2 autoescape disabled
+pub fn python_jinja_autoescape_disabled_rule() -> Rule {
+    Rule {
+        id: "python-jinja-autoescape-off".to_string(),
+        name: "Jinja2 Autoescape Disabled".to_string(),
+        description: "Disabling Jinja2 autoescape allows XSS vulnerabilities".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (identifier) @fn
+              arguments: (argument_list
+                (keyword_argument
+                  name: (identifier) @key
+                  value: (false)
+                )
+              )
+              (#eq? @fn "Environment")
+              (#eq? @key "autoescape")
+            ) @env"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-79".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "jinja2".to_string(),
+            "xss".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Enable autoescape: Environment(autoescape=True) or use select_autoescape()."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Flask-CORS wildcard
+pub fn python_cors_wildcard_rule() -> Rule {
+    Rule {
+        id: "python-cors-wildcard".to_string(),
+        name: "CORS Wildcard Origin".to_string(),
+        description: "CORS with wildcard origin exposes API to all domains".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (identifier) @fn
+              arguments: (argument_list
+                (keyword_argument
+                  name: (identifier) @key
+                  value: (string) @val
+                )
+              )
+              (#match? @fn "^(CORS|cors)$")
+              (#eq? @key "origins")
+              (#eq? @val "\"*\"")
+            ) @cors"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-942".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "cors".to_string(),
+            "misconfiguration".to_string(),
+            "python".to_string(),
+        ],
+        message: Some("Specify allowed origins explicitly instead of using '*'.".to_string()),
+        fix: None,
+    }
+}
+
+/// subprocess shell=True
+pub fn python_subprocess_shell_true_rule() -> Rule {
+    Rule {
+        id: "python-shell-true".to_string(),
+        name: "Subprocess shell=True".to_string(),
+        description: "subprocess with shell=True allows command injection".to_string(),
+        severity: Severity::Critical,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @mod
+                attribute: (identifier) @fn
+              )
+              arguments: (argument_list
+                (keyword_argument
+                  name: (identifier) @key
+                  value: (true)
+                )
+              )
+              (#eq? @mod "subprocess")
+              (#match? @fn "^(call|run|Popen|check_call|check_output)$")
+              (#eq? @key "shell")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-78".to_string()],
+        owasp_categories: vec!["A03:2021 - Injection".to_string()],
+        tags: vec![
+            "command-injection".to_string(),
+            "subprocess".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Use shell=False and pass command as a list: subprocess.run(['cmd', 'arg'])."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Sensitive data in logs
+pub fn python_logging_sensitive_rule() -> Rule {
+    Rule {
+        id: "python-logging-sensitive".to_string(),
+        name: "Sensitive Data in Logs".to_string(),
+        description: "Logging potentially sensitive data".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @log
+                attribute: (identifier) @fn
+              )
+              arguments: (argument_list
+                (identifier) @arg
+              )
+              (#match? @log "^(logging|logger|log)$")
+              (#match? @fn "^(debug|info|warning|error|critical)$")
+              (#match? @arg "(?i)(password|secret|token|key|credential)")
+            ) @log"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-532".to_string()],
+        owasp_categories: vec!["A09:2021 - Security Logging and Monitoring Failures".to_string()],
+        tags: vec![
+            "logging".to_string(),
+            "sensitive-data".to_string(),
+            "python".to_string(),
+        ],
+        message: Some("Mask or redact sensitive data before logging.".to_string()),
+        fix: None,
+    }
+}
+
+/// ReDoS via regex with user input
+pub fn python_regex_redos_rule() -> Rule {
+    Rule {
+        id: "python-regex-redos".to_string(),
+        name: "ReDoS Vulnerability".to_string(),
+        description: "User-controlled regex pattern can lead to ReDoS".to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                object: (identifier) @mod
+                attribute: (identifier) @fn
+              )
+              (#eq? @mod "re")
+              (#match? @fn "^(compile|match|search|findall|sub)$")
+            ) @regex"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-1333".to_string(), "CWE-400".to_string()],
+        owasp_categories: vec!["A05:2021 - Security Misconfiguration".to_string()],
+        tags: vec![
+            "redos".to_string(),
+            "regex".to_string(),
+            "dos".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Avoid user-controlled regex patterns. Consider using regex2 or google-re2."
+                .to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Mass assignment vulnerability (Django/Flask)
+pub fn python_mass_assignment_rule() -> Rule {
+    Rule {
+        id: "python-mass-assignment".to_string(),
+        name: "Mass Assignment Vulnerability".to_string(),
+        description: "Directly passing request data to model update allows privilege escalation"
+            .to_string(),
+        severity: Severity::High,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (attribute
+                attribute: (identifier) @fn
+              )
+              arguments: (argument_list
+                (dictionary_splat) @splat
+              )
+              (#match? @fn "^(update|create|filter|get_or_create)$")
+            ) @call"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-915".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "mass-assignment".to_string(),
+            "authorization".to_string(),
+            "python".to_string(),
+        ],
+        message: Some(
+            "Explicitly whitelist allowed fields instead of passing **kwargs.".to_string(),
+        ),
+        fix: None,
+    }
+}
+
+/// Open redirect vulnerability
+pub fn python_open_redirect_rule() -> Rule {
+    Rule {
+        id: "python-open-redirect".to_string(),
+        name: "Open Redirect".to_string(),
+        description: "Redirect without URL validation can lead to phishing".to_string(),
+        severity: Severity::Medium,
+        languages: vec![Language::Python],
+        pattern: Pattern::TreeSitterQuery(
+            r#"(call
+              function: (identifier) @fn
+              (#match? @fn "^(redirect|HttpResponseRedirect)$")
+            ) @redirect"#
+                .to_string(),
+        ),
+        options: RuleOptions::default(),
+        cwe_ids: vec!["CWE-601".to_string()],
+        owasp_categories: vec!["A01:2021 - Broken Access Control".to_string()],
+        tags: vec![
+            "redirect".to_string(),
+            "phishing".to_string(),
+            "python".to_string(),
+        ],
+        message: Some("Validate redirect URL against an allowlist of trusted domains.".to_string()),
+        fix: None,
+    }
+}
+
 /// Get all Python rules
 pub fn get_python_rules() -> Vec<Rule> {
     vec![
@@ -641,7 +1014,6 @@ pub fn get_python_rules() -> Vec<Rule> {
         // SSTI
         python_ssti_rule(),
         python_jinja_ssti_rule(),
-        // NOTE: Secret detection rules migrated to vulnera-secrets module
         // Cryptography
         python_weak_crypto_rule(),
         python_insecure_random_rule(),
@@ -658,5 +1030,17 @@ pub fn get_python_rules() -> Vec<Rule> {
         // JWT/XML
         python_jwt_no_verify_rule(),
         python_xxe_rule(),
+        // === NEW CATASTROPHIC RULES ===
+        python_ldap_injection_rule(),
+        python_timing_attack_rule(),
+        python_nosql_injection_rule(),
+        python_zipfile_path_traversal_rule(),
+        python_jinja_autoescape_disabled_rule(),
+        python_cors_wildcard_rule(),
+        python_subprocess_shell_true_rule(),
+        python_logging_sensitive_rule(),
+        python_regex_redos_rule(),
+        python_mass_assignment_rule(),
+        python_open_redirect_rule(),
     ]
 }
