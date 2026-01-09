@@ -52,8 +52,8 @@ use vulnera_deps::services::{
 };
 use vulnera_deps::types::VersionResolutionService;
 use vulnera_llm::{
-    EnrichFindingsUseCase, ExplainVulnerabilityUseCase, GeminiLlmProvider, GenerateCodeFixUseCase,
-    NaturalLanguageQueryUseCase,
+    EnrichFindingsUseCase, ExplainVulnerabilityUseCase, GenerateCodeFixUseCase,
+    NaturalLanguageQueryUseCase, ProviderRegistry,
 };
 
 use crate::auth::AuthServices;
@@ -138,7 +138,10 @@ pub async fn create_app(
     ));
 
     // 7. Initialize LLM Services
-    let llm_provider = Arc::new(GeminiLlmProvider::new(config.llm.clone()));
+    let llm_registry = ProviderRegistry::from_llm_config(&config.llm)
+        .map_err(|e| format!("Failed to initialize LLM provider: {}", e))?;
+    let llm_provider = llm_registry.default().ok_or("No LLM provider configured")?;
+
     let generate_code_fix_use_case = Arc::new(GenerateCodeFixUseCase::new(
         llm_provider.clone(),
         config.llm.clone(),

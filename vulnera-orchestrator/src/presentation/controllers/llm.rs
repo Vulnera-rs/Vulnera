@@ -8,7 +8,6 @@ use axum::{
 use futures::stream::{Stream, StreamExt};
 use std::collections::HashMap;
 use std::convert::Infallible;
-use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 use crate::presentation::auth::extractors::Auth;
@@ -102,16 +101,17 @@ pub async fn explain_vulnerability(
         .await;
 
     let stream = match stream_result {
-        Ok(rx) => ReceiverStream::new(rx)
-            .map(|result| -> Result<Event, Infallible> {
+        Ok(chunk_stream) => chunk_stream
+            .map(|result: Result<vulnera_llm::StreamChunk, vulnera_llm::LlmError>| -> Result<Event, Infallible> {
                 match result {
-                    Ok(response) => {
-                        // Extract content from streaming response - use content_str() to handle Option<String>
-                        let content = response
-                            .choices
-                            .first()
-                            .and_then(|c| c.delta.as_ref().or(c.message.as_ref()))
-                            .map(|m| m.content_str())
+                    Ok(chunk) => {
+                        // Extract text content from StreamChunk
+                        let content = chunk
+                            .delta
+                            .map(|block| match block {
+                                vulnera_llm::ContentBlock::Text { text } => text,
+                                _ => String::new(),
+                            })
                             .unwrap_or_default();
                         Ok(Event::default().data(content))
                     }

@@ -114,7 +114,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # This ensures sqlx-cli binary compiled in builder stage is compatible
 FROM debian:sid-slim
 
-
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    libpq5 \
+    pipx \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install semgrep via pipx with proper permissions for all users
 ENV PIPX_HOME=/opt/pipx
@@ -151,6 +158,42 @@ RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
 # Ensure PATH includes /usr/local/bin for any other subprocess calls
 ENV PATH="/usr/local/bin:/usr/bin:/bin"
+
+# ===========================================
+# Environment Variables (with defaults)
+# ===========================================
+
+# --- LLM Provider Configuration ---
+# Provider: google_ai, openai, azure
+ENV VULNERA__LLM__PROVIDER="google_ai"
+ENV VULNERA__LLM__DEFAULT_MODEL="gemini-flash-latest"
+ENV VULNERA__LLM__TEMPERATURE="0.3"
+ENV VULNERA__LLM__MAX_TOKENS="8192"
+ENV VULNERA__LLM__TIMEOUT_SECONDS="60"
+ENV VULNERA__LLM__ENABLE_STREAMING="true"
+
+# LLM Resilience (circuit breaker + retry)
+ENV VULNERA__LLM__RESILIENCE__ENABLED="true"
+ENV VULNERA__LLM__RESILIENCE__MAX_RETRIES="3"
+ENV VULNERA__LLM__RESILIENCE__INITIAL_BACKOFF_MS="500"
+ENV VULNERA__LLM__RESILIENCE__MAX_BACKOFF_MS="30000"
+ENV VULNERA__LLM__RESILIENCE__CIRCUIT_BREAKER_THRESHOLD="5"
+ENV VULNERA__LLM__RESILIENCE__CIRCUIT_BREAKER_TIMEOUT_SECS="60"
+
+# LLM Enrichment
+ENV VULNERA__LLM__ENRICHMENT__MAX_FINDINGS_TO_ENRICH="10"
+ENV VULNERA__LLM__ENRICHMENT__MAX_CONCURRENT_ENRICHMENTS="3"
+ENV VULNERA__LLM__ENRICHMENT__INCLUDE_CODE_CONTEXT="true"
+
+# --- Sandbox Configuration ---
+# Secure isolation for SAST/secrets modules
+ENV VULNERA__SANDBOX__ENABLED="true"
+ENV VULNERA__SANDBOX__BACKEND="process"
+ENV VULNERA__SANDBOX__EXECUTION_TIMEOUT_SECS="30"
+ENV VULNERA__SANDBOX__MEMORY_LIMIT_MB="256"
+
+# --- Server Configuration ---
+ENV VULNERA__SERVER__ADDRESS="0.0.0.0:3000"
 
 # Switch to app user
 USER vulnera

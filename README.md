@@ -137,15 +137,39 @@ cargo run
 
 ## ⚙️ Configuration
 
+Copy `.env.example` to `.env` and configure:
+
 ```bash
 # Required
 DATABASE_URL='postgresql://user:pass@localhost:5432/vulnera'
 VULNERA__AUTH__JWT_SECRET='minimum-32-character-secret-key'
 
-# Optional (recommended)
+# LLM Provider (AI features)
+VULNERA__LLM__PROVIDER='google_ai'  # or 'openai', 'azure'
+GOOGLE_AI_KEY='your-api-key'        # for Google AI
+# OPENAI_API_KEY='your-api-key'     # for OpenAI
+# AZURE_OPENAI_KEY='your-api-key'   # for Azure
+
+# Sandbox (secure module execution)
+VULNERA__SANDBOX__ENABLED=true
+VULNERA__SANDBOX__BACKEND='auto'    # landlock, process, or auto
+
+# Optional
 VULNERA__CACHE__DRAGONFLY_URL='redis://127.0.0.1:6379'
 VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=8
 ```
+
+**Supported LLM Providers:**
+
+- **Google AI** — Gemini models (`gemini-flash-latest`)
+- **OpenAI** — GPT models (`gpt-4.1`)
+- **Azure OpenAI** — Enterprise Azure deployments
+
+**Sandbox Backends:**
+
+- **Landlock** — Linux 5.13+ kernel-level isolation (near-zero overhead)
+- **Process** — Fork-based isolation (works on any Linux)
+- **Auto** — Tries Landlock, falls back to Process
 
 Config files: `config/development.toml`, `config/production.toml`
 

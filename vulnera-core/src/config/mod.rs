@@ -910,15 +910,26 @@ impl Default for DatabaseConfig {
     }
 }
 
-/// LLM configuration
+/// LLM configuration with multi-provider support
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    /// Gemini API URL
-    pub gemini_api_url: String,
-    /// Gemini API Key
-    pub gemini_api_key: Option<String>,
-    /// Default model to use (qwen3-32b or deepseek-v3.1)
+    /// Active provider: "google_ai", "openai", "azure"
+    pub provider: String,
+
+    /// Google AI (Gemini) configuration
+    #[serde(default)]
+    pub google_ai: GoogleAIConfig,
+
+    /// OpenAI configuration
+    #[serde(default)]
+    pub openai: OpenAIConfig,
+
+    /// Azure OpenAI configuration
+    #[serde(default)]
+    pub azure: AzureOpenAIConfig,
+
+    /// Default model to use (provider-specific)
     pub default_model: String,
     /// Model to use for explanations (overrides default)
     pub explanation_model: Option<String>,
@@ -934,6 +945,11 @@ pub struct LlmConfig {
     pub timeout_seconds: u64,
     /// Whether to enable streaming responses
     pub enable_streaming: bool,
+
+    /// Resilience configuration
+    #[serde(default)]
+    pub resilience: LlmResilienceConfig,
+
     /// Finding enrichment configuration
     #[serde(default)]
     pub enrichment: LlmEnrichmentConfig,
@@ -942,18 +958,117 @@ pub struct LlmConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            gemini_api_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
-                .to_string(),
-            gemini_api_key: None,
-            default_model: "deepseek-v3.1".to_string(),
-            explanation_model: Some("deepseek-v3.1".to_string()),
-            code_fix_model: Some("qwen3-32b".to_string()),
-            enrichment_model: Some("deepseek-v3.1".to_string()),
+            provider: "google_ai".to_string(),
+            google_ai: GoogleAIConfig::default(),
+            openai: OpenAIConfig::default(),
+            azure: AzureOpenAIConfig::default(),
+            default_model: "gemini-flash-latest".to_string(),
+            explanation_model: None,
+            code_fix_model: None,
+            enrichment_model: None,
             temperature: 0.3,
             max_tokens: 2048,
             timeout_seconds: 60,
             enable_streaming: true,
+            resilience: LlmResilienceConfig::default(),
             enrichment: LlmEnrichmentConfig::default(),
+        }
+    }
+}
+
+/// Google AI (Gemini) provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GoogleAIConfig {
+    /// API Key (can also use GOOGLE_AI_KEY env var)
+    pub api_key: Option<String>,
+    /// Base URL for the API
+    pub base_url: String,
+}
+
+impl Default for GoogleAIConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            base_url: "https://generativelanguage.googleapis.com/v1beta".to_string(),
+        }
+    }
+}
+
+/// OpenAI provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OpenAIConfig {
+    /// API Key (can also use OPENAI_API_KEY env var)
+    pub api_key: Option<String>,
+    /// Base URL for the API
+    pub base_url: String,
+    /// Organization ID (optional)
+    pub organization_id: Option<String>,
+}
+
+impl Default for OpenAIConfig {
+    fn default() -> Self {
+        Self {
+            api_key: None,
+            base_url: "https://api.openai.com/v1".to_string(),
+            organization_id: None,
+        }
+    }
+}
+
+/// Azure OpenAI provider configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AzureOpenAIConfig {
+    /// Azure resource endpoint
+    pub endpoint: String,
+    /// API Key (can also use AZURE_OPENAI_KEY env var)
+    pub api_key: Option<String>,
+    /// Deployment name
+    pub deployment: String,
+    /// API version
+    pub api_version: String,
+}
+
+impl Default for AzureOpenAIConfig {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            api_key: None,
+            deployment: String::new(),
+            api_version: "2024-02-15-preview".to_string(),
+        }
+    }
+}
+
+/// LLM resilience configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LlmResilienceConfig {
+    /// Enable resilience wrapper (circuit breaker + retry)
+    pub enabled: bool,
+    /// Maximum retry attempts
+    pub max_retries: u32,
+    /// Initial backoff delay in milliseconds
+    pub initial_backoff_ms: u64,
+    /// Maximum backoff delay in milliseconds
+    pub max_backoff_ms: u64,
+    /// Number of failures before circuit opens
+    pub circuit_breaker_threshold: u32,
+    /// Seconds before circuit attempts recovery
+    pub circuit_breaker_timeout_secs: u64,
+}
+
+impl Default for LlmResilienceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_retries: 3,
+            initial_backoff_ms: 500,
+            max_backoff_ms: 30_000,
+            circuit_breaker_threshold: 5,
+            circuit_breaker_timeout_secs: 60,
         }
     }
 }
