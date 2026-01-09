@@ -154,29 +154,25 @@ impl ExecuteAnalysisJobUseCase {
                 join_set.spawn(async move {
                     let module_start = std::time::Instant::now();
 
-                    // Build sandbox policy
-                    // Ensure a reasonable memory limit for sandboxed modules (at least 1GB)
-                    let effective_mem_limit = std::cmp::max(sandbox_mem_bytes, 1024 * 1024 * 1024);
+                    // Build sandbox policy with essential system paths for analysis
+                    // for_analysis() includes /usr, /lib, /proc, /etc/ssl, /tmp etc.
+                    let effective_mem_limit =
+                        std::cmp::max(sandbox_mem_bytes, 2 * 1024 * 1024 * 1024);
 
-                    let mut policy = SandboxPolicy::default()
+                    let mut policy = SandboxPolicy::for_analysis(&config.source_uri)
                         .with_timeout(sandbox_timeout)
                         .with_memory_limit(effective_mem_limit);
 
-                    // Add read-only access to source URI (if it's a file path)
-                    if std::path::Path::new(&config.source_uri).exists() {
-                        policy = policy.with_readonly_path(&config.source_uri);
-                    }
-
                     // Configure network access if enabled
                     if sandbox_config.allow_network {
-                        // Allow common ports for now if network is enabled
-                        policy.allowed_ports = vec![80, 443, 8080];
+                        // Add common HTTPS ports
+                        policy = policy.with_http_access();
 
                         // DependencyAnalyzer needs to connect to Dragonfly (Redis)
                         if module_type_clone
                             == vulnera_core::domain::module::ModuleType::DependencyAnalyzer
                         {
-                            policy.allowed_ports.push(6379);
+                            policy = policy.with_port(6379);
                         }
                     }
 

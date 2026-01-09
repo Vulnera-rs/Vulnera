@@ -131,9 +131,95 @@ impl SandboxPolicy {
         SandboxPolicyBuilder::new()
     }
 
+    /// Create a policy suitable for running analysis modules on Linux
+    ///
+    /// This policy includes essential system paths needed for Rust binaries:
+    /// - `/usr`, `/lib`, `/lib64` - shared libraries
+    /// - `/proc` - process information (needed by some libraries)
+    /// - `/etc/ssl`, `/etc/pki` - SSL certificates (for network modules)
+    /// - `/tmp` - temporary files (read-write)
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// let policy = SandboxPolicy::for_analysis("/path/to/scan")
+    ///     .with_timeout_secs(60);
+    /// ```
+    pub fn for_analysis(source_path: impl Into<PathBuf>) -> Self {
+        let mut policy = Self::default();
+
+        // Essential system paths for Rust binaries
+        let system_paths = [
+            "/usr",
+            "/lib",
+            "/lib64",
+            "/lib32",
+            "/proc",
+            "/etc/ssl",
+            "/etc/pki",
+            "/etc/ca-certificates",
+            "/etc/resolv.conf",
+            "/etc/hosts",
+            "/etc/nsswitch.conf",
+            "/etc/passwd", // getpwuid needs this
+            "/etc/group",
+        ];
+
+        for path in system_paths {
+            let p = PathBuf::from(path);
+            if p.exists() {
+                policy.readonly_paths.push(p);
+            }
+        }
+
+        // Add source path
+        policy.readonly_paths.push(source_path.into());
+
+        // Temp directory for scratch files (read-write)
+        policy.readwrite_paths.push(PathBuf::from("/tmp"));
+
+        // Reasonable defaults for analysis
+        policy.timeout = Duration::from_secs(120); // 2 minutes
+        policy.max_memory = 2 * 1024 * 1024 * 1024; // 2GB
+
+        policy
+    }
+
     /// Add a read-only path (chainable)
     pub fn with_readonly_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.readonly_paths.push(path.into());
+        self
+    }
+
+    /// Add a read-write path (chainable)
+    pub fn with_readwrite_path(mut self, path: impl Into<PathBuf>) -> Self {
+        self.readwrite_paths.push(path.into());
+        self
+    }
+
+    /// Add /tmp for temporary file access (chainable)
+    pub fn with_temp_access(mut self) -> Self {
+        let tmp = PathBuf::from("/tmp");
+        if !self.readwrite_paths.contains(&tmp) {
+            self.readwrite_paths.push(tmp);
+        }
+        self
+    }
+
+    /// Add network port access (chainable)
+    pub fn with_port(mut self, port: u16) -> Self {
+        if !self.allowed_ports.contains(&port) {
+            self.allowed_ports.push(port);
+        }
+        self
+    }
+
+    /// Add common HTTPS/HTTP ports (chainable)
+    pub fn with_http_access(mut self) -> Self {
+        for port in [80, 443, 8080, 8443] {
+            if !self.allowed_ports.contains(&port) {
+                self.allowed_ports.push(port);
+            }
+        }
         self
     }
 

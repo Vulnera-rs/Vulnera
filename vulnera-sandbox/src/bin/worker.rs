@@ -399,7 +399,7 @@ fn output_result(result: &WorkerResult) {
     }
 }
 
-/// Output error as JSON to stdout 
+/// Output error as JSON to stdout
 #[allow(dead_code)]
 fn output_error(message: &str) {
     output_error_with_code(message, WorkerErrorCode::Unknown);

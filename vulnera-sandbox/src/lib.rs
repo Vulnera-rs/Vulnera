@@ -3,6 +3,11 @@
 //! This crate provides a tiered sandboxing system for Vulnera analysis modules,
 //! protecting the orchestrator from malicious repository exploitation.
 //!
+//! # Default Behavior
+//!
+//! **By default, sandboxing is DISABLED (noop mode)** for maximum compatibility.
+//! Enable it explicitly in production after testing with your specific workloads.
+//!
 //! # Architecture
 //!
 //! The sandbox uses platform-specific backends with automatic fallback:
@@ -11,14 +16,13 @@
 //! |----------|-----------------|----------|
 //! | Linux 5.13+ | Landlock + seccomp | Process isolation |
 //! | Older Linux | Process isolation | - |
-//! | macOS | Process isolation | - |
-//! | Windows | WASM | - |
+//! | All platforms | NoOp (default) | - |
 //!
 //! # Performance
 //!
+//! - **NoOp**: Zero overhead (no restrictions applied)
 //! - **Landlock + seccomp**: <1µs overhead (kernel-native)
 //! - **Process isolation**: ~1-5ms per spawn
-//! - **WASM**: 15-30% overhead (IR translation)
 //!
 //! # Usage
 //!
@@ -30,7 +34,7 @@
 //!     .with_readonly_path("/path/to/scan")
 //!     .with_timeout_secs(30);
 //!
-//! // Auto-select best backend
+//! // Auto-select best backend (noop by default)
 //! let executor = SandboxExecutor::auto();
 //!
 //! // Execute module in sandbox
@@ -43,6 +47,7 @@ pub mod infrastructure;
 
 pub use application::executor::{SandboxExecutor, SandboxedExecutionError};
 pub use application::selector::SandboxSelector;
+pub use domain::limits::{ResourceLimits, calculate_limits};
 pub use domain::policy::{SandboxPolicy, SandboxPolicyBuilder};
 pub use domain::traits::{SandboxBackend, SandboxError, SandboxResult, SandboxStats};
 

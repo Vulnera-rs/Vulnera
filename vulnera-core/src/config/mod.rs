@@ -1127,29 +1127,46 @@ impl Default for AnalyticsConfig {
 }
 
 /// Sandbox configuration for module execution isolation
+///
+/// enabled with Landlock/seccomp on Linux 5.13+, provides kernel-level isolation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SandboxConfig {
-    /// Enable sandboxing for module execution (default: true, near-zero overhead with Landlock)
+    /// Enable sandboxing for module execution (default: false for compatibility)
+    ///
+    /// When enabled on Linux, uses Landlock + seccomp for kernel-level isolation.
+    /// Enable only after thorough testing with your specific workloads.
     pub enabled: bool,
-    /// Sandbox backend preference: "auto", "landlock", "process", "wasm"
+    /// Sandbox backend preference: "noop", "auto", "landlock", "process"
     pub backend: String,
-    /// Maximum execution time per module in milliseconds
+    /// Base timeout per module in milliseconds (dynamically adjusted based on source size)
     pub timeout_ms: u64,
-    /// Memory limit per module in bytes
+    /// Base memory limit per module in bytes (dynamically adjusted based on source size)
     pub max_memory_bytes: u64,
-    /// Allow network access for modules (not recommended)
+    /// Allow network access for modules (required for DependencyAnalyzer)
     pub allow_network: bool,
+    /// Enable dynamic limit calculation based on source size and module type
+    pub dynamic_limits: bool,
+    /// Additional timeout milliseconds per MB of source code
+    pub timeout_per_mb_ms: u64,
+    /// Memory multiplier per MB of source (e.g., 10.0 = 10x source size added to base)
+    pub memory_per_mb_ratio: f64,
+    /// Maximum memory cap in bytes (prevents runaway allocations)
+    pub max_memory_cap_bytes: u64,
 }
 
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            enabled: true, // Enabled by default (near-zero overhead with Landlock!)
-            backend: "auto".to_string(),
-            timeout_ms: 30_000,
-            max_memory_bytes: 1024 * 1024 * 1024, // 1GB
-            allow_network: false,
+            enabled: true,               // Enabled by default - for_analysis() provides safe paths
+            backend: "auto".to_string(), // Auto-select best backend (Landlock on Linux)
+            timeout_ms: 120_000,         // 2 minutes base timeout
+            max_memory_bytes: 2 * 1024 * 1024 * 1024, // 2GB base
+            allow_network: true,         // DependencyAnalyzer needs network
+            dynamic_limits: true,
+            timeout_per_mb_ms: 200,    // +200ms per MB of source
+            memory_per_mb_ratio: 10.0, // 10x source size for memory overhead
+            max_memory_cap_bytes: 8 * 1024 * 1024 * 1024, // 8GB cap
         }
     }
 }
