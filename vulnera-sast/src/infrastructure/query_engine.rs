@@ -273,6 +273,18 @@ impl TreeSitterQueryEngine {
         queries: &[(String, &str)], // (rule_id, query_str)
     ) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
         let (tree, _) = self.parse(source, language)?;
+        self.batch_query_with_tree(&tree, source, language, queries)
+    }
+
+    /// Execute multiple queries against a pre-parsed tree
+    #[instrument(skip(self, tree, source, queries), fields(source_len = source.len(), query_count = queries.len()))]
+    pub fn batch_query_with_tree(
+        &mut self,
+        tree: &Tree,
+        source: &str,
+        language: &Language,
+        queries: &[(String, &str)], // (rule_id, query_str)
+    ) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
         let mut results = HashMap::new();
 
         for (rule_id, query_str) in queries {
@@ -280,7 +292,7 @@ impl TreeSitterQueryEngine {
             // This allows language-specific queries to coexist without breaking the batch
             match self.compile_query(query_str, language) {
                 Ok(query) => {
-                    let matches = self.execute_query(&query, &tree, source.as_bytes());
+                    let matches = self.execute_query(&query, tree, source.as_bytes());
                     results.insert(rule_id.clone(), matches);
                 }
                 Err(e) => {
@@ -479,21 +491,22 @@ impl TreeSitterQueryEngine {
                 Ok(all_matches)
             }
             Pattern::AllOf(patterns) => {
-                // Intersection: only matches that appear in ALL sub-patterns
+                // Intersection: matches that appear in ALL positive sub-patterns,
+                // then filtered by any negative sub-patterns (pattern-not).
                 if patterns.is_empty() {
                     return Ok(Vec::new());
                 }
 
-                // Get matches from first pattern
-                let first_matches = self.match_pattern(&patterns[0], source, language, tree)?;
+                let (positives, negatives): (Vec<&Pattern>, Vec<&Pattern>) =
+                    patterns.iter().partition(|p| !matches!(p, Pattern::Not(_)));
 
-                if first_matches.is_empty() || patterns.len() == 1 {
-                    return Ok(first_matches);
+                if positives.is_empty() {
+                    return Ok(Vec::new());
                 }
 
-                // Filter to only matches that also appear in all other patterns
-                let mut result = first_matches;
-                for sub_pattern in patterns.iter().skip(1) {
+                let mut result = self.match_pattern(positives[0], source, language, tree)?;
+
+                for sub_pattern in positives.iter().skip(1) {
                     let other_matches = self.match_pattern(sub_pattern, source, language, tree)?;
 
                     // Keep only matches that overlap with other_matches
@@ -505,34 +518,30 @@ impl TreeSitterQueryEngine {
                     });
 
                     if result.is_empty() {
-                        break;
+                        return Ok(result);
+                    }
+                }
+
+                for sub_pattern in negatives {
+                    if let Pattern::Not(inner) = sub_pattern {
+                        let negative_matches = self.match_pattern(inner, source, language, tree)?;
+                        result.retain(|m| {
+                            !negative_matches
+                                .iter()
+                                .any(|o| m.start_byte < o.end_byte && o.start_byte < m.end_byte)
+                        });
+
+                        if result.is_empty() {
+                            break;
+                        }
                     }
                 }
 
                 Ok(result)
             }
-            Pattern::Not(inner_pattern) => {
-                // Not: used for filtering - this returns empty if pattern matches
-                // In practice, Not is used in AllOf to exclude matches
-                // e.g., AllOf([query, Not(false_positive_query)])
-                let inner_matches = self.match_pattern(inner_pattern, source, language, tree)?;
-
-                // For Not patterns, we return a single "match" at position 0 if the inner
-                // pattern has no matches (meaning the Not condition is satisfied)
-                if inner_matches.is_empty() {
-                    // Not pattern satisfied - return a synthetic match
-                    Ok(vec![QueryMatchResult {
-                        pattern_index: 0,
-                        captures: std::collections::HashMap::new(),
-                        start_byte: 0,
-                        end_byte: 0,
-                        start_position: (0, 0),
-                        end_position: (0, 0),
-                    }])
-                } else {
-                    // Not pattern failed - inner pattern matched
-                    Ok(Vec::new())
-                }
+            Pattern::Not(_inner_pattern) => {
+                // Not is only meaningful inside AllOf as a filter
+                Ok(Vec::new())
             }
         }
     }
@@ -848,6 +857,43 @@ os.system("rm -rf /")
 
         assert_eq!(results.get("eval-call").unwrap().len(), 1);
         assert_eq!(results.get("exec-call").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_batch_query_with_tree() {
+        let mut engine = TreeSitterQueryEngine::new();
+        let source = "result = eval(user_input)\n";
+        let (tree, _) = engine.parse(source, &Language::Python).unwrap();
+
+        let queries = vec![
+            ("eval-call".to_string(), common_queries::PYTHON_EVAL_CALL),
+            ("exec-call".to_string(), common_queries::PYTHON_EXEC_CALL),
+        ];
+
+        let results = engine
+            .batch_query_with_tree(&tree, source, &Language::Python, &queries)
+            .unwrap();
+
+        assert_eq!(results.get("eval-call").unwrap().len(), 1);
+        assert_eq!(results.get("exec-call").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_composite_pattern_allof_with_not_filters() {
+        let mut engine = TreeSitterQueryEngine::new();
+        let source = "foo(bar(x))";
+        let (tree, _) = engine.parse(source, &Language::Python).unwrap();
+
+        let pattern = Pattern::AllOf(vec![
+            Pattern::Metavariable("foo($X)".to_string()),
+            Pattern::Not(Box::new(Pattern::Metavariable("bar($X)".to_string()))),
+        ]);
+
+        let matches = engine
+            .match_pattern(&pattern, source, &Language::Python, &tree)
+            .unwrap();
+
+        assert_eq!(matches.len(), 0);
     }
 
     #[test]

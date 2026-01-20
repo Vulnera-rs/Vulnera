@@ -172,6 +172,10 @@ analysis_depth = "standard"      # quick | standard | deep
 enable_ast_cache = true          # Enable AST caching via Dragonfly
 ast_cache_ttl_hours = 4          # AST cache TTL in hours
 max_concurrent_files = 4         # Maximum concurrent file analysis
+dynamic_depth_enabled = true    # Auto-reduce depth for large repos
+dynamic_depth_file_count_threshold = 2000 # Downgrade depth if file count exceeds
+dynamic_depth_total_bytes_threshold = 50000000 # Downgrade depth if bytes exceed (50MB)
+tree_cache_max_entries = 1024    # Max parsed trees cached per worker
 
 
 # Cache TTL for popular package vulnerability listings (in hours)

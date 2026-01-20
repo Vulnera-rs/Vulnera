@@ -29,6 +29,11 @@ impl CacheServiceImpl {
         Self { cache_repository }
     }
 
+    /// Expose the underlying Dragonfly cache handle for downstream services
+    pub fn dragonfly_cache(&self) -> Arc<DragonflyCache> {
+        Arc::clone(&self.cache_repository)
+    }
+
     /// Generate cache key for package vulnerabilities
     /// Optimized with capacity hint to avoid reallocations
     pub fn package_vulnerabilities_key(package: &Package) -> String {

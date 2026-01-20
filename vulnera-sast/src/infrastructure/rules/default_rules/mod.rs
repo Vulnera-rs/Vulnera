@@ -15,13 +15,12 @@
 //!
 //! ## Usage
 //!
-//! ```rust
-//! use vulnera_sast::infrastructure::rules::default_rules::get_default_rules;
-//!
-//! let rules = get_default_rules();
-//! println!("Loaded {} rules", rules.len());
-//! ```
-
+/// ```rust
+/// use vulnera_sast::infrastructure::rules::get_default_rules;
+///
+/// let rules = get_default_rules();
+/// println!("Loaded {} rules", rules.len());
+/// ```
 mod c_cpp;
 mod common;
 mod go;
@@ -61,6 +60,8 @@ pub use typescript::get_typescript_rules;
 /// # Example
 ///
 /// ```rust
+/// use vulnera_sast::infrastructure::rules::get_default_rules;
+///
 /// let rules = get_default_rules();
 /// for rule in &rules {
 ///     println!("{}: {}", rule.id, rule.name);
