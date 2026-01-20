@@ -99,6 +99,49 @@ impl RuleEngine {
         results
     }
 
+    /// Execute multiple tree-sitter rules against a pre-parsed tree
+    ///
+    /// Useful for reusing ASTs across multiple phases.
+    pub async fn execute_tree_sitter_rules_with_tree(
+        &self,
+        rules: &[&Rule],
+        language: &Language,
+        source_code: &str,
+        tree: &tree_sitter::Tree,
+    ) -> Vec<(String, Vec<QueryMatchResult>)> {
+        let mut results = Vec::with_capacity(rules.len());
+        let mut engine = self.query_engine.write().await;
+
+        // Collect queries for batch execution
+        let queries: Vec<(String, &str)> = rules
+            .iter()
+            .filter_map(|rule| match &rule.pattern {
+                Pattern::TreeSitterQuery(query) => Some((rule.id.clone(), query.as_str())),
+                _ => None,
+            })
+            .collect();
+
+        if queries.is_empty() {
+            return results;
+        }
+
+        // Execute batch query against provided tree
+        match engine.batch_query_with_tree(tree, source_code, language, &queries) {
+            Ok(batch_results) => {
+                for (rule_id, matches) in batch_results {
+                    if !matches.is_empty() {
+                        results.push((rule_id, matches));
+                    }
+                }
+            }
+            Err(e) => {
+                debug!(error = %e, "Batch tree-sitter query execution failed");
+            }
+        }
+
+        results
+    }
+
     /// Get the query engine for direct access (advanced usage)
     pub fn query_engine(&self) -> Arc<RwLock<TreeSitterQueryEngine>> {
         Arc::clone(&self.query_engine)

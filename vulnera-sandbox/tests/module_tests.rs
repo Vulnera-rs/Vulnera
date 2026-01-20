@@ -4,12 +4,10 @@
 //! within the sandbox environment (with noop backend by default).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-
 use vulnera_api::module::ApiSecurityModule;
 use vulnera_core::config::{ApiSecurityConfig, SandboxConfig, SastConfig, SecretDetectionConfig};
 use vulnera_core::domain::module::{AnalysisModule, ModuleConfig, ModuleType};
-use vulnera_sandbox::{SandboxExecutor, SandboxPolicy, SandboxSelector, calculate_limits};
+use vulnera_sandbox::{SandboxExecutor, SandboxSelector, calculate_limits};
 use vulnera_sast::module::SastModule;
 use vulnera_secrets::module::SecretDetectionModule;
 

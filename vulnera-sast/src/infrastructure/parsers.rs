@@ -3,7 +3,7 @@
 use crate::domain::value_objects::Language;
 use tracing::{debug, error, instrument, warn};
 
-/// AST node (simplified representation)
+/// AST node
 #[derive(Debug, Clone)]
 pub struct AstNode {
     pub node_type: String,
@@ -361,8 +361,14 @@ impl Parser for CppParser {
     }
 }
 
+/// Build an AST from an existing tree-sitter tree
+pub(crate) fn ast_from_tree(tree: &tree_sitter::Tree, source: &str) -> AstNode {
+    let root_node = tree.root_node();
+    convert_tree_sitter_node(root_node, source, None)
+}
+
 /// Convert tree-sitter node to our AST representation
-fn convert_tree_sitter_node(
+pub(crate) fn convert_tree_sitter_node(
     node: tree_sitter::Node,
     source: &str,
     field_name: Option<String>,
