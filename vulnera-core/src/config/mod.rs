@@ -627,6 +627,14 @@ pub struct SastConfig {
     pub enable_call_graph: bool,
     /// Analysis depth: quick, standard, or deep
     pub analysis_depth: AnalysisDepth,
+    /// Enable dynamic depth selection based on repository size (default: false)
+    pub dynamic_depth_enabled: Option<bool>,
+    /// File count threshold to reduce depth (None = disabled)
+    pub dynamic_depth_file_count_threshold: Option<usize>,
+    /// Total bytes threshold to reduce depth (None = disabled)
+    pub dynamic_depth_total_bytes_threshold: Option<u64>,
+    /// Maximum number of cached parsed trees per scan
+    pub tree_cache_max_entries: Option<usize>,
     /// Enable AST caching via Dragonfly (default: true)
     pub enable_ast_cache: Option<bool>,
     /// AST cache TTL in hours (default: 4)
@@ -678,6 +686,10 @@ impl Default for SastConfig {
             enable_data_flow: true,
             enable_call_graph: true,
             analysis_depth: AnalysisDepth::Standard,
+            dynamic_depth_enabled: Some(false),
+            dynamic_depth_file_count_threshold: None,
+            dynamic_depth_total_bytes_threshold: None,
+            tree_cache_max_entries: Some(1024),
             enable_ast_cache: Some(true),
             ast_cache_ttl_hours: Some(4),
             max_concurrent_files: Some(4),

@@ -7,9 +7,11 @@
 //! - PostgreSQL rule storage with hot-reload
 //! - SARIF v2.1.0 export
 
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock as StdRwLock};
+use std::time::{Duration, Instant};
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
@@ -24,6 +26,7 @@ use crate::domain::value_objects::{AnalysisEngine, Language};
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch, TaintQueryEngine};
+use crate::infrastructure::parsers::ast_from_tree;
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 use crate::infrastructure::rules::{
     PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
@@ -89,6 +92,14 @@ pub struct AnalysisConfig {
     pub enable_call_graph: bool,
     /// Analysis depth: Quick, Standard, or Deep
     pub analysis_depth: AnalysisDepth,
+    /// Enable dynamic depth selection based on repository size
+    pub dynamic_depth_enabled: bool,
+    /// File count threshold to reduce depth (None = disabled)
+    pub dynamic_depth_file_count_threshold: Option<usize>,
+    /// Total bytes threshold to reduce depth (None = disabled)
+    pub dynamic_depth_total_bytes_threshold: Option<u64>,
+    /// Maximum number of cached parsed trees per scan
+    pub tree_cache_max_entries: usize,
     /// Maximum file size to analyze in bytes (files larger are skipped)
     pub max_file_size_bytes: u64,
     /// Per-file analysis timeout in seconds
@@ -110,6 +121,10 @@ impl Default for AnalysisConfig {
             enable_data_flow: true,
             enable_call_graph: true,
             analysis_depth: AnalysisDepth::Standard,
+            dynamic_depth_enabled: false,
+            dynamic_depth_file_count_threshold: None,
+            dynamic_depth_total_bytes_threshold: None,
+            tree_cache_max_entries: 1024,
             max_file_size_bytes: 1_048_576, // 1MB
             per_file_timeout_seconds: 30,
             scan_timeout_seconds: None,
@@ -128,6 +143,10 @@ impl From<&SastConfig> for AnalysisConfig {
             enable_data_flow: config.enable_data_flow,
             enable_call_graph: config.enable_call_graph,
             analysis_depth: config.analysis_depth,
+            dynamic_depth_enabled: config.dynamic_depth_enabled.unwrap_or(false),
+            dynamic_depth_file_count_threshold: config.dynamic_depth_file_count_threshold,
+            dynamic_depth_total_bytes_threshold: config.dynamic_depth_total_bytes_threshold,
+            tree_cache_max_entries: config.tree_cache_max_entries.unwrap_or(1024),
             max_file_size_bytes: config.max_file_size_bytes.unwrap_or(1_048_576),
             per_file_timeout_seconds: config.per_file_timeout_seconds.unwrap_or(30),
             scan_timeout_seconds: config.scan_timeout_seconds,
@@ -135,6 +154,23 @@ impl From<&SastConfig> for AnalysisConfig {
             max_total_findings: config.max_total_findings,
         }
     }
+}
+
+/// In-memory parsed tree cache entry for long-lived workers
+struct ParsedTreeCacheEntry {
+    content_hash: String,
+    tree: tree_sitter::Tree,
+    source: String,
+    last_access: Instant,
+}
+
+/// AST cache statistics for observability
+#[derive(Debug, Default, Clone)]
+struct AstCacheStats {
+    l1_hits: u64,
+    l1_misses: u64,
+    l2_hits: u64,
+    l2_misses: u64,
 }
 
 /// Production-ready use case for scanning a project
@@ -150,6 +186,8 @@ pub struct ScanProjectUseCase {
     call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
     /// Taint query engine for AST-aware taint detection (uses std::sync::RwLock internally)
     taint_query_engine: Arc<StdRwLock<TaintQueryEngine>>,
+    /// In-memory parsed tree cache for long-lived workers
+    parsed_tree_cache: StdRwLock<HashMap<String, ParsedTreeCacheEntry>>,
     /// Analysis configuration
     config: AnalysisConfig,
 }
@@ -177,6 +215,7 @@ impl ScanProjectUseCase {
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
             taint_query_engine: Arc::new(StdRwLock::new(TaintQueryEngine::new_owned())),
+            parsed_tree_cache: StdRwLock::new(HashMap::new()),
             config: analysis_config,
         }
     }
@@ -207,6 +246,109 @@ impl ScanProjectUseCase {
         self
     }
 
+    fn update_l2_cache_stats(stats: &mut AstCacheStats, hit: bool) {
+        if hit {
+            stats.l2_hits = stats.l2_hits.saturating_add(1);
+        } else {
+            stats.l2_misses = stats.l2_misses.saturating_add(1);
+        }
+    }
+
+    async fn refresh_l2_cache_entry(
+        &self,
+        content_hash: &str,
+        language: &Language,
+        tree: &tree_sitter::Tree,
+        source: &str,
+    ) {
+        let Some(cache) = self.ast_cache.as_ref() else {
+            return;
+        };
+
+        let ast = ast_from_tree(tree, source);
+        let ttl = Duration::from_secs(self.config.ast_cache_ttl_hours * 3600);
+
+        if let Err(e) = cache.set(content_hash, language, &ast, Some(ttl)).await {
+            warn!(error = %e, "Failed to refresh L2 AST cache entry");
+        }
+    }
+
+    fn compute_content_hash(&self, content: &str) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(content.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
+    fn get_cached_tree(
+        &self,
+        file_path: &str,
+        content: &str,
+    ) -> Option<(tree_sitter::Tree, String)> {
+        let content_hash = self.compute_content_hash(content);
+        let mut cache = self.parsed_tree_cache.write().unwrap();
+
+        if let Some(entry) = cache.get_mut(file_path) {
+            if entry.content_hash == content_hash {
+                entry.last_access = Instant::now();
+                return Some((entry.tree.clone(), entry.source.clone()));
+            }
+        }
+
+        None
+    }
+
+    fn insert_cached_tree(&self, file_path: String, content: &str, tree: tree_sitter::Tree) {
+        let content_hash = self.compute_content_hash(content);
+        let mut cache = self.parsed_tree_cache.write().unwrap();
+
+        if cache.len() >= self.config.tree_cache_max_entries {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_access)
+                .map(|(key, _)| key.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
+
+        cache.insert(
+            file_path,
+            ParsedTreeCacheEntry {
+                content_hash,
+                tree,
+                source: content.to_string(),
+                last_access: Instant::now(),
+            },
+        );
+    }
+
+    fn resolve_analysis_depth(&self, file_count: usize, total_bytes: u64) -> AnalysisDepth {
+        if !self.config.dynamic_depth_enabled {
+            return self.config.analysis_depth;
+        }
+
+        let exceeds_file = self
+            .config
+            .dynamic_depth_file_count_threshold
+            .map(|t| file_count >= t)
+            .unwrap_or(false);
+        let exceeds_bytes = self
+            .config
+            .dynamic_depth_total_bytes_threshold
+            .map(|t| total_bytes >= t)
+            .unwrap_or(false);
+
+        if exceeds_file || exceeds_bytes {
+            match self.config.analysis_depth {
+                AnalysisDepth::Deep => AnalysisDepth::Standard,
+                AnalysisDepth::Standard => AnalysisDepth::Quick,
+                AnalysisDepth::Quick => AnalysisDepth::Quick,
+            }
+        } else {
+            self.config.analysis_depth
+        }
+    }
+
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
         let start_time = std::time::Instant::now();
@@ -218,13 +360,25 @@ impl ScanProjectUseCase {
         })?;
 
         let file_count = files.len();
-        info!(file_count, analysis_depth = ?self.config.analysis_depth, "Found files to scan");
+        let total_bytes: u64 = files
+            .iter()
+            .filter_map(|file| std::fs::metadata(&file.path).ok().map(|meta| meta.len()))
+            .sum();
+        let effective_depth = self.resolve_analysis_depth(file_count, total_bytes);
+        info!(
+            file_count,
+            total_bytes,
+            configured_depth = ?self.config.analysis_depth,
+            effective_depth = ?effective_depth,
+            "Found files to scan"
+        );
 
         let mut all_findings = Vec::new();
         let mut files_scanned = 0;
         let mut files_skipped = 0;
         let mut files_failed = 0;
         let mut errors: Vec<String> = Vec::new();
+        let mut ast_cache_stats = AstCacheStats::default();
 
         let rules = self.rule_repository.read().await;
         let all_rules = rules.get_all_rules();
@@ -237,7 +391,7 @@ impl ScanProjectUseCase {
 
         let mut parsed_files: HashMap<String, (tree_sitter::Tree, String)> = HashMap::new();
 
-        if self.config.enable_call_graph && self.config.analysis_depth != AnalysisDepth::Quick {
+        if self.config.enable_call_graph && effective_depth != AnalysisDepth::Quick {
             debug!("Phase 1: Building call graph with cross-file resolution");
             let mut call_graph = self.call_graph_builder.write().await;
             let mut query_engine = TreeSitterQueryEngine::new();
@@ -247,17 +401,34 @@ impl ScanProjectUseCase {
                 if let Ok(content) = std::fs::read_to_string(&file.path) {
                     let file_path_str = file.path.display().to_string();
 
-                    if let Ok((tree, _)) = query_engine.parse(&content, &file.language) {
-                        // Build call graph nodes and edges
-                        call_graph.analyze_ast(
-                            &file_path_str,
-                            &tree,
-                            &file.language,
+                    let tree = if let Some((cached_tree, _)) =
+                        self.get_cached_tree(&file_path_str, &content)
+                    {
+                        cached_tree
+                    } else {
+                        let Ok((parsed_tree, _)) = query_engine.parse(&content, &file.language)
+                        else {
+                            continue;
+                        };
+                        self.insert_cached_tree(
+                            file_path_str.clone(),
                             &content,
-                            &mut query_engine,
+                            parsed_tree.clone(),
                         );
+                        parsed_tree
+                    };
 
-                        // Cache the parsed tree for reuse in analysis phase
+                    // Build call graph nodes and edges
+                    call_graph.analyze_ast(
+                        &file_path_str,
+                        &tree,
+                        &file.language,
+                        &content,
+                        &mut query_engine,
+                    );
+
+                    // Cache the parsed tree for reuse in analysis phase
+                    if parsed_files.len() < self.config.tree_cache_max_entries {
                         parsed_files.insert(file_path_str, (tree, content));
                     }
                 }
@@ -313,6 +484,47 @@ impl ScanProjectUseCase {
                 }
             };
 
+            let file_path_str = file.path.display().to_string();
+            let content_hash = self.compute_content_hash(&content);
+            let mut cached_tree = parsed_files
+                .get(&file_path_str)
+                .map(|(tree, _)| tree.clone())
+                .or_else(|| {
+                    self.get_cached_tree(&file_path_str, &content)
+                        .map(|(tree, _)| tree)
+                });
+
+            if cached_tree.is_some() {
+                ast_cache_stats.l1_hits = ast_cache_stats.l1_hits.saturating_add(1);
+            } else {
+                ast_cache_stats.l1_misses = ast_cache_stats.l1_misses.saturating_add(1);
+            }
+
+            if cached_tree.is_none() {
+                if let Some(cache) = self.ast_cache.as_ref() {
+                    match cache.get(&content_hash, &file.language).await {
+                        Ok(Some(_)) => Self::update_l2_cache_stats(&mut ast_cache_stats, true),
+                        Ok(None) => Self::update_l2_cache_stats(&mut ast_cache_stats, false),
+                        Err(e) => {
+                            warn!(error = %e, "Failed to read L2 AST cache");
+                        }
+                    }
+                }
+
+                let query_engine = TreeSitterQueryEngine::new();
+                if let Ok((parsed_tree, _)) = query_engine.parse(&content, &file.language) {
+                    self.insert_cached_tree(file_path_str.clone(), &content, parsed_tree.clone());
+                    self.refresh_l2_cache_entry(
+                        &content_hash,
+                        &file.language,
+                        &parsed_tree,
+                        &content,
+                    )
+                    .await;
+                    cached_tree = Some(parsed_tree);
+                }
+            }
+
             let suppressions = FileSuppressions::parse(&content);
             let is_test_context = Self::is_test_file(&file.path, &content);
 
@@ -337,6 +549,7 @@ impl ScanProjectUseCase {
                     &applicable_rules,
                     &suppressions,
                     is_test_context,
+                    cached_tree.as_ref(),
                     &mut all_findings,
                 )
                 .await
@@ -350,11 +563,12 @@ impl ScanProjectUseCase {
             }
 
             // Phase 3: Data flow analysis
-            if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
+            if self.config.enable_data_flow && effective_depth != AnalysisDepth::Quick {
                 self.execute_data_flow_analysis(
                     &file.path,
                     &file.language,
                     &content,
+                    cached_tree.as_ref(),
                     &mut all_findings,
                 )
                 .await;
@@ -386,13 +600,20 @@ impl ScanProjectUseCase {
         }
 
         // Phase 4: Adjust severity for data-flow confirmed findings
-        if self.config.enable_data_flow && self.config.analysis_depth != AnalysisDepth::Quick {
+        if self.config.enable_data_flow && effective_depth != AnalysisDepth::Quick {
             Self::adjust_severity_for_data_flow(&mut all_findings);
         }
 
         all_findings = Self::deduplicate_findings(all_findings);
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
+        info!(
+            l1_hits = ast_cache_stats.l1_hits,
+            l1_misses = ast_cache_stats.l1_misses,
+            l2_hits = ast_cache_stats.l2_hits,
+            l2_misses = ast_cache_stats.l2_misses,
+            "SAST AST cache stats"
+        );
         info!(
             finding_count = all_findings.len(),
             files_scanned, files_skipped, files_failed, duration_ms, "SAST scan completed"
@@ -417,6 +638,7 @@ impl ScanProjectUseCase {
         rules: &[&Rule],
         suppressions: &FileSuppressions,
         is_test_context: bool,
+        tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
         // Filter to tree-sitter query rules
@@ -436,10 +658,15 @@ impl ScanProjectUseCase {
             "Executing tree-sitter rules"
         );
 
-        let results = self
-            .rule_engine
-            .execute_tree_sitter_rules(&ts_rules, language, content)
-            .await;
+        let results = if let Some(tree) = tree {
+            self.rule_engine
+                .execute_tree_sitter_rules_with_tree(&ts_rules, language, content, tree)
+                .await
+        } else {
+            self.rule_engine
+                .execute_tree_sitter_rules(&ts_rules, language, content)
+                .await
+        };
 
         let query_engine = self.rule_engine.query_engine();
         let engine = query_engine.read().await;
@@ -481,6 +708,7 @@ impl ScanProjectUseCase {
         file_path: &Path,
         language: &Language,
         content: &str,
+        tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) {
         // Skip if data flow is disabled
@@ -491,17 +719,22 @@ impl ScanProjectUseCase {
         debug!(file = %file_path.display(), "Running data flow analysis");
 
         // Parse the file with tree-sitter (outside of any lock)
-        let query_engine = TreeSitterQueryEngine::new();
-        let (tree, _) = match query_engine.parse(content, language) {
-            Ok(t) => t,
-            Err(e) => {
-                warn!(
-                    file = %file_path.display(),
-                    error = %e,
-                    "Failed to parse file for data flow analysis"
-                );
-                return;
-            }
+        let tree = if let Some(tree) = tree {
+            tree.clone()
+        } else {
+            let query_engine = TreeSitterQueryEngine::new();
+            let (parsed_tree, _) = match query_engine.parse(content, language) {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!(
+                        file = %file_path.display(),
+                        error = %e,
+                        "Failed to parse file for data flow analysis"
+                    );
+                    return;
+                }
+            };
+            parsed_tree
         };
 
         let source_bytes = content.as_bytes();
@@ -1070,5 +1303,77 @@ impl ScanError {
         Self::ResourceLimit {
             message: message.into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AnalysisConfig, ScanProjectUseCase};
+    use vulnera_core::config::{AnalysisDepth, SastConfig};
+
+    fn build_use_case(mut config: AnalysisConfig) -> ScanProjectUseCase {
+        config.enable_call_graph = false;
+        config.enable_data_flow = false;
+        ScanProjectUseCase::with_config(&SastConfig::default(), config)
+    }
+
+    #[test]
+    fn test_dynamic_depth_disabled_returns_configured() {
+        let config = AnalysisConfig {
+            analysis_depth: AnalysisDepth::Deep,
+            dynamic_depth_enabled: false,
+            dynamic_depth_file_count_threshold: Some(10),
+            dynamic_depth_total_bytes_threshold: Some(100),
+            ..AnalysisConfig::default()
+        };
+
+        let use_case = build_use_case(config);
+        let depth = use_case.resolve_analysis_depth(10, 100);
+        assert_eq!(depth, AnalysisDepth::Deep);
+    }
+
+    #[test]
+    fn test_dynamic_depth_file_threshold_downgrades() {
+        let config = AnalysisConfig {
+            analysis_depth: AnalysisDepth::Deep,
+            dynamic_depth_enabled: true,
+            dynamic_depth_file_count_threshold: Some(10),
+            dynamic_depth_total_bytes_threshold: None,
+            ..AnalysisConfig::default()
+        };
+
+        let use_case = build_use_case(config);
+        let depth = use_case.resolve_analysis_depth(10, 0);
+        assert_eq!(depth, AnalysisDepth::Standard);
+    }
+
+    #[test]
+    fn test_dynamic_depth_bytes_threshold_downgrades() {
+        let config = AnalysisConfig {
+            analysis_depth: AnalysisDepth::Standard,
+            dynamic_depth_enabled: true,
+            dynamic_depth_file_count_threshold: None,
+            dynamic_depth_total_bytes_threshold: Some(100),
+            ..AnalysisConfig::default()
+        };
+
+        let use_case = build_use_case(config);
+        let depth = use_case.resolve_analysis_depth(0, 100);
+        assert_eq!(depth, AnalysisDepth::Quick);
+    }
+
+    #[test]
+    fn test_dynamic_depth_no_threshold_exceeded_keeps_depth() {
+        let config = AnalysisConfig {
+            analysis_depth: AnalysisDepth::Standard,
+            dynamic_depth_enabled: true,
+            dynamic_depth_file_count_threshold: Some(100),
+            dynamic_depth_total_bytes_threshold: Some(10_000),
+            ..AnalysisConfig::default()
+        };
+
+        let use_case = build_use_case(config);
+        let depth = use_case.resolve_analysis_depth(10, 100);
+        assert_eq!(depth, AnalysisDepth::Standard);
     }
 }
