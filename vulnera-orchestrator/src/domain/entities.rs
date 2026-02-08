@@ -10,7 +10,7 @@ use vulnera_core::domain::module::{Finding, ModuleResult};
 use vulnera_core::domain::organization::value_objects::OrganizationId;
 pub use vulnera_core::domain::project::{Project, ProjectMetadata};
 
-use super::value_objects::{AnalysisDepth, JobStatus};
+use super::value_objects::{AnalysisDepth, JobStatus, JobTransition, JobTransitionError};
 
 /// How the job request was authenticated
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -46,6 +46,9 @@ pub struct AnalysisJob {
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub error: Option<String>,
+    /// Ordered history of state transitions (audit trail).
+    #[serde(default)]
+    pub transitions: Vec<JobTransition>,
 }
 
 impl AnalysisJob {
@@ -64,7 +67,48 @@ impl AnalysisJob {
             started_at: None,
             completed_at: None,
             error: None,
+            transitions: Vec::new(),
         }
+    }
+
+    /// Attempt a validated state transition.
+    ///
+    /// Returns `Ok(())` if the transition is valid, recording the change in
+    /// the audit trail. Returns `Err` if the transition violates the state machine.
+    pub fn transition(
+        &mut self,
+        to: JobStatus,
+        reason: Option<String>,
+    ) -> Result<(), JobTransitionError> {
+        if !self.status.can_transition_to(&to) {
+            return Err(JobTransitionError {
+                from: self.status.clone(),
+                to,
+            });
+        }
+
+        let now = Utc::now();
+
+        self.transitions.push(JobTransition {
+            from: self.status.clone(),
+            to: to.clone(),
+            timestamp: now,
+            reason,
+        });
+
+        // Update lifecycle timestamps based on target state
+        match &to {
+            JobStatus::Running => {
+                self.started_at = Some(now);
+            }
+            JobStatus::Completed | JobStatus::Failed | JobStatus::Cancelled => {
+                self.completed_at = Some(now);
+            }
+            _ => {}
+        }
+
+        self.status = to;
+        Ok(())
     }
 }
 

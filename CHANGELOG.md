@@ -3,6 +3,38 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.4.1] - 2026-02-08
+
+### Added
+
+- **Orchestrator Workflow & State Machine:**
+  - Implemented a formal `JobStatus` state machine (`Pending` → `Queued` → `Running` → `Completed`/`Failed`/`Cancelled`).
+  - Centralized job lifecycle management in a new `JobWorkflow` application service.
+  - Added transition validation and a rich audit trail (`JobTransition`) persisted in snapshots.
+  - Introduced `IJobQueue` domain service trait for decoupled orchestration.
+- **Enterprise & Open Source Readiness:**
+  - Added `ModuleTier` (Community/Enterprise) to support the open-source model.
+  - Implemented `EnterpriseConfig` and entitlement-based module selection in `RuleBasedModuleSelector`.
+  - Added `CLA.md`, `SECURITY.md`, `SUPPORT.md`, and updated `CONTRIBUTING.md` for community engagement.
+  - Updated Github funding configuration (`FUNDING.yml`).
+- **LLM-Powered Remediation & Analysis:**
+  - Added automated code fix generation endpoint with language detection and contextual awareness.
+  - Enhanced binary analysis with MIME type detection and file signature verification.
+  - Integrated dynamic resilience wrapping in LLM provider registry.
+- **Resilient Orchestration:**
+  - Decoupled `ExecuteAnalysisJobUseCase` from job state mutation (now uses immutable references).
+  - Improved job queue worker reliability with workflow-mediated state transitions.
+  - Enhanced telemetry with cache hit tracking in orchestrator controllers.
+
+### Fixed
+
+- **CLI Decoupling:**
+  - Successfully decoupled `vulnera-cli` into a separate repository/workspace.
+  - Replaced internal dependency references with Git-based workspace overrides.
+- **Cache Management:**
+  - Fixed borrow checker issues in orchestrator controllers during analytics aggregation.
+  - Standardized snapshot persistence during job lifecycle transitions.
+
 ## [0.4.0] - 2026-01-06
 
 ### Added

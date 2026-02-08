@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,10 +12,10 @@ use vulnera_core::domain::organization::value_objects::StatsSubject;
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
+use crate::application::workflow::{JobWorkflow, WorkflowError};
 use crate::domain::entities::{AnalysisJob, JobInvocationContext, Project};
-use crate::domain::value_objects::JobStatus;
 use crate::infrastructure::git::GitService;
-use crate::infrastructure::job_store::{JobSnapshot, JobStore, JobStoreError};
+use crate::infrastructure::job_store::JobStore;
 
 const JOB_QUEUE_KEY: &str = "vulnera:orchestrator:job_queue";
 
@@ -108,6 +107,7 @@ pub enum JobQueueError {
 pub struct JobWorkerContext {
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
+    pub workflow: Arc<JobWorkflow>,
     pub job_store: Arc<dyn JobStore>,
     pub git_service: Arc<GitService>,
     pub cache_service: Arc<CacheServiceImpl>,
@@ -175,23 +175,21 @@ async fn process_job(
     info!(job_id = %job_id, "Processing analysis job");
 
     // Determine analytics subject from invocation context
-    let analytics_subject = payload.invocation_context.as_ref().and_then(|ctx| {
-        // Skip analytics for master key authentication
-        if ctx.is_master_key {
+    let analytics_subject = payload.invocation_context.as_ref().and_then(|inv| {
+        if inv.is_master_key {
             return None;
         }
-        // Prefer organization_id if present, otherwise use user_id for personal stats
-        if let Some(org_id) = ctx.organization_id {
+        if let Some(org_id) = inv.organization_id {
             Some(StatsSubject::Organization(org_id))
         } else {
-            ctx.user_id.map(StatsSubject::User)
+            inv.user_id.map(StatsSubject::User)
         }
     });
 
     let user_id = payload
         .invocation_context
         .as_ref()
-        .and_then(|ctx| ctx.user_id);
+        .and_then(|inv| inv.user_id);
 
     // Record scan started event (if we have analytics context)
     if let Some(ref subject) = analytics_subject {
@@ -204,10 +202,21 @@ async fn process_job(
         }
     }
 
-    // Execute modules via orchestrator use case
+    // ── Workflow: Pending → Running ──────────────────────────────────
+    if let Err(e) = ctx.workflow.start_job(
+        &mut payload.job,
+        &payload.project,
+        payload.callback_url.clone(),
+        payload.invocation_context.clone(),
+    ).await {
+        error!(job_id = %job_id, error = %e, "Failed to transition job to Running");
+        return Err(JobProcessingError::Workflow(e));
+    }
+
+    // ── Execute modules (pure computation, no status mutation) ───────
     match ctx
         .execute_job_use_case
-        .execute(&mut payload.job, &payload.project)
+        .execute(&payload.job, &payload.project)
         .await
     {
         Ok(module_results) => {
@@ -215,27 +224,18 @@ async fn process_job(
                 .aggregate_results_use_case
                 .execute(&payload.job, module_results.clone());
 
-            persist_snapshot(
-                &ctx,
-                JobSnapshot {
-                    job_id,
-                    project_id: payload.job.project_id.clone(),
-                    status: payload.job.status.clone(),
-                    module_results,
-                    project_metadata: payload.project.metadata.clone(),
-                    created_at: payload.job.created_at.to_rfc3339(),
-                    started_at: payload.job.started_at.map(|t| t.to_rfc3339()),
-                    completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
-                    error: payload.job.error.clone(),
-                    module_configs: HashMap::new(),
-                    callback_url: payload.callback_url.clone(),
-                    webhook_secret: None, // Don't persist secret
-                    invocation_context: payload.invocation_context.clone(),
-                    summary: Some(report.summary.clone()),
-                    findings_by_type: Some(report.findings_by_type.clone()),
-                },
-            )
-            .await?;
+            // ── Workflow: Running → Completed ────────────────────────
+            if let Err(e) = ctx.workflow.complete_job(
+                &mut payload.job,
+                &payload.project,
+                &module_results,
+                &report,
+                payload.callback_url.clone(),
+                payload.invocation_context.clone(),
+            ).await {
+                error!(job_id = %job_id, error = %e, "Failed to transition job to Completed");
+                return Err(JobProcessingError::Workflow(e));
+            }
 
             // Record scan completed with findings breakdown
             if let Some(ref subject) = analytics_subject {
@@ -259,10 +259,9 @@ async fn process_job(
             }
 
             if let Some(callback_url) = payload.callback_url.as_deref() {
-                // Deliver webhook with HMAC signature if secret provided
                 let webhook_payload = WebhookPayload {
                     job_id,
-                    status: format!("{:?}", payload.job.status),
+                    status: payload.job.status.to_string(),
                     summary: Some(report.summary.clone()),
                     findings_by_type: Some(report.findings_by_type.clone()),
                     error: None,
@@ -280,46 +279,23 @@ async fn process_job(
             info!(job_id = %job_id, "Analysis job finished successfully");
         }
         Err(err) => {
-            payload.job.status = JobStatus::Failed;
-            payload.job.error = Some(err.to_string());
-            payload.job.completed_at = Some(Utc::now());
-
-            persist_snapshot(
-                &ctx,
-                JobSnapshot {
-                    job_id,
-                    project_id: payload.job.project_id.clone(),
-                    status: payload.job.status.clone(),
-                    module_results: Vec::new(),
-                    project_metadata: payload.project.metadata.clone(),
-                    created_at: payload.job.created_at.to_rfc3339(),
-                    started_at: payload.job.started_at.map(|t| t.to_rfc3339()),
-                    completed_at: payload.job.completed_at.map(|t| t.to_rfc3339()),
-                    error: payload.job.error.clone(),
-                    module_configs: HashMap::new(),
-                    callback_url: payload.callback_url.clone(),
-                    webhook_secret: None, // Don't persist secret
-                    invocation_context: payload.invocation_context.clone(),
-                    summary: None,
-                    findings_by_type: None,
-                },
-            )
-            .await?;
+            // ── Workflow: Running → Failed ───────────────────────────
+            if let Err(e) = ctx.workflow.fail_job(
+                &mut payload.job,
+                &payload.project,
+                &err.to_string(),
+                payload.callback_url.clone(),
+                payload.invocation_context.clone(),
+            ).await {
+                error!(job_id = %job_id, error = %e, "Failed to transition job to Failed");
+                return Err(JobProcessingError::Workflow(e));
+            }
 
             // Record scan failed (with zero findings)
             if let Some(ref subject) = analytics_subject {
                 if let Err(e) = ctx
                     .analytics_recorder
-                    .on_scan_completed(
-                        subject.clone(),
-                        user_id,
-                        job_id,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0, // No findings on failure
-                    )
+                    .on_scan_completed(subject.clone(), user_id, job_id, 0, 0, 0, 0, 0)
                     .await
                 {
                     warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
@@ -330,7 +306,7 @@ async fn process_job(
             if let Some(callback_url) = payload.callback_url.as_deref() {
                 let webhook_payload = WebhookPayload {
                     job_id,
-                    status: format!("{:?}", payload.job.status),
+                    status: payload.job.status.to_string(),
                     summary: None,
                     findings_by_type: None,
                     error: payload.job.error.clone(),
@@ -357,16 +333,6 @@ async fn process_job(
     cleanup_s3_project(&payload.project).await;
 
     Ok(())
-}
-
-async fn persist_snapshot(
-    ctx: &JobWorkerContext,
-    snapshot: JobSnapshot,
-) -> Result<(), JobProcessingError> {
-    ctx.job_store
-        .save_snapshot(snapshot)
-        .await
-        .map_err(JobProcessingError::Snapshot)
 }
 
 /// Clean up S3 temporary directories after job completion
@@ -401,8 +367,8 @@ async fn cleanup_s3_project(project: &Project) {
 /// Errors surfaced while executing background jobs.
 #[derive(thiserror::Error, Debug)]
 pub enum JobProcessingError {
-    #[error("Failed to persist job snapshot: {0}")]
-    Snapshot(JobStoreError),
+    #[error("Workflow error: {0}")]
+    Workflow(#[from] WorkflowError),
 }
 
 // =============================================================================

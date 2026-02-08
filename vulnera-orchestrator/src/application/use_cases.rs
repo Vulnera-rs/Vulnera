@@ -13,7 +13,7 @@ use crate::domain::entities::{
     GroupedDependencyFinding, Project, SeverityBreakdown, Summary, TypeBreakdown,
 };
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
-use crate::domain::value_objects::{AnalysisDepth, JobStatus, SourceType};
+use crate::domain::value_objects::{AnalysisDepth, SourceType};
 use crate::infrastructure::ModuleRegistry;
 use vulnera_core::config::SandboxConfig;
 use vulnera_sandbox::{SandboxExecutor, SandboxPolicy, SandboxSelector};
@@ -90,12 +90,10 @@ impl ExecuteAnalysisJobUseCase {
     #[instrument(skip(self, job, project), fields(job_id = %job.job_id, module_count = job.modules_to_run.len()))]
     pub async fn execute(
         &self,
-        job: &mut AnalysisJob,
+        job: &AnalysisJob,
         project: &Project,
     ) -> Result<Vec<ModuleResult>, ModuleExecutionError> {
         let start_time = std::time::Instant::now();
-        job.status = JobStatus::Running;
-        job.started_at = Some(chrono::Utc::now());
 
         let effective_source_uri = project
             .metadata
@@ -316,9 +314,6 @@ impl ExecuteAnalysisJobUseCase {
             duration_ms = total_duration.as_millis(),
             "All modules completed"
         );
-
-        job.status = JobStatus::Completed;
-        job.completed_at = Some(chrono::Utc::now());
 
         Ok(results)
     }

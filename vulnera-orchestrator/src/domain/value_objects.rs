@@ -77,10 +77,74 @@ pub enum AnalysisDepth {
 pub enum JobStatus {
     /// Job is pending execution
     Pending,
+    /// Job has been enqueued for background processing
+    Queued,
     /// Job is currently running
     Running,
     /// Job completed successfully
     Completed,
     /// Job failed
     Failed,
+    /// Job was cancelled before completion
+    Cancelled,
+}
+
+impl JobStatus {
+    /// Returns the set of valid target states from the current state.
+    ///
+    /// ```text
+    /// Pending ──► Queued ──► Running ──► Completed
+    ///   │           │          │
+    ///   └──► Cancelled ◄──────┘──► Failed
+    /// ```
+    pub fn valid_transitions(&self) -> &[JobStatus] {
+        match self {
+            Self::Pending => &[Self::Queued, Self::Cancelled],
+            Self::Queued => &[Self::Running, Self::Cancelled],
+            Self::Running => &[Self::Completed, Self::Failed],
+            Self::Completed | Self::Failed | Self::Cancelled => &[],
+        }
+    }
+
+    /// Check whether transitioning to `target` is allowed from the current state.
+    pub fn can_transition_to(&self, target: &JobStatus) -> bool {
+        self.valid_transitions().contains(target)
+    }
+
+    /// Whether this status represents a terminal (final) state.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+    }
+}
+
+impl std::fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pending => write!(f, "Pending"),
+            Self::Queued => write!(f, "Queued"),
+            Self::Running => write!(f, "Running"),
+            Self::Completed => write!(f, "Completed"),
+            Self::Failed => write!(f, "Failed"),
+            Self::Cancelled => write!(f, "Cancelled"),
+        }
+    }
+}
+
+/// Recorded state transition for an analysis job (audit trail).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobTransition {
+    pub from: JobStatus,
+    pub to: JobStatus,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// Human-readable reason or context for the transition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// Error returned when an invalid status transition is attempted.
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid job transition from {from} to {to}")]
+pub struct JobTransitionError {
+    pub from: JobStatus,
+    pub to: JobStatus,
 }

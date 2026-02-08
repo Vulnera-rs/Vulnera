@@ -26,6 +26,35 @@ pub trait ModuleSelector: Send + Sync {
     fn select_modules(&self, project: &Project, analysis_depth: &AnalysisDepth) -> Vec<ModuleType>;
 }
 
+/// Abstract job queue interface.
+///
+/// Allows swapping the backing store (Dragonfly list, DB-backed queue, etc.)
+/// without changing application logic.
+#[async_trait]
+pub trait IJobQueue: Send + Sync {
+    /// Push a serialised job onto the queue.
+    async fn enqueue_raw(&self, payload: &[u8]) -> Result<(), JobQueueError>;
+
+    /// Blocking pop with timeout. Returns `None` if no job arrives within `timeout`.
+    async fn dequeue_raw(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<Option<Vec<u8>>, JobQueueError>;
+}
+
+/// Errors that can occur during queue operations.
+#[derive(thiserror::Error, Debug)]
+pub enum JobQueueError {
+    #[error("Failed to enqueue job: {0}")]
+    EnqueueFailed(String),
+
+    #[error("Failed to dequeue job: {0}")]
+    DequeueFailed(String),
+
+    #[error("Serialization error: {0}")]
+    Serialization(String),
+}
+
 /// Project detection error
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectDetectionError {

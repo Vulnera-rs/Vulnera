@@ -36,10 +36,11 @@ use vulnera_deps::types::VersionResolutionService;
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use crate::application::workflow::JobWorkflow;
 use crate::domain::entities::{JobAuthStrategy, JobInvocationContext};
 use crate::infrastructure::git::GitService;
 use crate::infrastructure::job_queue::{JobQueueHandle, QueuedAnalysisJob};
-use crate::infrastructure::job_store::{JobSnapshot, JobStore};
+use crate::infrastructure::job_store::JobStore;
 use crate::presentation::auth::extractors::{
     Auth, AuthState, OptionalApiKeyAuth, OptionalAwsCredentials,
 };
@@ -73,6 +74,7 @@ pub struct OrchestratorState {
     pub git_service: Arc<GitService>,
     pub job_store: Arc<dyn JobStore>,
     pub job_queue: JobQueueHandle,
+    pub workflow: Arc<JobWorkflow>,
 
     // Services
     pub cache_service: Arc<CacheServiceImpl>,
@@ -228,27 +230,20 @@ pub async fn analyze(
     let callback_url = request.callback_url.clone();
     let webhook_secret = request.webhook_secret.clone();
 
-    let snapshot = JobSnapshot {
-        job_id,
-        project_id: job.project_id.clone(),
-        status: job.status.clone(),
-        module_results: Vec::new(),
-        project_metadata: project.metadata.clone(),
-        created_at: job.created_at.to_rfc3339(),
-        started_at: job.started_at.map(|t| t.to_rfc3339()),
-        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
-        error: job.error.clone(),
-        module_configs: std::collections::HashMap::new(),
-        callback_url: callback_url.clone(),
-        webhook_secret: None, // Don't persist secret
-        invocation_context: Some(invocation_context.clone()),
-        summary: None,
-        findings_by_type: None,
-    };
-    if let Err(e) = state.job_store.save_snapshot(snapshot).await {
-        error!(job_id = %job_id, error = %e, "Failed to persist pending job snapshot");
-    }
+    // Transition Pending → Queued via workflow (persists snapshot + audit trail)
+    let mut job = job;
+    state
+        .workflow
+        .enqueue_job(
+            &mut job,
+            &project,
+            callback_url.clone(),
+            Some(invocation_context.clone()),
+        )
+        .await
+        .map_err(|e| format!("Failed to enqueue job: {}", e))?;
 
+    // Push onto the background worker queue
     state
         .job_queue
         .enqueue(QueuedAnalysisJob {
