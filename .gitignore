@@ -157,3 +157,6 @@ criterion/
 /.vulnera_data
 curls.txt
 /.sqlx
+
+# Decoupled components
+/vulnera-cli/

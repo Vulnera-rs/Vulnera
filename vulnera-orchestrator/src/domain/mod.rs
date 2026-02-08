@@ -12,3 +12,7 @@ pub use value_objects::*;
 pub use vulnera_core::domain::module::{
     AnalysisModule, Finding, ModuleConfig, ModuleExecutionError, ModuleResult, ModuleType,
 };
+
+// Re-export workflow-related types at crate boundary
+pub use services::{IJobQueue, JobQueueError};
+pub use value_objects::{JobTransition, JobTransitionError};

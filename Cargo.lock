@@ -7441,7 +7441,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "futures",
@@ -7462,7 +7462,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -7520,7 +7520,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-deps"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7543,7 +7543,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-llm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7567,7 +7567,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-orchestrator"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -7610,7 +7610,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-rust"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7653,7 +7653,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-sandbox"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -7680,7 +7680,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-sast"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "bincode",
@@ -7723,7 +7723,7 @@ dependencies = [
 
 [[package]]
 name = "vulnera-secrets"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

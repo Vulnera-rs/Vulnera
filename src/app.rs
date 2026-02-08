@@ -11,6 +11,7 @@ use vulnera_core::Config;
 use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
+use vulnera_orchestrator::application::workflow::JobWorkflow;
 use vulnera_orchestrator::infrastructure::{
     DragonflyJobStore, FileSystemProjectDetector, JobQueueHandle, JobWorkerContext,
     RuleBasedModuleSelector, spawn_job_worker_pool,
@@ -305,6 +306,7 @@ pub async fn create_app(
 
     // 13. Build Orchestrator State
     let job_queue_handle = JobQueueHandle::new(cache_service.clone());
+    let workflow = Arc::new(JobWorkflow::new(job_store.clone()));
     let orchestrator_state = OrchestratorState {
         // Orchestrator use cases
         create_job_use_case,
@@ -313,6 +315,7 @@ pub async fn create_app(
         git_service: infra.git_service.clone(),
         job_store: job_store.clone(),
         job_queue: job_queue_handle.clone(),
+        workflow: workflow.clone(),
 
         // Services
         cache_service: cache_service.clone(),
@@ -397,6 +400,7 @@ pub async fn create_app(
     let worker_context = JobWorkerContext {
         execute_job_use_case: orchestrator_state.execute_job_use_case.clone(),
         aggregate_results_use_case: orchestrator_state.aggregate_results_use_case.clone(),
+        workflow: workflow.clone(),
         job_store: job_store.clone(),
         git_service: infra.git_service.clone(),
         cache_service: cache_service.clone(),
