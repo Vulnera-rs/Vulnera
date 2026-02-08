@@ -20,7 +20,7 @@ vulnera-rust (binary - HTTP API server)
 vulnera-cli (standalone workspace - offline analysis + server API calls)
 ```
 
-**Composition Root**: `src/app.rs` is the **single composition root**. It delegates module setup to `src/modules/mod.rs`. Never instantiate services (PgPool, Cache, etc.) inside crate internals—wire everything at the top level and inject via `Arc<dyn Trait>`.
+**Composition Root**: `src/app.rs` is the **single composition root**. It delegates module setup to `src/modules/mod.rs` and wires all use cases, repositories, caches, and HTTP state. Never instantiate services (PgPool, Cache, etc.) inside crate internals—wire everything at the top level and inject via `Arc<dyn Trait>`.
 
 **Domain-Driven Layering**:
 
@@ -31,26 +31,28 @@ vulnera-cli (standalone workspace - offline analysis + server API calls)
 
 ## Critical Files & Patterns
 
-| Task               | Key Files                                          | Pattern                                                                 |
-| :----------------- | :------------------------------------------------- | :---------------------------------------------------------------------- |
-| **New Module**     | `vulnera-core/.../traits.rs`, `src/modules/mod.rs` | Implement `AnalysisModule`; register in `ModuleRegistry`                |
-| **Sandbox Policy** | `vulnera-sandbox/src/domain/policy.rs`             | Define FS/Network restrictions; used in `ExecuteAnalysisJobUseCase`     |
-| **SAST Rules**     | `vulnera-sast/src/infrastructure/rules/`           | Tree-sitter queries + visitor pattern for taint/data-flow               |
-| **Job Lifecycle**  | `vulnera-orchestrator/.../job_worker.rs`           | Dragonfly-backed queue -> `ExecuteAnalysisJobUseCase` -> Sandbox        |
-| **Auth/API Keys**  | `vulnera-core/src/infrastructure/auth/`            | JWT + Argon2; use `ApiKeyAuth` extractors in controllers                |
-| **Database**       | `migrations/`, `vulnera-core/.../infrastructure/`  | SQLx `query!` macros (compile-time checked); `IEntityRepository` traits |
+| Task               | Key Files                                                                 | Pattern                                                                                   |
+| :----------------- | :------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------- |
+| **New Module**     | `vulnera-core/.../traits.rs`, `src/modules/mod.rs`                        | Implement `AnalysisModule`; register in `ModuleRegistry`                                  |
+| **Sandbox Policy** | `vulnera-sandbox/src/domain/policy.rs`, `.../application/use_cases.rs`    | Build `SandboxPolicy::for_analysis()`; module execution via `SandboxExecutor`             |
+| **SAST Rules**     | `vulnera-sast/src/infrastructure/rules/`                                  | Tree-sitter queries + visitor pattern for taint/data-flow                                 |
+| **Job Lifecycle**  | `vulnera-orchestrator/src/infrastructure/job_queue.rs`                    | Dragonfly-backed queue -> worker pool -> `ExecuteAnalysisJobUseCase` -> Sandbox           |
+| **Job Storage**    | `vulnera-orchestrator/src/infrastructure/job_store/`                      | Persist snapshots (summary, findings, metadata) with optional webhook delivery            |
+| **Module Selection** | `vulnera-orchestrator/src/infrastructure/module_selector.rs`            | `RuleBasedModuleSelector` decides modules by `AnalysisDepth` + project metadata           |
+| **Auth/API Keys**  | `vulnera-core/src/infrastructure/auth/`, `.../presentation/auth/`         | JWT + Argon2; cookie auth with CSRF; API key endpoints under `/api/v1/auth/api-keys`      |
+| **Database**       | `migrations/`, `vulnera-core/.../infrastructure/`                         | SQLx `query!` macros (compile-time checked); `IEntityRepository` traits                   |
 
 ## Analysis Capabilities
 
 - **SAST**: Supports **Python, JavaScript, TypeScript, Rust, Go, C, C++** using Tree-sitter.
-- **Sandboxing**: Tiered isolation. Linux (Landlock + Seccomp) -> Windows (WASM/Process) -> Fallback (Process isolation).
+- **Sandboxing**: Tiered isolation. Linux (Landlock + Seccomp) -> Process -> fallback. `SandboxPolicy::for_analysis` includes system paths, `/tmp` RW, and optional HTTP/Redis ports.
 - **Dependency Analysis**: Cross-ecosystem (NPM, PyPI, Cargo, Maven) with `vulnera-advisor` intelligence.
 - **LLM**: Integrated `GeminiLlmProvider` for automated remediation and finding enrichment.
 
 ## Configuration & Secrets
 
 - **Strongly-typed config**: `vulnera-core/src/config/mod.rs`.
-- **Env Var Pattern**: `VULNERA__SECTION__KEY=value` (e.g., `VULNERA__SANDBOX__BACKEND=landlock`).
+- **Env Var Pattern**: `VULNERA__SECTION__KEY=value` (e.g., `VULNERA__SANDBOX__BACKEND=landlock`). `DATABASE_URL` overrides `config.database.url` at load time.
 - **Cache**: Dragonfly/Redis only (`Config.cache.dragonfly_url`).
 - **DB**: PostgreSQL via SQLx. `DATABASE_URL` is required for compilation.
 
@@ -87,6 +89,13 @@ cd vulnera-cli && cargo run -- scan .
 - Use `#[openapi(paths(...))]` for documentation.
 - Inject dependencies via `State<Arc<OrchestratorState>>`.
 
+### 2.1 Request Pipeline & Middleware
+
+- Routes and middleware are assembled in `vulnera-orchestrator/src/presentation/routes.rs`.
+- CSRF protection is required for state-changing routes (cookie auth).
+- CORS rules differ for wildcard vs specific origins; wildcard disables credentials.
+- Rate limiting uses tiered limits (`Config.server.rate_limit`) and runs after early auth extraction.
+
 ### 3. CLI Command
 
 - `vulnera-cli` is a separate workspace. Use `CliContext` for shared state.
@@ -97,6 +106,12 @@ cd vulnera-cli && cargo run -- scan .
 
 - Analysis execution is wrapped in `SandboxExecutor`.
 - Policies should be "Least Privilege": Read-only source access, no network (unless `allow_network` config is set).
+- Dependency analysis enables network and adds port 6379 for Dragonfly when required.
+
+## Background Workers
+
+- Sync and analytics cleanup workers live in `src/workers/mod.rs`.
+- Job worker pool is spawned from `vulnera-orchestrator/src/infrastructure/job_queue.rs` and respects `Config.analysis.max_job_workers`.
 
 ## Code Style & Implementation Rules
 
