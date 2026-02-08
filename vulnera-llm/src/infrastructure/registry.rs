@@ -6,7 +6,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::domain::{LlmError, LlmProvider};
-use crate::infrastructure::providers::{GoogleAIProvider, OpenAIProvider, ResilienceConfig};
+use crate::infrastructure::providers::{
+    GoogleAIProvider, OpenAIProvider, ResilientProvider, ResilienceConfig,
+};
 
 /// Provider type identifier
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -182,14 +184,28 @@ impl ProviderRegistry {
     }
 
     /// Create a provider from configuration
+    ///
+    /// When `config.resilience` is `Some`, the provider is automatically wrapped
+    /// with [`ResilientProvider`] for circuit-breaker + retry protection.
     fn create_provider(config: ProviderConfig) -> Result<Arc<dyn LlmProvider>, LlmError> {
-        let base_provider: Arc<dyn LlmProvider> = match config.provider_type {
+        let resilience = config.resilience.clone();
+        fn wrap_with_resilience<P: LlmProvider + 'static>(
+            provider: P,
+            resilience: Option<ResilienceConfig>,
+        ) -> Arc<dyn LlmProvider> {
+            match resilience {
+                Some(cfg) => Arc::new(ResilientProvider::new(provider, cfg)),
+                None => Arc::new(provider),
+            }
+        }
+
+        match config.provider_type {
             ProviderType::GoogleAI => {
                 let mut provider = GoogleAIProvider::new(&config.api_key, &config.model);
                 if let Some(ref url) = config.base_url {
                     provider = provider.with_base_url(url);
                 }
-                Arc::new(provider)
+                Ok(wrap_with_resilience(provider, resilience))
             }
             ProviderType::OpenAI => {
                 let mut provider = OpenAIProvider::new(&config.api_key, &config.model);
@@ -199,7 +215,7 @@ impl ProviderRegistry {
                 if let Some(ref org) = config.organization_id {
                     provider = provider.with_organization(org);
                 }
-                Arc::new(provider)
+                Ok(wrap_with_resilience(provider, resilience))
             }
             ProviderType::Azure => {
                 let endpoint = config.azure_endpoint.ok_or_else(|| {
@@ -212,28 +228,20 @@ impl ProviderRegistry {
                     .azure_api_version
                     .unwrap_or_else(|| "2024-02-15-preview".to_string());
 
-                Arc::new(OpenAIProvider::azure(
+                let provider = OpenAIProvider::azure(
                     endpoint,
                     &config.api_key,
                     deployment,
                     api_version,
-                ))
+                );
+                Ok(wrap_with_resilience(provider, resilience))
             }
             ProviderType::Custom(name) => {
-                return Err(LlmError::ProviderNotFound(format!(
+                Err(LlmError::ProviderNotFound(format!(
                     "Unknown provider type: {}",
                     name
-                )));
+                )))
             }
-        };
-
-        // Wrap with resilience if configured
-        if config.resilience.is_some() {
-            // TODO: Implement dynamic resilience wrapping
-            // Currently resilience should be applied at the call site
-            Ok(base_provider)
-        } else {
-            Ok(base_provider)
         }
     }
 

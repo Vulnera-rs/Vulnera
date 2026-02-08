@@ -680,6 +680,8 @@ pub async fn analyze_dependencies(
                 .await
             {
                 Ok((report, dependency_graph)) => {
+                    let was_cached = report.metadata.analysis_duration
+                        < std::time::Duration::from_millis(50);
                     let mut result = convert_analysis_report_to_response(
                         &report,
                         filename_for_response,
@@ -690,7 +692,7 @@ pub async fn analyze_dependencies(
                     )
                     .await;
                     result.workspace_path = workspace_path;
-                    result.cache_hit = Some(false); // TODO: Implement actual cache tracking
+                    result.cache_hit = Some(was_cached);
                     Ok(result)
                 }
                 Err(e) => {
@@ -793,6 +795,11 @@ pub async fn analyze_dependencies(
 
     let duration = start_time.elapsed();
 
+    let cache_hits = {
+        let hits = results.iter().filter(|r| r.cache_hit == Some(true)).count();
+        if hits > 0 { Some(hits) } else { None }
+    };
+
     info!(
         authenticated = is_authenticated,
         successful,
@@ -810,7 +817,7 @@ pub async fn analyze_dependencies(
             duration_ms: duration.as_millis() as u64,
             total_vulnerabilities,
             total_packages,
-            cache_hits: None, // TODO: Implement cache hit tracking
+            cache_hits,
             critical_count,
             high_count,
         },

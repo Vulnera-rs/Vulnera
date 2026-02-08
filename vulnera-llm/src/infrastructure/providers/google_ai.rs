@@ -72,7 +72,7 @@ impl GoogleAIProvider {
                         ContentBlock::Text { text } => GeminiPart::Text { text: text.clone() },
                         ContentBlock::Image { url, .. } => GeminiPart::InlineData {
                             inline_data: GeminiInlineData {
-                                mime_type: "image/jpeg".to_string(), // TODO: detect from URL
+                                mime_type: detect_image_mime_type(url),
                                 data: url.clone(),
                             },
                         },
@@ -420,6 +420,40 @@ struct GeminiStreamChunk {
     usage_metadata: Option<GeminiUsageMetadata>,
 }
 
+/// Detect image MIME type from a URL or data URI by inspecting the extension
+/// or data URI prefix. Falls back to `image/jpeg` for unknown formats.
+fn detect_image_mime_type(url: &str) -> String {
+    // Handle data URIs: data:image/png;base64,...
+    if let Some(rest) = url.strip_prefix("data:") {
+        if let Some(mime_end) = rest.find(';').or_else(|| rest.find(',')) {
+            return rest[..mime_end].to_string();
+        }
+    }
+
+    // Extract extension from URL path (strip query string / fragment first)
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let lower = path.to_ascii_lowercase();
+
+    if lower.ends_with(".png") {
+        "image/png".to_string()
+    } else if lower.ends_with(".gif") {
+        "image/gif".to_string()
+    } else if lower.ends_with(".webp") {
+        "image/webp".to_string()
+    } else if lower.ends_with(".svg") {
+        "image/svg+xml".to_string()
+    } else if lower.ends_with(".bmp") {
+        "image/bmp".to_string()
+    } else if lower.ends_with(".ico") {
+        "image/x-icon".to_string()
+    } else if lower.ends_with(".avif") {
+        "image/avif".to_string()
+    } else {
+        // Default fallback — JPEG covers .jpg, .jpeg, and unknown formats
+        "image/jpeg".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -442,5 +476,42 @@ mod tests {
         assert!(url.contains("gemini-2.0-flash"));
         assert!(url.contains("generateContent"));
         assert!(url.contains("key=test-key"));
+    }
+
+    #[test]
+    fn test_detect_mime_from_extension() {
+        assert_eq!(detect_image_mime_type("https://example.com/img.png"), "image/png");
+        assert_eq!(detect_image_mime_type("https://example.com/img.gif"), "image/gif");
+        assert_eq!(detect_image_mime_type("https://example.com/img.webp"), "image/webp");
+        assert_eq!(detect_image_mime_type("https://example.com/img.svg"), "image/svg+xml");
+        assert_eq!(detect_image_mime_type("https://example.com/img.jpg"), "image/jpeg");
+        assert_eq!(detect_image_mime_type("https://example.com/img.jpeg"), "image/jpeg");
+        assert_eq!(detect_image_mime_type("https://example.com/img.avif"), "image/avif");
+    }
+
+    #[test]
+    fn test_detect_mime_with_query_string() {
+        assert_eq!(
+            detect_image_mime_type("https://cdn.example.com/photo.png?w=800&h=600"),
+            "image/png"
+        );
+    }
+
+    #[test]
+    fn test_detect_mime_from_data_uri() {
+        assert_eq!(
+            detect_image_mime_type("data:image/png;base64,iVBORw0KGgo="),
+            "image/png"
+        );
+        assert_eq!(
+            detect_image_mime_type("data:image/webp;base64,UklGRiA="),
+            "image/webp"
+        );
+    }
+
+    #[test]
+    fn test_detect_mime_unknown_defaults_to_jpeg() {
+        assert_eq!(detect_image_mime_type("https://example.com/img"), "image/jpeg");
+        assert_eq!(detect_image_mime_type("binary_data_blob"), "image/jpeg");
     }
 }
