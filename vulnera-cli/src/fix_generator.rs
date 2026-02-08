@@ -173,14 +173,31 @@ impl FixGenerator {
     }
 
     /// Call the server's code fix endpoint
-    async fn call_fix_endpoint(&self, _request: CodeFixRequest) -> Result<CodeFixResponse> {
-        // TODO: Implement actual API call to server's /api/v1/llm/fix endpoint
-        // For now, return a placeholder response
-        // This would be implemented when the server endpoint is available
+    async fn call_fix_endpoint(&self, request: CodeFixRequest) -> Result<CodeFixResponse> {
+        use crate::api_client::LlmFixRequest;
+
+        let llm_request = LlmFixRequest {
+            vulnerability_id: request.finding_id.clone(),
+            vulnerable_code: request.code_context.clone(),
+            language: detect_language_from_path(&request.file_path),
+            context: Some(format!(
+                "{}:{} — {}",
+                request.file_path, request.line_number, request.vulnerability_description
+            )),
+        };
+
+        let response = self.client.generate_code_fix(&llm_request).await?;
+
         Ok(CodeFixResponse {
-            success: false,
-            fix: None,
-            error: Some("LLM fix endpoint not yet implemented".to_string()),
+            success: true,
+            fix: Some(CodeFix {
+                finding_id: request.finding_id,
+                original_code: request.code_context,
+                suggested_code: response.fixed_code,
+                explanation: response.explanation,
+                diff: String::new(),
+            }),
+            error: None,
         })
     }
 
@@ -208,6 +225,41 @@ impl FixGenerator {
             }],
         }
     }
+}
+
+/// Infer programming language from a file path extension.
+fn detect_language_from_path(path: &str) -> String {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    match ext {
+        "rs" => "rust",
+        "py" | "pyi" => "python",
+        "js" | "mjs" | "cjs" => "javascript",
+        "ts" | "mts" | "cts" => "typescript",
+        "jsx" => "jsx",
+        "tsx" => "tsx",
+        "go" => "go",
+        "c" | "h" => "c",
+        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => "cpp",
+        "java" => "java",
+        "rb" => "ruby",
+        "php" => "php",
+        "cs" => "csharp",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "scala" => "scala",
+        "sh" | "bash" | "zsh" => "shell",
+        "yml" | "yaml" => "yaml",
+        "toml" => "toml",
+        "json" => "json",
+        "tf" | "hcl" => "terraform",
+        "dockerfile" => "dockerfile",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 #[cfg(test)]

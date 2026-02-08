@@ -111,6 +111,24 @@ pub struct QuotaStatusResponse {
     pub resets_at: String,
 }
 
+/// Request for the server's LLM code fix endpoint (`POST /api/v1/llm/fix`)
+#[derive(Debug, Serialize)]
+pub struct LlmFixRequest {
+    pub vulnerability_id: String,
+    pub vulnerable_code: String,
+    pub language: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+}
+
+/// Response from the server's LLM code fix endpoint
+#[derive(Debug, Deserialize)]
+pub struct LlmFixResponse {
+    pub fixed_code: String,
+    pub explanation: String,
+    pub confidence: Option<f64>,
+}
+
 /// Error response from server
 #[derive(Debug, Deserialize)]
 pub struct ErrorResponse {
@@ -471,6 +489,43 @@ impl VulneraClient {
             Ok(response) => Ok(response.status().is_success()),
             Err(_) => Ok(false),
         }
+    }
+
+    /// Generate a code fix using the server's LLM endpoint
+    pub async fn generate_code_fix(
+        &self,
+        request: &LlmFixRequest,
+    ) -> Result<LlmFixResponse> {
+        let url = format!(
+            "{}/api/v1/llm/fix",
+            self.base_url.trim_end_matches('/')
+        );
+
+        let mut req = self.client.post(&url).json(request);
+
+        if let Some(api_key) = &self.api_key {
+            req = req.header("X-API-Key", api_key);
+        }
+
+        let response = req.send().await.map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to send LLM fix request to {}: {} (is_connect: {}, is_timeout: {})",
+                url,
+                e,
+                e.is_connect(),
+                e.is_timeout()
+            )
+        })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(self.handle_error_response(status, response).await);
+        }
+
+        response
+            .json::<LlmFixResponse>()
+            .await
+            .context("Failed to parse LLM fix response")
     }
 
     /// Handle error response from server
