@@ -1,0 +1,11 @@
+# Local development path overrides
+#
+# When working on vulnera-cli alongside the main Vulnera workspace,
+# uncomment these lines to use local path dependencies instead of Git.
+# Do NOT commit this file with overrides active.
+
+[patch."https://github.com/Vulnera-rs/Vulnera.git"]
+vulnera-core = { path = "../vulnera-core" }
+vulnera-sast = { path = "../vulnera-sast" }
+vulnera-secrets = { path = "../vulnera-secrets" }
+vulnera-api = { path = "../vulnera-api" }

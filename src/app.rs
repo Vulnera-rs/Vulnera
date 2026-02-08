@@ -109,7 +109,9 @@ pub async fn create_app(
         infra.git_service.clone(),
         infra.s3_service.clone(),
     ));
-    let module_selector = Arc::new(RuleBasedModuleSelector);
+    let module_selector = Arc::new(RuleBasedModuleSelector::with_entitlement(
+        config.enterprise.as_ref().map_or(false, |e| e.enabled),
+    ));
 
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
         project_detector,

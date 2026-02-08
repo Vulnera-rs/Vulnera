@@ -1,15 +1,58 @@
 //! Module selector implementation
+//!
+//! Selects analysis modules based on project metadata, analysis depth,
+//! and the caller's module tier entitlement (community vs enterprise).
 
 use async_trait::async_trait;
 
-use vulnera_core::domain::module::ModuleType;
+use vulnera_core::domain::module::{ModuleTier, ModuleType};
 
 use crate::domain::entities::Project;
 use crate::domain::services::ModuleSelector;
 use crate::domain::value_objects::AnalysisDepth;
 
-/// rule-based module selector
-pub struct RuleBasedModuleSelector;
+/// Rule-based module selector with tier-aware filtering
+pub struct RuleBasedModuleSelector {
+    /// Whether the current caller/context holds an enterprise license
+    enterprise_entitled: bool,
+}
+
+impl RuleBasedModuleSelector {
+    /// Create a selector for community-only access (default for open-source users)
+    pub fn community() -> Self {
+        Self {
+            enterprise_entitled: false,
+        }
+    }
+
+    /// Create a selector with enterprise entitlement
+    pub fn enterprise() -> Self {
+        Self {
+            enterprise_entitled: true,
+        }
+    }
+
+    /// Create a selector with explicit entitlement flag
+    pub fn with_entitlement(enterprise_entitled: bool) -> Self {
+        Self {
+            enterprise_entitled,
+        }
+    }
+
+    /// Returns true if the given module type is accessible under current entitlement
+    fn is_entitled(&self, module_type: &ModuleType) -> bool {
+        match module_type.tier() {
+            ModuleTier::Community => true,
+            ModuleTier::Enterprise => self.enterprise_entitled,
+        }
+    }
+}
+
+impl Default for RuleBasedModuleSelector {
+    fn default() -> Self {
+        Self::community()
+    }
+}
 
 #[async_trait]
 impl ModuleSelector for RuleBasedModuleSelector {
@@ -29,7 +72,7 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 }
             }
             AnalysisDepth::Full => {
-                // Full analysis: only modules that are registered
+                // Full analysis: all applicable modules
                 modules.push(ModuleType::DependencyAnalyzer);
 
                 // SAST if we have source code
@@ -48,9 +91,28 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 {
                     modules.push(ModuleType::ApiSecurity);
                 }
+
+                // --- Enterprise modules (only if entitled) ---
+                // License compliance for dependency-heavy projects
+                modules.push(ModuleType::LicenseCompliance);
+
+                // SBOM generation
+                modules.push(ModuleType::SBOM);
+
+                // IaC security if infrastructure files are present
+                if project.metadata.frameworks.contains(&"terraform".to_string())
+                    || project.metadata.frameworks.contains(&"docker".to_string())
+                    || project.metadata.frameworks.contains(&"kubernetes".to_string())
+                {
+                    modules.push(ModuleType::IaC);
+                }
             }
         }
 
+        // Filter out modules the caller is not entitled to
         modules
+            .into_iter()
+            .filter(|m| self.is_entitled(m))
+            .collect()
     }
 }

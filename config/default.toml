@@ -180,3 +180,10 @@ tree_cache_max_entries = 1024    # Max parsed trees cached per worker
 
 # Cache TTL for popular package vulnerability listings (in hours)
 cache_ttl_hours = 24
+
+# Enterprise license configuration
+# Uncomment and set license_key to enable enterprise-tier modules
+# [enterprise]
+# enabled = false
+# license_key = ""
+# organization_id = ""

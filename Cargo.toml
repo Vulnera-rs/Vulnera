@@ -146,10 +146,10 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
 # Time handling
-chrono = { version = "0.4.42", features = ["serde"] }
+chrono = { version = "0.4.43", features = ["serde"] }
 
 # UUID generation
-uuid = { version = "1.19.0", features = ["v4", "serde"] }
+uuid = { version = "1.20.0", features = ["v4", "serde"] }
 url = "2.5.8"
 
 # Hashing for cache keys
@@ -177,9 +177,9 @@ sqlx = { version = "0.8.6", features = [
 ] }
 
 # File and Version parsing
-toml = "0.9.10"
+toml = "0.9.8"
 serde_yml = "0.0.12"
-quick-xml = "0.38.4"
+quick-xml = "0.39.0"
 regex = "1.12"
 pest = "2.8.5"
 pest_derive = "2.8.5"
@@ -193,7 +193,7 @@ streaming-iterator = "0.1"
 
 # AWS SDK for S3 bucket analysis
 aws-config = { version = "1.8.12", features = ["behavior-version-latest"] }
-aws-sdk-s3 = "1.119.0"
+aws-sdk-s3 = "1.122.0"
 aws-credential-types = "1.2"
 
 # SAST dependencies
