@@ -4,12 +4,13 @@ version = "0.2.0"
 edition = "2024"
 authors = ["Vulnera-Team"]
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/k5602/vulnera"
+repository = "https://github.com/Vulnera-rs/vulnera-cli"
 keywords = ["security", "vulnerability", "analysis", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 description = "Standalone CLI for Vulnera vulnerability analysis - offline SAST, secrets, and API security scanning"
 
-# Standalone workspace
+# Standalone workspace — this crate is a separate project.
+# For development, use path overrides; for releases, Git dependencies are used.
 [workspace]
 
 [[bin]]
@@ -17,13 +18,13 @@ name = "vulnera"
 path = "src/main.rs"
 
 [dependencies]
-# Core dependencies for config and types
-vulnera-core = { path = "../vulnera-core" }
+# Core dependencies (Git for release, path override via .cargo/config.toml for dev)
+vulnera-core = { git = "https://github.com/Vulnera-rs/Vulnera.git", branch = "main" }
 
-# Offline analysis modules
-vulnera-sast = { path = "../vulnera-sast" }
-vulnera-secrets = { path = "../vulnera-secrets" }
-vulnera-api = { path = "../vulnera-api" }
+# Offline community analysis modules
+vulnera-sast = { git = "https://github.com/Vulnera-rs/Vulnera.git", branch = "main" }
+vulnera-secrets = { git = "https://github.com/Vulnera-rs/Vulnera.git", branch = "main" }
+vulnera-api = { git = "https://github.com/Vulnera-rs/Vulnera.git", branch = "main" }
 
 # Async runtime
 tokio = { version = "1.48", features = ["full"] }

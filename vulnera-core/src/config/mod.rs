@@ -104,6 +104,23 @@ pub struct Config {
     pub popular_packages: Option<PopularPackagesConfig>,
     pub llm: LlmConfig,
     pub sandbox: SandboxConfig,
+    /// Enterprise license configuration (optional)
+    pub enterprise: Option<EnterpriseConfig>,
+}
+
+/// Enterprise license configuration
+///
+/// When present and `enabled = true`, enterprise-tier modules are unlocked.
+/// The license key is validated at startup and periodically refreshed.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct EnterpriseConfig {
+    /// Whether enterprise features are enabled
+    pub enabled: bool,
+    /// Enterprise license key (validated at startup)
+    pub license_key: Option<String>,
+    /// Organization ID bound to the license
+    pub organization_id: Option<String>,
 }
 
 /// Popular packages configuration for vulnerability listing
@@ -1266,6 +1283,7 @@ impl Default for Config {
             popular_packages: None,
             llm: LlmConfig::default(),
             sandbox: SandboxConfig::default(),
+            enterprise: None,
         }
     }
 }
