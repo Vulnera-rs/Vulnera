@@ -124,7 +124,12 @@ message = "Review unsafe code carefully. Document safety invariants."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(unsafe_block) @unsafe
+[
+  (unsafe_block) @unsafe
+  (function_item
+    (unsafe) @kw
+  ) @unsafe
+]
 '''
 
 [[rules]]
@@ -187,6 +192,15 @@ value = '''
   function: (scoped_identifier
     path: (identifier) @mod
     name: (identifier) @fn
+  )
+  arguments: (arguments
+    [
+      (identifier) @cmd
+      (field_expression) @cmd
+      (call_expression) @cmd
+      (binary_expression) @cmd
+      (format_expression) @cmd
+    ]
   )
   (#eq? @mod "Command")
   (#eq? @fn "new")

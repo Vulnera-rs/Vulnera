@@ -79,8 +79,17 @@ value = '''
     object: (identifier) @mod
     attribute: (identifier) @fn
   )
+  arguments: (argument_list
+    (_)*
+    (keyword_argument
+      name: (identifier) @kw
+      value: (true) @val
+    )
+    (_)*
+  )
   (#eq? @mod "subprocess")
   (#match? @fn "^(call|run|Popen|check_call|check_output)$")
+  (#eq? @kw "shell")
 ) @call
 '''
 
@@ -111,7 +120,7 @@ value = '''
 [[rules]]
 id = "unsafe-deserialization"
 name = "Unsafe Deserialization"
-description = "Potential unsafe deserialization vulnerability"
+description = "Potential unsafe deserialization vulnerability (pickle and similar serializers)"
 severity = "High"
 languages = ["Python"]
 cwe_ids = ["CWE-502"]
@@ -122,14 +131,16 @@ message = "Never unpickle untrusted data. Use JSON or other safe formats."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call
-  function: (attribute
-    object: (identifier) @obj
-    attribute: (identifier) @fn
-  )
-  (#eq? @obj "pickle")
-  (#match? @fn "^loads?$")
-) @call
+[
+  (call
+    function: (attribute
+      object: (identifier) @obj
+      attribute: (identifier) @fn
+    )
+    (#match? @obj "^(pickle|shelve|marshal|dill|cloudpickle|joblib)$")
+    (#match? @fn "^(loads?|dump|Unpickler|open)$")
+  ) @call
+]
 '''
 
 [[rules]]
@@ -146,14 +157,45 @@ message = "Use yaml.safe_load() instead of yaml.load()."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call
-  function: (attribute
-    object: (identifier) @mod
-    attribute: (identifier) @fn
-  )
-  (#eq? @mod "yaml")
-  (#eq? @fn "load")
-) @call
+[
+  (call
+    function: (attribute
+      object: (identifier) @mod
+      attribute: (identifier) @fn
+    )
+    arguments: (argument_list) @args
+    (#eq? @mod "yaml")
+    (#eq? @fn "load")
+    (#not-match? @args "SafeLoader")
+  ) @call
+  (call
+    function: (attribute
+      object: (identifier) @mod
+      attribute: (identifier) @fn
+    )
+    (#eq? @mod "yaml")
+    (#match? @fn "^(unsafe_load|full_load)$")
+  ) @call
+  (call
+    function: (attribute
+      object: (identifier) @mod
+      attribute: (identifier) @fn
+    )
+    arguments: (argument_list
+      (_)
+      (keyword_argument
+        name: (identifier) @kw_name
+        value: (attribute
+          attribute: (identifier) @loader_type
+        )
+      )
+    )
+    (#eq? @mod "yaml")
+    (#eq? @fn "load")
+    (#eq? @kw_name "Loader")
+    (#match? @loader_type "^(Loader|UnsafeLoader|FullLoader|CLoader)$")
+  ) @call
+]
 '''
 
 [[rules]]

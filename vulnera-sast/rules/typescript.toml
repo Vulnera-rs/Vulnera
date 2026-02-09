@@ -128,12 +128,18 @@ message = "Validate and sanitize command arguments."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @fn
-  )
-  (#match? @fn "^(exec|execSync|spawn|spawnSync)$")
-) @call
+[
+  (call_expression
+    function: (member_expression
+      property: (property_identifier) @fn
+    )
+    (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
+  ) @call
+  (call_expression
+    function: (identifier) @fn
+    (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
+  ) @call
+]
 '''
 
 [[rules]]
@@ -150,15 +156,67 @@ message = "Use parameterized queries with proper binding."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @fn
-  )
-  arguments: (arguments
-    [(binary_expression) (template_string)]
-  )
-  (#match? @fn "^(query|execute|raw)$")
-) @sql
+[
+  (call_expression
+    function: (member_expression
+      property: (property_identifier) @fn
+    )
+    arguments: (arguments
+      [(binary_expression) (template_string)]
+    )
+    (#match? @fn "^(query|execute|raw)$")
+  ) @sql
+
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @var
+      value: (template_string) @sql
+    )
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @var
+      value: (binary_expression
+        left: (string) @sql_start
+        operator: "+"
+        right: (_) @rhs
+      )
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (assignment_expression
+    left: (identifier) @var
+    right: (template_string) @sql
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (assignment_expression
+    left: (identifier) @var
+    right: (binary_expression
+      left: (string) @sql_start
+      operator: "+"
+      right: (_) @rhs
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (return_statement
+    (template_string) @sql
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (return_statement
+    (binary_expression
+      left: (string) @sql_start
+      operator: "+"
+      right: (_) @rhs
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+]
 '''
 
 [[rules]]

@@ -155,6 +155,10 @@ pub fn execute_query(
     let mut results = Vec::new();
 
     while let Some(m) = matches.next() {
+        // Evaluate text predicates (#eq?, #match?, #not-eq?, #not-match?)
+        if !crate::infrastructure::sast_engine::evaluate_predicates_ext(query, m, source) {
+            continue;
+        }
         if let Some(result) = process_match(m, capture_names, source) {
             results.push(result);
         }

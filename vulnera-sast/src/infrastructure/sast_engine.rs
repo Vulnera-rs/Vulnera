@@ -19,10 +19,11 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use regex::Regex;
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
-use tree_sitter::{Query, Tree};
-use tracing::{debug, instrument};
+use tree_sitter::{Query, QueryPredicateArg, Tree};
+use tracing::{debug, instrument, trace};
 
 use crate::domain::{Finding, Location, Pattern, Rule};
 use crate::domain::value_objects::{Confidence, Language};
@@ -129,6 +130,15 @@ impl SastEngine {
             matches.advance();
             matches.get()
         } {
+            if match_result.captures.is_empty() {
+                continue;
+            }
+
+            // Evaluate text predicates (#eq?, #match?, #not-eq?, #not-match?)
+            if !evaluate_predicates(&query, match_result, source.as_bytes()) {
+                continue;
+            }
+
             let mut captures = HashMap::new();
             
             for capture in match_result.captures {
@@ -237,6 +247,15 @@ impl SastEngine {
             matches.advance();
             matches.get()
         } {
+            if match_result.captures.is_empty() {
+                continue;
+            }
+
+            // Evaluate text predicates (#eq?, #match?, #not-eq?, #not-match?)
+            if !evaluate_predicates(query, match_result, source_bytes) {
+                continue;
+            }
+
             let mut captures = HashMap::new();
             
             for capture in match_result.captures {
@@ -346,6 +365,149 @@ impl Default for SastEngine {
 /// Result of taint detection
 pub type TaintDetectionResult = Vec<TaintMatch>;
 
+/// Evaluate text predicates for a query match.
+///
+/// Tree-sitter queries can contain predicates like `#eq?`, `#match?`, `#not-eq?`,
+/// `#not-match?` which filter matches based on captured text content.
+///
+/// Returns `true` if ALL predicates pass (match should be kept).
+fn evaluate_predicates(
+    query: &Query,
+    match_result: &tree_sitter::QueryMatch,
+    source_bytes: &[u8],
+) -> bool {
+    evaluate_predicates_ext(query, match_result, source_bytes)
+}
+
+/// Public version of predicate evaluation for use by other modules (e.g. query_engine).
+pub fn evaluate_predicates_ext(
+    query: &Query,
+    match_result: &tree_sitter::QueryMatch,
+    source_bytes: &[u8],
+) -> bool {
+    let predicates = query.general_predicates(match_result.pattern_index);
+
+    for predicate in predicates {
+        let op = predicate.operator.as_ref();
+
+        match op {
+            "eq?" | "not-eq?" => {
+                if predicate.args.len() < 2 {
+                    continue;
+                }
+
+                let capture_idx = match &predicate.args[0] {
+                    QueryPredicateArg::Capture(idx) => *idx,
+                    _ => continue,
+                };
+
+                let expected = match &predicate.args[1] {
+                    QueryPredicateArg::String(s) => s.as_ref(),
+                    _ => continue,
+                };
+
+                // Find the capture text from the match
+                let captured_text = match_result
+                    .captures
+                    .iter()
+                    .find(|c| c.index == capture_idx)
+                    .and_then(|c| c.node.utf8_text(source_bytes).ok());
+
+                let Some(text) = captured_text else {
+                    // Capture not found in this match — predicate fails
+                    if op == "eq?" {
+                        return false;
+                    }
+                    continue;
+                };
+
+                let matches = text == expected;
+                if (op == "eq?" && !matches) || (op == "not-eq?" && matches) {
+                    return false;
+                }
+            }
+
+            "match?" | "not-match?" => {
+                if predicate.args.len() < 2 {
+                    continue;
+                }
+
+                let capture_idx = match &predicate.args[0] {
+                    QueryPredicateArg::Capture(idx) => *idx,
+                    _ => continue,
+                };
+
+                let pattern = match &predicate.args[1] {
+                    QueryPredicateArg::String(s) => s.as_ref(),
+                    _ => continue,
+                };
+
+                let captured_text = match_result
+                    .captures
+                    .iter()
+                    .find(|c| c.index == capture_idx)
+                    .and_then(|c| c.node.utf8_text(source_bytes).ok());
+
+                let Some(text) = captured_text else {
+                    if op == "match?" {
+                        return false;
+                    }
+                    continue;
+                };
+
+                let Ok(re) = Regex::new(pattern) else {
+                    trace!(pattern, "Failed to compile predicate regex");
+                    continue;
+                };
+
+                let matches = re.is_match(text);
+                if (op == "match?" && !matches) || (op == "not-match?" && matches) {
+                    return false;
+                }
+            }
+
+            "any-eq?" | "any-not-eq?" => {
+                if predicate.args.len() < 2 {
+                    continue;
+                }
+
+                let capture_idx = match &predicate.args[0] {
+                    QueryPredicateArg::Capture(idx) => *idx,
+                    _ => continue,
+                };
+
+                let expected = match &predicate.args[1] {
+                    QueryPredicateArg::String(s) => s.as_ref(),
+                    _ => continue,
+                };
+
+                // Check ALL captures with the given index (not just the first)
+                let any_match = match_result
+                    .captures
+                    .iter()
+                    .filter(|c| c.index == capture_idx)
+                    .any(|c| {
+                        c.node
+                            .utf8_text(source_bytes)
+                            .map(|t| t == expected)
+                            .unwrap_or(false)
+                    });
+
+                if (op == "any-eq?" && !any_match) || (op == "any-not-eq?" && any_match) {
+                    return false;
+                }
+            }
+
+            // Unknown predicates are ignored (pass-through)
+            _ => {
+                trace!(operator = op, "Unknown predicate operator, skipping");
+            }
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,5 +546,70 @@ mod tests {
         ).await;
         assert!(result2.is_ok());
         assert_eq!(result2.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_predicate_eq_filters_correctly() {
+        let engine = SastEngine::new();
+
+        // Only match function named 'eval', not 'safe_func'
+        let code = r#"eval(); safe_func();"#;
+        let query_str = r#"(call_expression function: (identifier) @fn (#eq? @fn "eval")) @call"#;
+
+        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
+        assert_eq!(results.len(), 1, "Should match only eval(), not safe_func()");
+    }
+
+    #[tokio::test]
+    async fn test_predicate_match_regex() {
+        let engine = SastEngine::new();
+
+        let code = r#"exec("cmd"); spawn("sh"); JSON.parse("{}");"#;
+        let query_str = r#"(call_expression function: (identifier) @fn (#match? @fn "^(exec|spawn)$")) @call"#;
+
+        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
+        assert_eq!(results.len(), 2, "Should match exec and spawn but not JSON");
+    }
+
+    #[tokio::test]
+    async fn test_predicate_not_eq() {
+        let engine = SastEngine::new();
+
+        let code = r#"eval(); safe();"#;
+        let query_str = r#"(call_expression function: (identifier) @fn (#not-eq? @fn "eval")) @call"#;
+
+        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
+        assert_eq!(results.len(), 1, "Should match safe() but not eval()");
+    }
+
+    #[tokio::test]
+    async fn test_typescript_ts_ignore_predicate() {
+        let engine = SastEngine::new();
+
+        let code = r#"function safe(): number { return 1; }"#;
+        let code_with_comment = r#"function risky(): void { // @ts-ignore
+      undeclaredFunction();
+    }"#;
+        let query_str = r#"(comment) @comment (#match? @comment "@ts-ignore")"#;
+
+        let results = engine
+            .query(code, Language::TypeScript, query_str)
+            .await
+            .unwrap();
+        let results_with_comment = engine
+            .query(code_with_comment, Language::TypeScript, query_str)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            results.len(),
+            0,
+            "Should not match ts-ignore when no comment exists"
+        );
+        assert_eq!(
+            results_with_comment.len(),
+            1,
+            "Should match ts-ignore when comment exists"
+        );
     }
 }

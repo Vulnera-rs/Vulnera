@@ -74,3 +74,8 @@ futures = { workspace = true }
 uuid = { workspace = true }
 serde_yml = { workspace = true }
 insta = { version = "1.46", features = ["yaml"] }
+walkdir = { workspace = true }
+
+[[test]]
+name = "datatest_sast_rules"
+harness = false

@@ -75,12 +75,18 @@ message = "Validate and sanitize input before passing to child_process functions
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @fn
-  )
-  (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
-) @call
+[
+  (call_expression
+    function: (member_expression
+      property: (property_identifier) @fn
+    )
+    (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
+  ) @call
+  (call_expression
+    function: (identifier) @fn
+    (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
+  ) @call
+]
 '''
 
 [[rules]]
@@ -691,50 +697,6 @@ value = '''
 '''
 
 [[rules]]
-id = "js-helmet-missing"
-name = "Missing Security Headers"
-description = "Express app without Helmet middleware for security headers"
-severity = "Medium"
-languages = ["JavaScript"]
-cwe_ids = ["CWE-693"]
-owasp_categories = ["A05:2021 - Security Misconfiguration"]
-tags = ["helmet", "headers", "javascript"]
-message = "Use Helmet middleware: app.use(helmet()) for security headers."
-
-[rules.pattern]
-type = "TreeSitterQuery"
-value = '''
-(call_expression
-  function: (identifier) @fn
-  (#eq? @fn "express")
-) @app
-'''
-
-[[rules]]
-id = "js-no-rate-limit"
-name = "Missing Rate Limiting"
-description = "API endpoint without rate limiting is vulnerable to brute force"
-severity = "Medium"
-languages = ["JavaScript"]
-cwe_ids = ["CWE-307", "CWE-799"]
-owasp_categories = ["A04:2021 - Insecure Design"]
-tags = ["rate-limit", "brute-force", "javascript"]
-message = "Add rate limiting to sensitive endpoints: express-rate-limit."
-
-[rules.pattern]
-type = "TreeSitterQuery"
-value = '''
-(call_expression
-  function: (member_expression
-    object: (identifier) @app
-    property: (property_identifier) @method
-  )
-  (#match? @app "^(app|router)$")
-  (#match? @method "^(post|put|patch|delete)$")
-) @endpoint
-'''
-
-[[rules]]
 id = "js-sql-injection"
 name = "SQL Injection"
 description = "SQL query built with string concatenation is vulnerable to injection"
@@ -748,15 +710,67 @@ message = "Use parameterized queries: db.query('SELECT * FROM users WHERE id = ?
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @fn
-  )
-  arguments: (arguments
-    [(binary_expression) (template_string)]
-  )
-  (#match? @fn "^(query|execute|raw|prepare)$")
-) @sql
+[
+  (call_expression
+    function: (member_expression
+      property: (property_identifier) @fn
+    )
+    arguments: (arguments
+      [(binary_expression) (template_string)]
+    )
+    (#match? @fn "^(query|execute|raw|prepare)$")
+  ) @sql
+
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @var
+      value: (template_string) @sql
+    )
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @var
+      value: (binary_expression
+        left: (string) @sql_start
+        operator: "+"
+        right: (_) @rhs
+      )
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (assignment_expression
+    left: (identifier) @var
+    right: (template_string) @sql
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (assignment_expression
+    left: (identifier) @var
+    right: (binary_expression
+      left: (string) @sql_start
+      operator: "+"
+      right: (_) @rhs
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (return_statement
+    (template_string) @sql
+    (#match? @sql "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+
+  (return_statement
+    (binary_expression
+      left: (string) @sql_start
+      operator: "+"
+      right: (_) @rhs
+    )
+    (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
+  ) @sql
+]
 '''
 
 [[rules]]

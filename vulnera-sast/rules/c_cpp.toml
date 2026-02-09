@@ -177,9 +177,9 @@ value = '''
 (call_expression
   function: (identifier) @fn
   arguments: (argument_list
-    (identifier) @arg
+    . (identifier) @arg .
   )
-  (#match? @fn "^(printf|sprintf|fprintf|snprintf|vprintf|vsprintf)$")
+  (#match? @fn "^(printf|fprintf|sprintf|snprintf|vprintf|vsprintf)$")
 ) @call
 '''
 
@@ -248,25 +248,6 @@ value = '''
   function: (identifier) @fn
   (#eq? @fn "free")
 ) @free
-'''
-
-[[rules]]
-id = "c-integer-overflow"
-name = "Potential Integer Overflow"
-description = "Arithmetic operation may overflow"
-severity = "Medium"
-languages = ["C", "Cpp"]
-cwe_ids = ["CWE-190", "CWE-191"]
-owasp_categories = []
-tags = ["overflow", "arithmetic", "c"]
-message = "Consider using safe integer arithmetic or bounds checking."
-
-[rules.pattern]
-type = "TreeSitterQuery"
-value = '''
-(binary_expression
-  operator: ["+" "-" "*"]
-) @overflow
 '''
 
 [[rules]]
@@ -339,7 +320,7 @@ type = "TreeSitterQuery"
 value = '''
 (call_expression
   function: (identifier) @fn
-  (#match? @fn "^(memcpy|memmove|memset)$")
+  (#match? @fn "^(memcpy|memmove)$")
 ) @call
 '''
 
