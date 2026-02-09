@@ -703,9 +703,9 @@ impl Default for SastConfig {
             enable_data_flow: true,
             enable_call_graph: true,
             analysis_depth: AnalysisDepth::Standard,
-            dynamic_depth_enabled: Some(false),
-            dynamic_depth_file_count_threshold: None,
-            dynamic_depth_total_bytes_threshold: None,
+            dynamic_depth_enabled: Some(true),
+            dynamic_depth_file_count_threshold: Some(500),
+            dynamic_depth_total_bytes_threshold: Some(52_428_800), // 50 MB
             tree_cache_max_entries: Some(1024),
             enable_ast_cache: Some(true),
             ast_cache_ttl_hours: Some(4),

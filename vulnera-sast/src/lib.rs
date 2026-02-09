@@ -16,9 +16,15 @@
 //!
 //! ```rust
 //! use vulnera_sast::SastModule;
-//! use vulnera_core::config::SastConfig;
 //!
-//! let module = SastModule::with_config(&SastConfig::default());
+//! // Zero-config: sensible defaults, auto-detect depth
+//! let module = SastModule::builder().build();
+//!
+//! // Or from a SastConfig
+//! use vulnera_core::config::SastConfig;
+//! let module = SastModule::builder()
+//!     .sast_config(&SastConfig::default())
+//!     .build();
 //! ```
 //!
 //! See the [README.md](../README.md) for more detailed documentation.

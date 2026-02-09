@@ -6,6 +6,7 @@
 //! - Call graph analysis for cross-function vulnerability detection
 //! - SARIF v2.1.0 export
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -15,20 +16,20 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
+use crate::domain::value_objects::Language;
 use crate::domain::{
     DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
     Location, Pattern, Rule, Severity,
 };
-use crate::domain::value_objects::Language;
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
 use crate::infrastructure::incremental::IncrementalTracker;
-use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
+use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::taint_queries::{get_propagation_queries, TaintConfig};
+use crate::infrastructure::taint_queries::{TaintConfig, get_propagation_queries};
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -70,36 +71,81 @@ impl ScanResult {
     }
 }
 
-/// Configuration for the analysis pipeline
-#[derive(Debug, Clone)]
+// ─── Default value helpers ──────────────────
+const fn default_true() -> bool {
+    true
+}
+const fn default_ast_cache_ttl() -> u64 {
+    4
+}
+const fn default_max_concurrent() -> usize {
+    8
+}
+const fn default_tree_cache_max() -> usize {
+    1024
+}
+const fn default_max_file_size() -> u64 {
+    1_048_576
+}
+const fn default_per_file_timeout() -> u64 {
+    30
+}
+const fn default_max_findings_per_file() -> usize {
+    100
+}
+fn default_depth_file_threshold() -> Option<usize> {
+    Some(500)
+}
+fn default_depth_bytes_threshold() -> Option<u64> {
+    Some(52_428_800)
+} // 50 MB
+
+/// Configuration for the analysis pipeline.
+///
+/// All fields carry sensible defaults via `#[serde(default)]`, so typical usage
+/// only needs `AnalysisConfig::default()` or `AnalysisConfig::from(&sast_config)`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AnalysisConfig {
     /// Enable AST caching via Dragonfly
+    #[serde(default = "default_true")]
     pub enable_ast_cache: bool,
     /// AST cache TTL in hours
+    #[serde(default = "default_ast_cache_ttl")]
     pub ast_cache_ttl_hours: u64,
     /// Maximum concurrent file analysis
+    #[serde(default = "default_max_concurrent")]
     pub max_concurrent_files: usize,
     /// Enable inter-procedural data flow analysis
+    #[serde(default = "default_true")]
     pub enable_data_flow: bool,
     /// Enable call graph analysis
+    #[serde(default = "default_true")]
     pub enable_call_graph: bool,
     /// Analysis depth: Quick, Standard, or Deep
     pub analysis_depth: AnalysisDepth,
-    /// Enable dynamic depth selection based on repository size
+    /// Enable dynamic depth auto-detection based on repository size (opt-out)
+    #[serde(default = "default_true")]
     pub dynamic_depth_enabled: bool,
-    /// File count threshold to reduce depth (None = disabled)
+    /// File count threshold to reduce depth (default: 500 files)
+    #[serde(default = "default_depth_file_threshold")]
     pub dynamic_depth_file_count_threshold: Option<usize>,
-    /// Total bytes threshold to reduce depth (None = disabled)
+    /// Total bytes threshold to reduce depth (default: 50 MB)
+    #[serde(default = "default_depth_bytes_threshold")]
     pub dynamic_depth_total_bytes_threshold: Option<u64>,
     /// Maximum number of cached parsed trees per scan
+    #[serde(default = "default_tree_cache_max")]
     pub tree_cache_max_entries: usize,
     /// Maximum file size to analyze in bytes (files larger are skipped)
+    #[serde(default = "default_max_file_size")]
     pub max_file_size_bytes: u64,
     /// Per-file analysis timeout in seconds
+    #[serde(default = "default_per_file_timeout")]
     pub per_file_timeout_seconds: u64,
     /// Overall scan timeout in seconds (None = no limit)
     pub scan_timeout_seconds: Option<u64>,
     /// Maximum findings per file (prevents memory explosion)
+    #[serde(default = "default_max_findings_per_file")]
     pub max_findings_per_file: usize,
     /// Maximum total findings across all files (None = no limit)
     pub max_total_findings: Option<usize>,
@@ -107,48 +153,41 @@ pub struct AnalysisConfig {
     pub incremental_state_path: Option<PathBuf>,
 }
 
-impl Default for AnalysisConfig {
-    fn default() -> Self {
-        Self {
-            enable_ast_cache: true,
-            ast_cache_ttl_hours: 1,
-            max_concurrent_files: 8,
-            enable_data_flow: true,
-            enable_call_graph: true,
-            analysis_depth: AnalysisDepth::Standard,
-            dynamic_depth_enabled: false,
-            dynamic_depth_file_count_threshold: None,
-            dynamic_depth_total_bytes_threshold: None,
-            tree_cache_max_entries: 1024,
-            max_file_size_bytes: 1_048_576, // 1MB
-            per_file_timeout_seconds: 30,
-            scan_timeout_seconds: None,
-            max_findings_per_file: 100,
-            max_total_findings: None,
-            incremental_state_path: None,
-        }
-    }
-}
-
 impl From<&SastConfig> for AnalysisConfig {
     fn from(config: &SastConfig) -> Self {
         Self {
-            enable_ast_cache: config.enable_ast_cache.unwrap_or(true),
-            ast_cache_ttl_hours: config.ast_cache_ttl_hours.unwrap_or(4),
-            max_concurrent_files: config.max_concurrent_files.unwrap_or(4),
+            enable_ast_cache: config.enable_ast_cache.unwrap_or(default_true()),
+            ast_cache_ttl_hours: config
+                .ast_cache_ttl_hours
+                .unwrap_or(default_ast_cache_ttl()),
+            max_concurrent_files: config
+                .max_concurrent_files
+                .unwrap_or(default_max_concurrent()),
             enable_data_flow: config.enable_data_flow,
             enable_call_graph: config.enable_call_graph,
             analysis_depth: config.analysis_depth,
-            dynamic_depth_enabled: config.dynamic_depth_enabled.unwrap_or(false),
-            dynamic_depth_file_count_threshold: config.dynamic_depth_file_count_threshold,
-            dynamic_depth_total_bytes_threshold: config.dynamic_depth_total_bytes_threshold,
-            tree_cache_max_entries: config.tree_cache_max_entries.unwrap_or(1024),
-            max_file_size_bytes: config.max_file_size_bytes.unwrap_or(1_048_576),
-            per_file_timeout_seconds: config.per_file_timeout_seconds.unwrap_or(30),
+            dynamic_depth_enabled: config.dynamic_depth_enabled.unwrap_or(default_true()),
+            dynamic_depth_file_count_threshold: config
+                .dynamic_depth_file_count_threshold
+                .or_else(default_depth_file_threshold),
+            dynamic_depth_total_bytes_threshold: config
+                .dynamic_depth_total_bytes_threshold
+                .or_else(default_depth_bytes_threshold),
+            tree_cache_max_entries: config
+                .tree_cache_max_entries
+                .unwrap_or(default_tree_cache_max()),
+            max_file_size_bytes: config
+                .max_file_size_bytes
+                .unwrap_or(default_max_file_size()),
+            per_file_timeout_seconds: config
+                .per_file_timeout_seconds
+                .unwrap_or(default_per_file_timeout()),
             scan_timeout_seconds: config.scan_timeout_seconds,
-            max_findings_per_file: config.max_findings_per_file.unwrap_or(100),
+            max_findings_per_file: config
+                .max_findings_per_file
+                .unwrap_or(default_max_findings_per_file()),
             max_total_findings: config.max_total_findings,
-            incremental_state_path: None,
+            incremental_state_path: config.incremental_state_path.clone(),
         }
     }
 }
@@ -716,13 +755,28 @@ impl ScanProjectUseCase {
 
         // Detect sources, sinks, and sanitizers using tree-sitter queries
         let (sources, sinks, sanitizers, sanitizer_confidence, assignments) = {
-            let matches = self.sast_engine.detect_taint(&tree, source_bytes, *language, &TaintConfig::default()).await;
-            
+            let matches = self
+                .sast_engine
+                .detect_taint(&tree, source_bytes, *language, &TaintConfig::default())
+                .await;
+
             // Split matches into sources, sinks, and sanitizers based on their properties
-            let sources: Vec<_> = matches.iter().filter(|m| !m.labels.is_empty()).cloned().collect();
-            let sinks: Vec<_> = matches.iter().filter(|m| m.labels.is_empty() && m.clears_labels.is_none()).cloned().collect();
-            let sanitizers: Vec<_> = matches.iter().filter(|m| m.clears_labels.is_some()).cloned().collect();
-            
+            let sources: Vec<_> = matches
+                .iter()
+                .filter(|m| !m.labels.is_empty())
+                .cloned()
+                .collect();
+            let sinks: Vec<_> = matches
+                .iter()
+                .filter(|m| m.labels.is_empty() && m.clears_labels.is_none())
+                .cloned()
+                .collect();
+            let sanitizers: Vec<_> = matches
+                .iter()
+                .filter(|m| m.clears_labels.is_some())
+                .cloned()
+                .collect();
+
             let assignments = Self::extract_assignments(&tree, source_bytes, language);
 
             // Collect confidence values for sanitizers
@@ -817,8 +871,8 @@ impl ScanProjectUseCase {
                     .as_deref()
                     .unwrap_or(&source.matched_text);
 
-                let source_in_expr = source_expr.contains(source_var)
-                    || source_expr.contains(&source.matched_text);
+                let source_in_expr =
+                    source_expr.contains(source_var) || source_expr.contains(&source.matched_text);
 
                 if source_in_expr {
                     analyzer.mark_tainted(

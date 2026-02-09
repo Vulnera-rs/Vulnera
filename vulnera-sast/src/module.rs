@@ -12,41 +12,104 @@ use vulnera_core::domain::module::{
 
 use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
 use crate::domain::Severity as SastSeverity;
+use crate::infrastructure::ast_cache::AstCacheService;
 
-/// SAST analysis module
+/// SAST analysis module.
+///
+/// Construct via the builder:
+/// ```rust
+/// use vulnera_sast::SastModule;
+/// let module = SastModule::builder().build();
+/// ```
 pub struct SastModule {
     use_case: Arc<ScanProjectUseCase>,
 }
 
-impl SastModule {
-    pub fn new() -> Self {
-        Self::with_config(&SastConfig::default())
+/// Builder for [`SastModule`].
+///
+/// All fields are optional — omitting everything yields a sensible default
+/// configuration (zero-config UX).
+pub struct SastModuleBuilder {
+    sast_config: Option<SastConfig>,
+    analysis_config: Option<AnalysisConfig>,
+    ast_cache: Option<Arc<dyn AstCacheService>>,
+    use_case_override: Option<Arc<ScanProjectUseCase>>,
+}
+
+impl SastModuleBuilder {
+    /// Override the SAST config (scanning depth, excludes, rule file, etc.).
+    pub fn sast_config(mut self, config: &SastConfig) -> Self {
+        self.sast_config = Some(config.clone());
+        self
     }
 
-    pub fn with_config(config: &SastConfig) -> Self {
-        Self {
-            use_case: Arc::new(ScanProjectUseCase::with_config(
-                config,
-                AnalysisConfig::default(),
-            )),
-        }
-    }
-
-    /// Create with custom analysis config
-    pub fn with_full_config(sast_config: &SastConfig, analysis_config: AnalysisConfig) -> Self {
-        Self {
-            use_case: Arc::new(ScanProjectUseCase::with_config(
-                sast_config,
-                analysis_config,
-            )),
-        }
-    }
-
-    /// Create with a pre-built use case (dependency injection)
+    /// Override the analysis config (concurrency, timeouts, cache, etc.).
     ///
-    /// Use this when you want to inject a fully-configured ScanProjectUseCase.
-    pub fn with_use_case(use_case: Arc<ScanProjectUseCase>) -> Self {
-        Self { use_case }
+    /// If omitted and a `SastConfig` is set, `AnalysisConfig::from(&sast_config)` is used.
+    /// If both are omitted, `AnalysisConfig::default()` applies.
+    pub fn analysis_config(mut self, config: AnalysisConfig) -> Self {
+        self.analysis_config = Some(config);
+        self
+    }
+
+    /// Attach a Dragonfly-backed AST cache for parsed file caching.
+    pub fn ast_cache(mut self, cache: Arc<dyn AstCacheService>) -> Self {
+        self.ast_cache = Some(cache);
+        self
+    }
+
+    /// Inject a fully-constructed `ScanProjectUseCase` (overrides all other settings).
+    ///
+    /// Use this from the composition root when you need full control.
+    pub fn use_case(mut self, use_case: Arc<ScanProjectUseCase>) -> Self {
+        self.use_case_override = Some(use_case);
+        self
+    }
+
+    /// Build the `SastModule`.
+    pub fn build(self) -> SastModule {
+        let use_case = if let Some(uc) = self.use_case_override {
+            uc
+        } else {
+            let sast_cfg = self.sast_config.unwrap_or_default();
+            let analysis_cfg = self
+                .analysis_config
+                .unwrap_or_else(|| AnalysisConfig::from(&sast_cfg));
+
+            let uc = ScanProjectUseCase::with_config(&sast_cfg, analysis_cfg);
+            let uc = if let Some(cache) = self.ast_cache {
+                uc.with_ast_cache(cache)
+            } else {
+                uc
+            };
+            Arc::new(uc)
+        };
+
+        SastModule { use_case }
+    }
+}
+
+impl SastModule {
+    /// Create a builder for configuring and constructing a `SastModule`.
+    pub fn builder() -> SastModuleBuilder {
+        SastModuleBuilder {
+            sast_config: None,
+            analysis_config: None,
+            ast_cache: None,
+            use_case_override: None,
+        }
+    }
+
+    // ── Convenience constructors (thin wrappers around the builder) ──
+
+    /// Zero-config constructor — sensible defaults, auto-detect depth.
+    pub fn new() -> Self {
+        Self::builder().build()
+    }
+
+    /// Construct from a `SastConfig` (derives `AnalysisConfig` automatically).
+    pub fn with_config(config: &SastConfig) -> Self {
+        Self::builder().sast_config(config).build()
     }
 }
 
