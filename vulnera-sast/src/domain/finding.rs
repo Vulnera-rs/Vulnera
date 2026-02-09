@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::value_objects::{Confidence, Language};
+use super::value_objects::Confidence;
 
 /// Security finding from SAST analysis
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,6 +63,16 @@ impl TreeSitterParser {
         })
     }
 
+    /// Parse source code and return the raw tree-sitter Tree.
+    /// This is useful for executing queries directly against the AST.
+    pub fn parse_tree(&mut self, source: &str) -> Result<tree_sitter::Tree, ParseError> {
+        self.parser.parse(source, None).ok_or_else(|| {
+            let label = if self.is_tsx { "TSX" } else { self.lang.to_tree_sitter_name() };
+            warn!(language = label, "Failed to parse code");
+            ParseError::ParseFailed(format!("Failed to parse {} code", label))
+        })
+    }
+
     /// Create a TSX parser for React/JSX files.
     pub fn new_tsx() -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();

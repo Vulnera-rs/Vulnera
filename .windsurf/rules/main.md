@@ -26,7 +26,8 @@ CORRECTNESS > PERFORMANCE > READABILITY > CLEVERNESS
 - ✅ Input validation and sanitization (zero-trust model)
 - ✅ Type safety enforced at language level
 - ✅ Self-documenting code with targeted comments for complex logic
-
+- ✅ Use of modern language features and patterns
+- ✅ Do not ever never make backward compatibility unless asked for , always modernize the codebase
 ### 3. Modern Tooling Requirements
 - **Rust**: Latest stable (2024 edition), `clippy` lints enforced, `cargo check` before delivery, and cargo fmt at final
 - **Python**: `uv` for deps, `ruff` for linting, type hints mandatory (Python 3.12+)

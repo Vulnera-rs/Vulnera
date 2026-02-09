@@ -18,6 +18,7 @@ pub mod parsers;
 pub mod query_engine;
 pub mod rules;
 pub mod sarif;
+pub mod sast_engine;
 pub mod scanner;
 pub mod taint_queries;
 
@@ -28,5 +29,6 @@ pub use incremental::*;
 pub use query_engine::*;
 pub use rules::{RuleEngine, RuleRepository};
 pub use sarif::*;
+pub use sast_engine::*;
 pub use scanner::*;
 pub use taint_queries::*;

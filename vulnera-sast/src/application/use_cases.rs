@@ -9,7 +9,7 @@
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, RwLock as StdRwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
@@ -17,22 +17,19 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
-use crate::domain::finding::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding,
-    Location, Severity,
+use crate::domain::{
+    DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
+    Location, Pattern, Rule, Severity,
 };
-use crate::domain::pattern_types::{Pattern, PatternRule as Rule};
-use crate::domain::suppression::FileSuppressions;
 use crate::domain::value_objects::{AnalysisEngine, Language};
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
-use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch, TaintQueryEngine};
-use crate::infrastructure::parsers::ast_from_tree;
-use crate::infrastructure::query_engine::TreeSitterQueryEngine;
+use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
+use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::rules::{RuleEngine, RuleRepository};
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::taint_queries::get_propagation_queries;
+use crate::infrastructure::taint_queries::{get_propagation_queries, TaintConfig};
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -155,14 +152,6 @@ impl From<&SastConfig> for AnalysisConfig {
     }
 }
 
-/// In-memory parsed tree cache entry for long-lived workers
-struct ParsedTreeCacheEntry {
-    content_hash: String,
-    tree: tree_sitter::Tree,
-    source: String,
-    last_access: Instant,
-}
-
 /// AST cache statistics for observability
 #[derive(Debug, Default, Clone)]
 struct AstCacheStats {
@@ -176,17 +165,13 @@ struct AstCacheStats {
 pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
     rule_repository: Arc<RwLock<RuleRepository>>,
-    rule_engine: RuleEngine,
+    sast_engine: SastEngineHandle,
     /// AST cache for parsed file caching (Dragonfly-backed)
     ast_cache: Option<Arc<dyn AstCacheService>>,
     /// Inter-procedural data flow context
     data_flow_context: Arc<RwLock<InterProceduralContext>>,
     /// Call graph builder
     call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
-    /// Taint query engine for AST-aware taint detection (uses std::sync::RwLock internally)
-    taint_query_engine: Arc<StdRwLock<TaintQueryEngine>>,
-    /// In-memory parsed tree cache for long-lived workers
-    parsed_tree_cache: StdRwLock<HashMap<String, ParsedTreeCacheEntry>>,
     /// Analysis configuration
     config: AnalysisConfig,
 }
@@ -209,12 +194,10 @@ impl ScanProjectUseCase {
         Self {
             scanner,
             rule_repository: Arc::new(RwLock::new(rule_repository)),
-            rule_engine: RuleEngine::new(),
+            sast_engine: Arc::new(SastEngine::new()),
             ast_cache: None,
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
-            taint_query_engine: Arc::new(StdRwLock::new(TaintQueryEngine::new_owned())),
-            parsed_tree_cache: StdRwLock::new(HashMap::new()),
             config: analysis_config,
         }
     }
@@ -236,72 +219,10 @@ impl ScanProjectUseCase {
         }
     }
 
-    async fn refresh_l2_cache_entry(
-        &self,
-        content_hash: &str,
-        language: &Language,
-        tree: &tree_sitter::Tree,
-        source: &str,
-    ) {
-        let Some(cache) = self.ast_cache.as_ref() else {
-            return;
-        };
-
-        let ast = ast_from_tree(tree, source);
-        let ttl = Duration::from_secs(self.config.ast_cache_ttl_hours * 3600);
-
-        if let Err(e) = cache.set(content_hash, language, &ast, Some(ttl)).await {
-            warn!(error = %e, "Failed to refresh L2 AST cache entry");
-        }
-    }
-
     fn compute_content_hash(&self, content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         hex::encode(hasher.finalize())
-    }
-
-    fn get_cached_tree(
-        &self,
-        file_path: &str,
-        content: &str,
-    ) -> Option<(tree_sitter::Tree, String)> {
-        let content_hash = self.compute_content_hash(content);
-        let mut cache = self.parsed_tree_cache.write().unwrap();
-
-        if let Some(entry) = cache.get_mut(file_path) {
-            if entry.content_hash == content_hash {
-                entry.last_access = Instant::now();
-                return Some((entry.tree.clone(), entry.source.clone()));
-            }
-        }
-
-        None
-    }
-
-    fn insert_cached_tree(&self, file_path: String, content: &str, tree: tree_sitter::Tree) {
-        let content_hash = self.compute_content_hash(content);
-        let mut cache = self.parsed_tree_cache.write().unwrap();
-
-        if cache.len() >= self.config.tree_cache_max_entries {
-            if let Some(oldest_key) = cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_access)
-                .map(|(key, _)| key.clone())
-            {
-                cache.remove(&oldest_key);
-            }
-        }
-
-        cache.insert(
-            file_path,
-            ParsedTreeCacheEntry {
-                content_hash,
-                tree,
-                source: content.to_string(),
-                last_access: Instant::now(),
-            },
-        );
     }
 
     fn resolve_analysis_depth(&self, file_count: usize, total_bytes: u64) -> AnalysisDepth {
@@ -376,28 +297,16 @@ impl ScanProjectUseCase {
         if self.config.enable_call_graph && effective_depth != AnalysisDepth::Quick {
             debug!("Phase 1: Building call graph with cross-file resolution");
             let mut call_graph = self.call_graph_builder.write().await;
-            let mut query_engine = TreeSitterQueryEngine::new();
+            let mut query_engine = SastEngine::new();
 
             // 1a. Parse all files and build initial graph
             for file in &files {
                 if let Ok(content) = std::fs::read_to_string(&file.path) {
                     let file_path_str = file.path.display().to_string();
 
-                    let tree = if let Some((cached_tree, _)) =
-                        self.get_cached_tree(&file_path_str, &content)
-                    {
-                        cached_tree
-                    } else {
-                        let Ok((parsed_tree, _)) = query_engine.parse(&content, &file.language)
-                        else {
-                            continue;
-                        };
-                        self.insert_cached_tree(
-                            file_path_str.clone(),
-                            &content,
-                            parsed_tree.clone(),
-                        );
-                        parsed_tree
+                    let tree = match query_engine.parse(&content, file.language).await {
+                        Ok(tree) => tree,
+                        Err(_) => continue,
                     };
 
                     // Build call graph nodes and edges
@@ -470,11 +379,7 @@ impl ScanProjectUseCase {
             let content_hash = self.compute_content_hash(&content);
             let mut cached_tree = parsed_files
                 .get(&file_path_str)
-                .map(|(tree, _)| tree.clone())
-                .or_else(|| {
-                    self.get_cached_tree(&file_path_str, &content)
-                        .map(|(tree, _)| tree)
-                });
+                .map(|(tree, _)| tree.clone());
 
             if cached_tree.is_some() {
                 ast_cache_stats.l1_hits = ast_cache_stats.l1_hits.saturating_add(1);
@@ -493,17 +398,12 @@ impl ScanProjectUseCase {
                     }
                 }
 
-                let query_engine = TreeSitterQueryEngine::new();
-                if let Ok((parsed_tree, _)) = query_engine.parse(&content, &file.language) {
-                    self.insert_cached_tree(file_path_str.clone(), &content, parsed_tree.clone());
-                    self.refresh_l2_cache_entry(
-                        &content_hash,
-                        &file.language,
-                        &parsed_tree,
-                        &content,
-                    )
-                    .await;
-                    cached_tree = Some(parsed_tree);
+                let query_engine = SastEngine::new();
+                match query_engine.parse(&content, file.language).await {
+                    Ok(tree) => {
+                        cached_tree = Some(tree);
+                    }
+                    Err(_) => {}
                 }
             }
 
@@ -640,18 +540,14 @@ impl ScanProjectUseCase {
             "Executing tree-sitter rules"
         );
 
-        let results = if let Some(tree) = tree {
-            self.rule_engine
-                .execute_tree_sitter_rules_with_tree(&ts_rules, language, content, tree)
-                .await
-        } else {
-            self.rule_engine
-                .execute_tree_sitter_rules(&ts_rules, language, content)
+        let results = {
+            self.sast_engine
+                .query_batch(content, *language, &ts_rules)
                 .await
         };
 
-        let query_engine = self.rule_engine.query_engine();
-        let engine = query_engine.read().await;
+        // Get sast_engine for match_to_finding
+        let sast_engine = Arc::clone(&self.sast_engine);
 
         for (rule_id, matches) in results {
             let rule = ts_rules.iter().find(|r| r.id == rule_id);
@@ -669,7 +565,7 @@ impl ScanProjectUseCase {
                         continue;
                     }
 
-                    let finding = engine.match_to_finding(
+                    let finding = sast_engine.match_to_finding(
                         &match_result,
                         rule,
                         &file_path.display().to_string(),
@@ -704,9 +600,8 @@ impl ScanProjectUseCase {
         let tree = if let Some(tree) = tree {
             tree.clone()
         } else {
-            let query_engine = TreeSitterQueryEngine::new();
-            let (parsed_tree, _) = match query_engine.parse(content, language) {
-                Ok(t) => t,
+            match self.sast_engine.parse(content, *language).await {
+                Ok(tree) => tree,
                 Err(e) => {
                     warn!(
                         file = %file_path.display(),
@@ -715,33 +610,27 @@ impl ScanProjectUseCase {
                     );
                     return;
                 }
-            };
-            parsed_tree
+            }
         };
 
         let source_bytes = content.as_bytes();
         let file_str = file_path.display().to_string();
 
         // Detect sources, sinks, and sanitizers using tree-sitter queries
-        // Acquire lock, do detection, release lock before any await
         let (sources, sinks, sanitizers, sanitizer_confidence, assignments) = {
-            let mut taint_engine = match self.taint_query_engine.write() {
-                Ok(guard) => guard,
-                Err(e) => {
-                    error!(error = %e, "Failed to acquire taint engine write lock");
-                    return;
-                }
-            };
-
-            let sources = taint_engine.detect_sources(&tree, source_bytes, language);
-            let sinks = taint_engine.detect_sinks(&tree, source_bytes, language);
-            let sanitizers = taint_engine.detect_sanitizers(&tree, source_bytes, language);
+            let matches = self.sast_engine.detect_taint(&tree, source_bytes, *language, &TaintConfig::default()).await;
+            
+            // Split matches into sources, sinks, and sanitizers based on their properties
+            let sources: Vec<_> = matches.iter().filter(|m| !m.labels.is_empty()).cloned().collect();
+            let sinks: Vec<_> = matches.iter().filter(|m| m.labels.is_empty() && m.clears_labels.is_none()).cloned().collect();
+            let sanitizers: Vec<_> = matches.iter().filter(|m| m.clears_labels.is_some()).cloned().collect();
+            
             let assignments = Self::extract_assignments(&tree, source_bytes, language);
 
             // Collect confidence values for sanitizers
             let sanitizer_confidence: Vec<Option<f32>> = sanitizers
                 .iter()
-                .map(|s| taint_engine.get_sanitizer_confidence(s))
+                .map(|s| if s.is_known { None } else { Some(0.5) })
                 .collect();
 
             (
@@ -751,7 +640,7 @@ impl ScanProjectUseCase {
                 sanitizer_confidence,
                 assignments,
             )
-        }; // Lock released here
+        };
 
         debug!(
             file = %file_str,

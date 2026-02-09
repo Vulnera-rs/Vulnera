@@ -8,28 +8,31 @@ pub use loader::{FileRuleLoader, RuleLoadError, RuleLoader};
 
 use crate::domain::{Pattern, Rule};
 use crate::domain::value_objects::Language;
-use crate::infrastructure::query_engine::{
-    QueryEngineError, QueryMatchResult, TreeSitterQueryEngine,
-};
+use crate::infrastructure::query_engine::QueryMatchResult;
+use crate::infrastructure::sast_engine::{SastEngine, SastEngineError, SastEngineHandle};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::debug;
 
-/// Rule engine for matching security patterns using tree-sitter queries
+/// Rule engine for matching security patterns using SastEngine
 ///
-/// All rules use tree-sitter S-expression queries for pattern matching.
-/// This provides consistent, powerful, and performant analysis across all languages.
+/// Thin wrapper around SastEngine for backward compatibility.
+/// All pattern matching is delegated to the unified SastEngine.
 pub struct RuleEngine {
-    /// Tree-sitter query engine for S-expression pattern matching
-    query_engine: Arc<RwLock<TreeSitterQueryEngine>>,
+    /// Unified SAST engine for pattern matching
+    sast_engine: SastEngineHandle,
 }
 
 impl RuleEngine {
-    /// Create a new rule engine with tree-sitter query support
+    /// Create a new rule engine with SastEngine
     pub fn new() -> Self {
         Self {
-            query_engine: Arc::new(RwLock::new(TreeSitterQueryEngine::new())),
+            sast_engine: Arc::new(SastEngine::new()),
         }
+    }
+
+    /// Create with a pre-built SastEngine (dependency injection)
+    pub fn with_sast_engine(sast_engine: SastEngineHandle) -> Self {
+        Self { sast_engine }
     }
 
     /// Execute a tree-sitter query against source code
@@ -41,16 +44,15 @@ impl RuleEngine {
         rule: &Rule,
         language: &Language,
         source_code: &str,
-    ) -> Result<Vec<QueryMatchResult>, TreeSitterQueryError> {
+    ) -> Result<Vec<QueryMatchResult>, SastEngineError> {
         let query_str = match &rule.pattern {
             Pattern::TreeSitterQuery(query) => query.as_str(),
             _ => return Ok(Vec::new()), // Only tree-sitter queries supported
         };
 
-        let mut engine = self.query_engine.write().await;
-        engine
-            .query(source_code, language, query_str)
-            .map_err(TreeSitterQueryError::QueryExecution)
+        self.sast_engine
+            .query(source_code, *language, query_str)
+            .await
     }
 
     /// Execute multiple tree-sitter rules against source code
@@ -62,37 +64,9 @@ impl RuleEngine {
         language: &Language,
         source_code: &str,
     ) -> Vec<(String, Vec<QueryMatchResult>)> {
-        let mut results = Vec::with_capacity(rules.len());
-        let mut engine = self.query_engine.write().await;
-
-        // Collect queries for batch execution
-        let queries: Vec<(String, &str)> = rules
-            .iter()
-            .filter_map(|rule| match &rule.pattern {
-                Pattern::TreeSitterQuery(query) => Some((rule.id.clone(), query.as_str())),
-                _ => None,
-            })
-            .collect();
-
-        if queries.is_empty() {
-            return results;
-        }
-
-        // Execute batch query
-        match engine.batch_query(source_code, language, &queries) {
-            Ok(batch_results) => {
-                for (rule_id, matches) in batch_results {
-                    if !matches.is_empty() {
-                        results.push((rule_id, matches));
-                    }
-                }
-            }
-            Err(e) => {
-                debug!(error = %e, "Batch tree-sitter query execution failed");
-            }
-        }
-
-        results
+        self.sast_engine
+            .query_batch(source_code, *language, rules)
+            .await
     }
 
     /// Execute multiple tree-sitter rules against a pre-parsed tree
@@ -103,44 +77,17 @@ impl RuleEngine {
         rules: &[&Rule],
         language: &Language,
         source_code: &str,
-        tree: &tree_sitter::Tree,
+        _tree: &tree_sitter::Tree,
     ) -> Vec<(String, Vec<QueryMatchResult>)> {
-        let mut results = Vec::with_capacity(rules.len());
-        let mut engine = self.query_engine.write().await;
-
-        // Collect queries for batch execution
-        let queries: Vec<(String, &str)> = rules
-            .iter()
-            .filter_map(|rule| match &rule.pattern {
-                Pattern::TreeSitterQuery(query) => Some((rule.id.clone(), query.as_str())),
-                _ => None,
-            })
-            .collect();
-
-        if queries.is_empty() {
-            return results;
-        }
-
-        // Execute batch query against provided tree
-        match engine.batch_query_with_tree(tree, source_code, language, &queries) {
-            Ok(batch_results) => {
-                for (rule_id, matches) in batch_results {
-                    if !matches.is_empty() {
-                        results.push((rule_id, matches));
-                    }
-                }
-            }
-            Err(e) => {
-                debug!(error = %e, "Batch tree-sitter query execution failed");
-            }
-        }
-
-        results
+        // For now, delegate to query_batch (tree reuse optimization can be added later)
+        self.sast_engine
+            .query_batch(source_code, *language, rules)
+            .await
     }
 
-    /// Get the query engine for direct access (advanced usage)
-    pub fn query_engine(&self) -> Arc<RwLock<TreeSitterQueryEngine>> {
-        Arc::clone(&self.query_engine)
+    /// Get the underlying SastEngine handle
+    pub fn sast_engine(&self) -> SastEngineHandle {
+        Arc::clone(&self.sast_engine)
     }
 }
 
@@ -154,7 +101,7 @@ impl Default for RuleEngine {
 #[derive(Debug, thiserror::Error)]
 pub enum TreeSitterQueryError {
     #[error("Query execution failed: {0}")]
-    QueryExecution(#[from] QueryEngineError),
+    QueryExecution(#[from] SastEngineError),
 }
 
 /// Rule repository

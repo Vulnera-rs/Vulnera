@@ -9,7 +9,7 @@ use tree_sitter::Tree;
 use crate::domain::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
-use crate::infrastructure::query_engine::TreeSitterQueryEngine;
+use crate::infrastructure::sast_engine::SastEngine;
 
 /// Call graph for inter-procedural analysis
 #[derive(Debug, Default)]
@@ -476,7 +476,7 @@ impl CallGraphBuilder {
         tree: &Tree,
         language: &Language,
         source: &str,
-        query_engine: &mut TreeSitterQueryEngine,
+        query_engine: &mut SastEngine,
     ) {
         let source_bytes = source.as_bytes();
 

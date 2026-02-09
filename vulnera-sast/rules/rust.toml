@@ -11,6 +11,9 @@ owasp_categories = []
 tags = ["panic", "error-handling", "rust"]
 message = "Use match, if let, or ? operator instead of unwrap()."
 
+[rules.options]
+suppress_in_tests = true
+
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
@@ -32,6 +35,9 @@ cwe_ids = ["CWE-476"]
 owasp_categories = []
 tags = ["panic", "error-handling", "rust"]
 message = "Consider using match or ? operator for recoverable errors."
+
+[rules.options]
+suppress_in_tests = true
 
 [rules.pattern]
 type = "TreeSitterQuery"

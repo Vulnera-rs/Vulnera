@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::finding::{DataFlowNode, DataFlowPath, Location, Severity};
-use super::pattern_types::{PatternRule, SimplePattern, SimplePatternKind};
+use super::finding::Severity;
+use super::pattern_types::PatternRule;
 use super::taint_types::DataFlowRule;
 use super::value_objects::Language;
 
@@ -138,6 +138,29 @@ pub struct RuleSet {
     pub version: Option<String>,
     /// Rules in this set
     pub rules: Vec<SastRule>,
+}
+
+// =============================================================================
+// Legacy Support
+// =============================================================================
+
+/// Alias for PatternRule (backwards compatibility)
+pub type Rule = PatternRule;
+
+/// Legacy RulePattern enum - use Pattern instead
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RulePattern {
+    TreeSitterQuery(String),
+}
+
+impl From<RulePattern> for super::pattern_types::Pattern {
+    fn from(rp: RulePattern) -> Self {
+        match rp {
+            RulePattern::TreeSitterQuery(q) => {
+                super::pattern_types::Pattern::TreeSitterQuery(q)
+            }
+        }
+    }
 }
 
 // =============================================================================
