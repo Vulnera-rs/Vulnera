@@ -4,7 +4,7 @@ mod default_rules;
 mod loader;
 
 pub use default_rules::get_default_rules;
-pub use loader::{FileRuleLoader, RuleLoadError, RuleLoader};
+pub use loader::{BuiltinRuleLoader, FileRuleLoader, RuleLoadError, RuleLoader};
 
 use crate::domain::{Pattern, Rule};
 use crate::domain::value_objects::Language;
@@ -110,9 +110,23 @@ pub struct RuleRepository {
 }
 
 impl RuleRepository {
-    /// Create a new rule repository with default rules
+    /// Create a new rule repository with default built-in rules.
     pub fn new() -> Self {
-        Self::with_rules(get_default_rules())
+        let loader = BuiltinRuleLoader::new();
+        // BuiltinRuleLoader is infallible in practice; unwrap is safe here.
+        let rules = loader.load_rules().unwrap_or_default();
+        Self::with_rules(rules)
+    }
+
+    /// Create a rule repository from an arbitrary [`RuleLoader`].
+    pub fn from_loader(loader: &dyn RuleLoader) -> Self {
+        match loader.load_rules() {
+            Ok(rules) => Self::with_rules(rules),
+            Err(e) => {
+                tracing::warn!(error = %e, "Loader failed, falling back to defaults");
+                Self::new()
+            }
+        }
     }
 
     /// Create a rule repository with custom rules
@@ -136,12 +150,13 @@ impl RuleRepository {
         }
     }
 
-    /// Create a rule repository with both file rules and default rules
+    /// Create a rule repository with both file rules and default rules.
     pub fn with_file_and_defaults<P: AsRef<std::path::Path>>(file_path: P) -> Self {
-        let mut rules = get_default_rules();
+        let builtin = BuiltinRuleLoader::new();
+        let mut rules = builtin.load_rules().unwrap_or_default();
 
-        let loader = FileRuleLoader::new(file_path);
-        match loader.load_rules() {
+        let file_loader = FileRuleLoader::new(file_path);
+        match file_loader.load_rules() {
             Ok(file_rules) => {
                 debug!(
                     file_rule_count = file_rules.len(),
@@ -167,7 +182,6 @@ impl RuleRepository {
     pub fn get_all_rules(&self) -> &[Rule] {
         &self.rules
     }
-
 }
 
 impl Default for RuleRepository {

@@ -141,12 +141,6 @@ impl ParserFactory {
     }
 }
 
-/// Build an AST from an existing tree-sitter tree
-pub(crate) fn ast_from_tree(tree: &tree_sitter::Tree, source: &str) -> AstNode {
-    let root_node = tree.root_node();
-    convert_tree_sitter_node(root_node, source, None)
-}
-
 /// Convert tree-sitter node to our AST representation
 pub(crate) fn convert_tree_sitter_node(
     node: tree_sitter::Node,

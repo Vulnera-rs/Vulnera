@@ -7,6 +7,7 @@
 
 use crate::domain::{Pattern, Rule, Severity};
 use crate::domain::value_objects::Language;
+use crate::infrastructure::rules::default_rules::get_default_rules;
 use serde::Deserialize;
 use std::path::Path;
 use tracing::{debug, warn};
@@ -14,6 +15,32 @@ use tracing::{debug, warn};
 /// Trait for loading rules from various sources
 pub trait RuleLoader: Send + Sync {
     fn load_rules(&self) -> Result<Vec<Rule>, RuleLoadError>;
+}
+
+/// Loader for compile-time embedded TOML rules.
+///
+/// Wraps the `get_default_rules()` function behind the [`RuleLoader`] trait,
+/// enabling uniform polymorphic usage alongside [`FileRuleLoader`].
+pub struct BuiltinRuleLoader;
+
+impl BuiltinRuleLoader {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BuiltinRuleLoader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RuleLoader for BuiltinRuleLoader {
+    fn load_rules(&self) -> Result<Vec<Rule>, RuleLoadError> {
+        let rules = get_default_rules();
+        debug!(rule_count = rules.len(), "Loaded built-in rules from embedded TOML");
+        Ok(rules)
+    }
 }
 
 /// Error type for rule loading

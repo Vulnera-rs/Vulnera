@@ -4,13 +4,13 @@
 //! where user input flows to sensitive sinks without proper sanitization.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use tree_sitter::Tree;
+use tree_sitter::{Query, Tree};
 
 use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, TaintLabel, TaintState};
 use crate::domain::value_objects::Language;
-use crate::infrastructure::query_engine::TreeSitterQueryEngine;
+use crate::infrastructure::query_engine;
 use crate::infrastructure::taint_queries::{
     TaintConfig, TaintPattern, get_sanitizer_queries, get_sink_queries, get_source_queries,
 };
@@ -349,11 +349,11 @@ impl InterProceduralContext {
 
         // Fallback: Use legacy parameter taint tracking
         for (idx, arg_taint) in argument_taints.iter().enumerate() {
-            if arg_taint.is_some() {
-                if self.get_param_taint(function_id, idx).is_some() {
-                    if let Some(ret_taint) = self.get_return_taint(function_id) {
-                        return Some(ret_taint.clone());
-                    }
+            if arg_taint.is_some()
+                && self.get_param_taint(function_id, idx).is_some()
+            {
+                if let Some(ret_taint) = self.get_return_taint(function_id) {
+                    return Some(ret_taint.clone());
                 }
             }
         }
@@ -390,7 +390,7 @@ impl InterProceduralContext {
 
         // 2. Analyze parameter taints that we've tracked
         if let Some(param_taints) = self.param_taint.get(function_id) {
-            for (&param_idx, _param_state) in param_taints {
+            for &param_idx in param_taints.keys() {
                 // Check if this parameter's taint reached any sinks
                 // This information comes from the function's analyzer findings
                 if let Some(analyzer) = self.function_contexts.get(function_id) {
@@ -423,7 +423,7 @@ impl InterProceduralContext {
                     if let Some(analyzer) = self.function_contexts.get(function_id) {
                         let param_source = format!("param:{}", param_idx);
 
-                        for (_, taint_state) in &analyzer.taint_states {
+                        for taint_state in analyzer.taint_states.values() {
                             // Check if this state has labels from the parameter
                             let from_param =
                                 taint_state.labels.iter().any(|l| l.source == param_source);
@@ -521,12 +521,12 @@ pub struct TaintMatch {
 /// Engine for AST-aware taint source/sink/sanitizer detection
 /// Uses tree-sitter queries for precise pattern matching
 pub struct TaintQueryEngine {
-    /// Underlying tree-sitter query engine (owned, wrapped in RwLock for interior mutability)
-    query_engine: Arc<RwLock<TreeSitterQueryEngine>>,
     /// Taint configuration
     config: TaintConfig,
     /// Cache: (language_key, pattern_type) -> patterns already retrieved
     pattern_cache: HashMap<(String, TaintPatternType), Vec<TaintPattern>>,
+    /// Cache: (language, query_string) -> compiled query
+    query_cache: HashMap<(Language, String), Arc<Query>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -538,46 +538,37 @@ enum TaintPatternType {
 
 impl TaintQueryEngine {
     /// Create a new taint query engine with default config
-    pub fn new(query_engine: Arc<RwLock<TreeSitterQueryEngine>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            query_engine,
             config: TaintConfig::default(),
             pattern_cache: HashMap::new(),
+            query_cache: HashMap::new(),
         }
     }
 
     /// Create with custom configuration
     pub fn with_config(
-        query_engine: Arc<RwLock<TreeSitterQueryEngine>>,
         config: TaintConfig,
     ) -> Self {
         Self {
-            query_engine,
             config,
             pattern_cache: HashMap::new(),
+            query_cache: HashMap::new(),
         }
     }
 
     /// Create with an owned query engine (convenience constructor)
     pub fn new_owned() -> Self {
-        Self {
-            query_engine: Arc::new(RwLock::new(TreeSitterQueryEngine::new())),
-            config: TaintConfig::default(),
-            pattern_cache: HashMap::new(),
-        }
+        Self::new()
     }
 
     /// Create with owned query engine and custom config
     pub fn new_owned_with_config(config: TaintConfig) -> Self {
-        Self {
-            query_engine: Arc::new(RwLock::new(TreeSitterQueryEngine::new())),
-            config,
-            pattern_cache: HashMap::new(),
-        }
+        Self::with_config(config)
     }
 
     /// Detect taint sources in the parsed AST
-    pub fn detect_sources(
+    pub async fn detect_sources(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -590,11 +581,11 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Source,
-        )
+        ).await
     }
 
     /// Detect taint sinks in the parsed AST
-    pub fn detect_sinks(
+    pub async fn detect_sinks(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -607,11 +598,11 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Sink,
-        )
+        ).await
     }
 
     /// Detect sanitizers in the parsed AST
-    pub fn detect_sanitizers(
+    pub async fn detect_sanitizers(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -624,7 +615,7 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Sanitizer,
-        )
+        ).await
     }
 
     /// Get patterns for a language and type, using cache
@@ -650,7 +641,7 @@ impl TaintQueryEngine {
     }
 
     /// Execute patterns against the AST and collect matches
-    fn execute_patterns(
+    async fn execute_patterns(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -661,18 +652,16 @@ impl TaintQueryEngine {
         let mut matches = Vec::new();
 
         for pattern in patterns {
-            // Compile the query using RwLock for interior mutability
-            let query = {
-                let mut engine = match self.query_engine.write() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to acquire query engine write lock");
-                        continue;
+            // Get or compile the query
+            let query = if let Some(q) = self.query_cache.get(&(*language, pattern.query.clone())) {
+                q.clone()
+            } else {
+                match query_engine::compile_query(&pattern.query, language) {
+                    Ok(q_arc) => {
+                        self.query_cache
+                            .insert((*language, pattern.query.clone()), q_arc.clone());
+                        q_arc
                     }
-                };
-
-                match engine.compile_query(&pattern.query, language) {
-                    Ok(q) => q,
                     Err(e) => {
                         tracing::warn!(
                             pattern = %pattern.name,
@@ -685,17 +674,8 @@ impl TaintQueryEngine {
                 }
             };
 
-            // Execute query with read lock
-            let query_matches = {
-                let engine = match self.query_engine.read() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to acquire query engine read lock");
-                        continue;
-                    }
-                };
-                engine.execute_query(&query, tree, source_code)
-            };
+            // Execute query
+            let query_matches = query_engine::execute_query(&query, tree, source_code);
 
             for qm in query_matches {
                 // Extract variable name from captures if available
@@ -760,40 +740,40 @@ impl TaintQueryEngine {
     }
 
     /// Check if a specific line contains a taint source
-    pub fn is_source_at_line(
+    pub async fn is_source_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sources(tree, source_code, language)
+        self.detect_sources(tree, source_code, language).await
             .into_iter()
             .find(|m| m.line == line)
     }
 
     /// Check if a specific line contains a taint sink
-    pub fn is_sink_at_line(
+    pub async fn is_sink_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sinks(tree, source_code, language)
+        self.detect_sinks(tree, source_code, language).await
             .into_iter()
             .find(|m| m.line == line)
     }
 
     /// Check if a specific line contains a sanitizer
-    pub fn is_sanitizer_at_line(
+    pub async fn is_sanitizer_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sanitizers(tree, source_code, language)
+        self.detect_sanitizers(tree, source_code, language).await
             .into_iter()
             .find(|m| m.line == line)
     }

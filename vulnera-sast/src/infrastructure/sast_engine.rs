@@ -1,22 +1,33 @@
 //! Unified SAST analysis engine
 //!
-//! Eliminates triple-nested locks by combining TreeSitterQueryEngine
-//! and TaintQueryEngine into a single structure with consistent locking.
+//! Eliminates triple-nested locks by combining query caching,
+//! parsing, and TaintQueryEngine into a single structure with consistent locking.
 //!
-//! ## Locking Strategy
+//! ## Lock Ordering Policy 
 //!
-//! - All mutable state uses `tokio::sync::RwLock` for async-safe access
-//! - Query cache is immutable after compilation, no lock needed
-//! - Single acquisition order prevents deadlocks
+//! All mutable state uses `tokio::sync::RwLock`. To prevent deadlocks,
+//! locks **must** be acquired in the following strict order:
+//!
+//! 1. `compiled_queries` — query compilation cache (read-heavy, rarely written)
+//! 2. `parser`           — tree-sitter parser state (write per language switch)
+//! 3. `taint_engine`     — taint query engine (write for detection runs)
+//!
+//! **Rules:**
+//! - Never hold `parser` while acquiring `compiled_queries`.
+//! - Never hold `taint_engine` while acquiring `parser` or `compiled_queries`.
+//! - Each public method acquires at most **two** locks, always in order.
+//! - `query()` acquires `compiled_queries` then `parser`.
+//! - `detect_taint()` acquires only `taint_engine`.
+//! - `parse()` acquires only `parser`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tree_sitter::{Query, Tree};
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument};
 
-use crate::domain::{Finding, Location, Pattern, Rule, Severity};
+use crate::domain::{Finding, Location, Pattern, Rule};
 use crate::domain::value_objects::{Confidence, Language};
 use crate::infrastructure::parsers::{ParseError, Parser, TreeSitterParser};
 use crate::infrastructure::query_engine::{QueryEngineError, QueryMatchResult};
@@ -182,9 +193,9 @@ impl SastEngine {
         
         // Combine sources, sinks, and sanitizers into one list
         let mut matches = Vec::new();
-        matches.extend(engine.detect_sources(tree, source_bytes, &language));
-        matches.extend(engine.detect_sinks(tree, source_bytes, &language));
-        matches.extend(engine.detect_sanitizers(tree, source_bytes, &language));
+        matches.extend(engine.detect_sources(tree, source_bytes, &language).await);
+        matches.extend(engine.detect_sinks(tree, source_bytes, &language).await);
+        matches.extend(engine.detect_sanitizers(tree, source_bytes, &language).await);
         
         debug!(match_count = matches.len(), "Taint detection complete");
         

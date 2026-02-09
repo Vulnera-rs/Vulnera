@@ -58,19 +58,14 @@ impl Location {
 }
 
 /// Finding severity
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 pub enum Severity {
     Critical,
     High,
+    #[default]
     Medium,
     Low,
     Info,
-}
-
-impl Default for Severity {
-    fn default() -> Self {
-        Self::Medium
-    }
 }
 
 impl std::fmt::Display for Severity {

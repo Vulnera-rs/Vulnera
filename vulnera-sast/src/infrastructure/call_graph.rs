@@ -210,6 +210,7 @@ impl CallGraph {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn strongconnect(
         &self,
         v: &str,
@@ -476,7 +477,7 @@ impl CallGraphBuilder {
         tree: &Tree,
         language: &Language,
         source: &str,
-        query_engine: &mut SastEngine,
+        query_engine: &SastEngine,
     ) {
         let source_bytes = source.as_bytes();
 

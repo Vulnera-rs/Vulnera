@@ -478,14 +478,12 @@ fn translate_member_access(tokens: &[MetavarToken], language: &Language) -> Opti
         // Get object token (first non-whitespace before dot)
         let object_token = tokens[..dot_idx]
             .iter()
-            .filter(|t| !matches!(t, MetavarToken::Whitespace))
-            .next();
+            .find(|t| !matches!(t, MetavarToken::Whitespace));
 
         // Get attribute token (first non-whitespace after dot)
         let attr_token = tokens[dot_idx + 1..]
             .iter()
-            .filter(|t| !matches!(t, MetavarToken::Whitespace))
-            .next();
+            .find(|t| !matches!(t, MetavarToken::Whitespace));
 
         // Build object pattern and constraint
         let (obj_pattern, obj_constraint) = match object_token {

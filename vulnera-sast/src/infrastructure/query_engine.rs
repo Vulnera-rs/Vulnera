@@ -67,22 +67,8 @@ pub struct CaptureInfo {
     pub kind: String,
 }
 
-/// Tree-sitter query engine for executing S-expression queries
-pub struct TreeSitterQueryEngine {
-    /// Cached compiled queries per language and query string
-    query_cache: HashMap<(Language, String), Arc<Query>>,
-}
-
-impl TreeSitterQueryEngine {
-    /// Create a new query engine
-    pub fn new() -> Self {
-        Self {
-            query_cache: HashMap::new(),
-        }
-    }
-
-    /// Get the tree-sitter language for a given Language enum
-    fn get_ts_language(language: &Language) -> Result<TsLanguage, QueryEngineError> {
+/// Get the tree-sitter language for a given Language enum
+pub fn get_ts_language(language: &Language) -> Result<TsLanguage, QueryEngineError> {
         match language {
             Language::Python => Ok(tree_sitter_python::LANGUAGE.into()),
             Language::JavaScript => Ok(tree_sitter_javascript::LANGUAGE.into()),
@@ -99,14 +85,13 @@ impl TreeSitterQueryEngine {
         tree_sitter_typescript::LANGUAGE_TSX.into()
     }
 
-    /// Parse source code and return the tree
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    pub fn parse(
-        &self,
-        source: &str,
-        language: &Language,
-    ) -> Result<(Tree, TsLanguage), QueryEngineError> {
-        let ts_lang = Self::get_ts_language(language)?;
+/// Parse source code and return the tree
+#[instrument(skip(source), fields(source_len = source.len()))]
+pub fn parse(
+    source: &str,
+    language: &Language,
+) -> Result<(Tree, TsLanguage), QueryEngineError> {
+    let ts_lang = get_ts_language(language)?;
         let mut parser = tree_sitter::Parser::new();
         parser
             .set_language(&ts_lang)
@@ -122,22 +107,17 @@ impl TreeSitterQueryEngine {
         Ok((tree, ts_lang))
     }
 
-    /// Compile a query for a given language and return an Arc for shared access
-    #[instrument(skip(self, query_str), fields(query_len = query_str.len()))]
-    pub fn compile_query(
-        &mut self,
-        query_str: &str,
-        language: &Language,
-    ) -> Result<Arc<Query>, QueryEngineError> {
-        let cache_key = (language.clone(), query_str.to_string());
-
-        // Check cache first and return Arc clone
-        if let Some(query) = self.query_cache.get(&cache_key) {
-            return Ok(Arc::clone(query));
-        }
-
-        // Compile new query
-        let ts_lang = Self::get_ts_language(language)?;
+/// Compile a query for a given language and return an Arc for shared access
+///
+/// This is a pure compilation step with no internal caching.
+/// Callers should cache the result if repeated compilation is expected.
+#[instrument(skip(query_str), fields(query_len = query_str.len()))]
+pub fn compile_query(
+    query_str: &str,
+    language: &Language,
+) -> Result<Arc<Query>, QueryEngineError> {
+    // Compile new query
+    let ts_lang = get_ts_language(language)?;
         let query = Query::new(&ts_lang, query_str).map_err(|e| {
             QueryEngineError::QueryParseFailed(format!(
                 "Query parse error at offset {}: {}",
@@ -158,42 +138,38 @@ impl TreeSitterQueryEngine {
             capture_count = query.capture_names().len(),
             "Compiled query"
         );
-        let query_arc = Arc::new(query);
-        self.query_cache.insert(cache_key, Arc::clone(&query_arc));
-        Ok(query_arc)
+        Ok(Arc::new(query))
     }
 
-    /// Execute a query against parsed source code
-    #[instrument(skip(self, tree, source, query), fields(query_patterns = query.pattern_count()))]
-    pub fn execute_query(
-        &self,
-        query: &Query,
-        tree: &Tree,
-        source: &[u8],
-    ) -> Vec<QueryMatchResult> {
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(query, tree.root_node(), source);
+/// Execute a query against parsed source code
+#[instrument(skip(tree, source, query), fields(query_patterns = query.pattern_count()))]
+pub fn execute_query(
+    query: &Query,
+    tree: &Tree,
+    source: &[u8],
+) -> Vec<QueryMatchResult> {
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, tree.root_node(), source);
 
-        let capture_names: &[&str] = query.capture_names();
-        let mut results = Vec::new();
+    let capture_names: &[&str] = query.capture_names();
+    let mut results = Vec::new();
 
-        while let Some(m) = matches.next() {
-            if let Some(result) = self.process_match(m, capture_names, source) {
-                results.push(result);
-            }
+    while let Some(m) = matches.next() {
+        if let Some(result) = process_match(m, capture_names, source) {
+            results.push(result);
         }
-
-        debug!(match_count = results.len(), "Query execution complete");
-        results
     }
 
-    /// Process a single query match into a result
-    fn process_match(
-        &self,
-        m: &QueryMatch,
-        capture_names: &[&str],
-        source: &[u8],
-    ) -> Option<QueryMatchResult> {
+    debug!(match_count = results.len(), "Query execution complete");
+    results
+}
+
+/// Process a single query match into a result
+fn process_match(
+    m: &QueryMatch,
+    capture_names: &[&str],
+    source: &[u8],
+) -> Option<QueryMatchResult> {
         if m.captures.is_empty() {
             return None;
         }
@@ -247,359 +223,345 @@ impl TreeSitterQueryEngine {
         })
     }
 
-    /// Execute a query string directly against source code
-    #[instrument(skip(self, source, query_str), fields(source_len = source.len()))]
-    pub fn query(
-        &mut self,
-        source: &str,
-        language: &Language,
-        query_str: &str,
-    ) -> Result<Vec<QueryMatchResult>, QueryEngineError> {
-        let (tree, _) = self.parse(source, language)?;
-        let query = self.compile_query(query_str, language)?;
-        Ok(self.execute_query(&query, &tree, source.as_bytes()))
-    }
+/// Execute a query string directly against source code
+#[instrument(skip(source, query_str), fields(source_len = source.len()))]
+pub fn query(
+    source: &str,
+    language: &Language,
+    query_str: &str,
+) -> Result<Vec<QueryMatchResult>, QueryEngineError> {
+    let (tree, _) = parse(source, language)?;
+    let query = compile_query(query_str, language)?;
+    Ok(execute_query(&query, &tree, source.as_bytes()))
+}
 
-    /// Execute multiple queries in batch (more efficient for multiple rules)
-    ///
-    /// This method is resilient to individual query failures - if a query fails to compile
-    /// for the given language (e.g., using Python syntax for Rust), it will be skipped
-    /// and other queries will still be executed.
-    #[instrument(skip(self, source, queries), fields(source_len = source.len(), query_count = queries.len()))]
-    pub fn batch_query(
-        &mut self,
-        source: &str,
-        language: &Language,
-        queries: &[(String, &str)], // (rule_id, query_str)
-    ) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
-        let (tree, _) = self.parse(source, language)?;
-        self.batch_query_with_tree(&tree, source, language, queries)
-    }
+/// Execute multiple queries in batch (more efficient for multiple rules)
+///
+/// This method is resilient to individual query failures - if a query fails to compile
+/// for the given language (e.g., using Python syntax for Rust), it will be skipped
+/// and other queries will still be executed.
+#[instrument(skip(source, queries), fields(source_len = source.len(), query_count = queries.len()))]
+pub fn batch_query(
+    source: &str,
+    language: &Language,
+    queries: &[(String, &str)], // (rule_id, query_str)
+) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
+    let (tree, _) = parse(source, language)?;
+    batch_query_with_tree(&tree, source, language, queries)
+}
 
-    /// Execute multiple queries against a pre-parsed tree
-    #[instrument(skip(self, tree, source, queries), fields(source_len = source.len(), query_count = queries.len()))]
-    pub fn batch_query_with_tree(
-        &mut self,
-        tree: &Tree,
-        source: &str,
-        language: &Language,
-        queries: &[(String, &str)], // (rule_id, query_str)
-    ) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
-        let mut results = HashMap::new();
+/// Execute multiple queries against a pre-parsed tree
+#[instrument(skip(tree, source, queries), fields(source_len = source.len(), query_count = queries.len()))]
+pub fn batch_query_with_tree(
+    tree: &Tree,
+    source: &str,
+    language: &Language,
+    queries: &[(String, &str)], // (rule_id, query_str)
+) -> Result<HashMap<String, Vec<QueryMatchResult>>, QueryEngineError> {
+    let mut results = HashMap::new();
 
-        for (rule_id, query_str) in queries {
-            // Skip queries that fail to compile for this language
-            // This allows language-specific queries to coexist without breaking the batch
-            match self.compile_query(query_str, language) {
-                Ok(query) => {
-                    let matches = self.execute_query(&query, tree, source.as_bytes());
-                    results.insert(rule_id.clone(), matches);
-                }
-                Err(e) => {
-                    // Log but don't fail - the query might be for a different language
-                    warn!(
-                        rule_id = %rule_id,
-                        language = ?language,
-                        error = %e,
-                        "Query failed to compile for language, skipping"
-                    );
-                }
+    for (rule_id, query_str) in queries {
+        // Skip queries that fail to compile for this language
+        // This allows language-specific queries to coexist without breaking the batch
+        match compile_query(query_str, language) {
+            Ok(query) => {
+                let matches = execute_query(&query, tree, source.as_bytes());
+                results.insert(rule_id.clone(), matches);
+            }
+            Err(e) => {
+                // Log but don't fail - the query might be for a different language
+                warn!(
+                    rule_id = %rule_id,
+                    language = ?language,
+                    error = %e,
+                    "Query failed to compile for language, skipping"
+                );
             }
         }
-
-        Ok(results)
     }
 
-    /// Convert a query match to a Finding
-    pub fn match_to_finding(
-        &self,
-        match_result: &QueryMatchResult,
-        rule: &Rule,
-        file_path: &str,
-        source: &str,
-    ) -> Finding {
-        // Try to get the primary capture (usually @name or first capture)
-        let primary_capture = match_result
-            .captures
-            .get("name")
-            .or_else(|| match_result.captures.values().next());
+    Ok(results)
+}
 
-        let (line, column, end_line, end_column) = if let Some(capture) = primary_capture {
-            (
-                capture.start_position.0 as u32 + 1, // Convert to 1-based
-                Some(capture.start_position.1 as u32),
-                Some(capture.end_position.0 as u32 + 1),
-                Some(capture.end_position.1 as u32),
-            )
-        } else {
-            (
-                match_result.start_position.0 as u32 + 1,
-                Some(match_result.start_position.1 as u32),
-                Some(match_result.end_position.0 as u32 + 1),
-                Some(match_result.end_position.1 as u32),
-            )
-        };
+/// Convert a query match to a Finding
+pub fn match_to_finding(
+    match_result: &QueryMatchResult,
+    rule: &Rule,
+    file_path: &str,
+    source: &str,
+) -> Finding {
+    // Try to get the primary capture (usually @name or first capture)
+    let primary_capture = match_result
+        .captures
+        .get("name")
+        .or_else(|| match_result.captures.values().next());
 
-        // Extract code snippet for context
-        let snippet: String = source
-            .get(match_result.start_byte..match_result.end_byte)
-            .unwrap_or("")
-            .chars()
-            .take(200)
-            .collect();
+    let (line, column, end_line, end_column) = if let Some(capture) = primary_capture {
+        (
+            capture.start_position.0 as u32 + 1, // Convert to 1-based
+            Some(capture.start_position.1 as u32),
+            Some(capture.end_position.0 as u32 + 1),
+            Some(capture.end_position.1 as u32),
+        )
+    } else {
+        (
+            match_result.start_position.0 as u32 + 1,
+            Some(match_result.start_position.1 as u32),
+            Some(match_result.end_position.0 as u32 + 1),
+            Some(match_result.end_position.1 as u32),
+        )
+    };
 
-        // Generate deterministic finding ID
-        let finding_id = format!(
-            "{}-{}-{}",
-            rule.id,
-            file_path.replace(['/', '\\'], "_"),
+    // Extract code snippet for context
+    let snippet: String = source
+        .get(match_result.start_byte..match_result.end_byte)
+        .unwrap_or("")
+        .chars()
+        .take(200)
+        .collect();
+
+    // Generate deterministic finding ID
+    let finding_id = format!(
+        "{}-{}-{}",
+        rule.id,
+        file_path.replace(['/', '\\'], "_"),
+        line
+    );
+
+    Finding {
+        id: finding_id,
+        rule_id: rule.id.clone(),
+        location: Location {
+            file_path: file_path.to_string(),
+            line,
+            column,
+            end_line,
+            end_column,
+        },
+        severity: rule.severity.clone(),
+        confidence: calculate_confidence(rule, match_result),
+        description: format_description(rule, match_result, &snippet),
+        recommendation: Some(format!(
+            "Review the code at line {} and consider the security implications.",
             line
-        );
-
-        Finding {
-            id: finding_id,
-            rule_id: rule.id.clone(),
-            location: Location {
-                file_path: file_path.to_string(),
-                line,
-                column,
-                end_line,
-                end_column,
-            },
-            severity: rule.severity.clone(),
-            confidence: Self::calculate_confidence(rule, match_result),
-            description: self.format_description(rule, match_result, &snippet),
-            recommendation: Some(format!(
-                "Review the code at line {} and consider the security implications.",
-                line
-            )),
-            data_flow_path: None,
-            snippet: Some(snippet),
-        }
-    }
-
-    /// Calculate confidence based on rule and match quality
-    fn calculate_confidence(rule: &Rule, match_result: &QueryMatchResult) -> Confidence {
-        // More captures = higher confidence (more specific match)
-        let capture_score = match match_result.captures.len() {
-            0..=1 => 0,
-            2..=3 => 1,
-            _ => 2,
-        };
-
-        // Critical/High severity rules tend to be more specific
-        let severity_score = match rule.severity {
-            Severity::Critical | Severity::High => 1,
-            _ => 0,
-        };
-
-        match capture_score + severity_score {
-            3 => Confidence::High,
-            2 => Confidence::Medium,
-            _ => Confidence::Low,
-        }
-    }
-
-    /// Format finding description with captured context
-    fn format_description(
-        &self,
-        rule: &Rule,
-        match_result: &QueryMatchResult,
-        snippet: &str,
-    ) -> String {
-        let mut desc = rule.description.clone();
-
-        // Append captured values for context
-        if !match_result.captures.is_empty() {
-            desc.push_str("\n\nMatched:");
-            for (name, info) in &match_result.captures {
-                desc.push_str(&format!(
-                    "\n  @{}: `{}`",
-                    name,
-                    info.text.replace('\n', "\\n")
-                ));
-            }
-        }
-
-        // Add code snippet
-        if !snippet.is_empty() {
-            desc.push_str(&format!("\n\nCode:\n```\n{}\n```", snippet.trim()));
-        }
-
-        desc
-    }
-
-    /// Match a pattern (including composite patterns) against source code
-    pub fn match_pattern(
-        &mut self,
-        pattern: &Pattern,
-        source: &str,
-        language: &Language,
-        tree: &Tree,
-    ) -> Result<Vec<QueryMatchResult>, QueryEngineError> {
-        match pattern {
-            Pattern::TreeSitterQuery(query_str) => {
-                let query = self.compile_query(query_str, language)?;
-                Ok(self.execute_query(&query, tree, source.as_bytes()))
-            }
-            Pattern::Metavariable(pattern_str) => {
-                // Parse the metavariable pattern
-                use crate::infrastructure::metavar_patterns::{
-                    parse_metavar_pattern, translate_to_tree_sitter,
-                };
-
-                let parsed = parse_metavar_pattern(pattern_str);
-
-                // Translate to tree-sitter query
-                if let Some(ts_query_str) = translate_to_tree_sitter(&parsed, language) {
-                    // Compile and execute the generated query
-                    match self.compile_query(&ts_query_str, language) {
-                        Ok(query) => {
-                            let matches = self.execute_query(&query, tree, source.as_bytes());
-                            Ok(matches)
-                        }
-                        Err(e) => {
-                            warn!(
-                                pattern = pattern_str,
-                                error = %e,
-                                "Failed to compile metavariable pattern"
-                            );
-                            Ok(Vec::new())
-                        }
-                    }
-                } else {
-                    // Pattern structure not supported, return empty
-                    debug!(
-                        pattern = pattern_str,
-                        "Metavariable pattern structure not supported for translation"
-                    );
-                    Ok(Vec::new())
-                }
-            }
-            Pattern::AnyOf(patterns) => {
-                // Union: collect all matches from all sub-patterns
-                let mut all_matches = Vec::new();
-                for sub_pattern in patterns {
-                    let matches = self.match_pattern(sub_pattern, source, language, tree)?;
-                    all_matches.extend(matches);
-                }
-                // Deduplicate by location
-                all_matches.sort_by_key(|m| (m.start_position, m.end_position));
-                all_matches.dedup_by(|a, b| {
-                    a.start_position == b.start_position && a.end_position == b.end_position
-                });
-                Ok(all_matches)
-            }
-            Pattern::AllOf(patterns) => {
-                // Intersection: matches that appear in ALL positive sub-patterns,
-                // then filtered by any negative sub-patterns (pattern-not).
-                if patterns.is_empty() {
-                    return Ok(Vec::new());
-                }
-
-                let (positives, negatives): (Vec<&Pattern>, Vec<&Pattern>) =
-                    patterns.iter().partition(|p| !matches!(p, Pattern::Not(_)));
-
-                if positives.is_empty() {
-                    return Ok(Vec::new());
-                }
-
-                let mut result = self.match_pattern(positives[0], source, language, tree)?;
-
-                for sub_pattern in positives.iter().skip(1) {
-                    let other_matches = self.match_pattern(sub_pattern, source, language, tree)?;
-
-                    // Keep only matches that overlap with other_matches
-                    result.retain(|m| {
-                        other_matches.iter().any(|o| {
-                            // Check for overlapping ranges
-                            m.start_byte < o.end_byte && o.start_byte < m.end_byte
-                        })
-                    });
-
-                    if result.is_empty() {
-                        return Ok(result);
-                    }
-                }
-
-                for sub_pattern in negatives {
-                    if let Pattern::Not(inner) = sub_pattern {
-                        let negative_matches = self.match_pattern(inner, source, language, tree)?;
-                        result.retain(|m| {
-                            !negative_matches
-                                .iter()
-                                .any(|o| m.start_byte < o.end_byte && o.start_byte < m.end_byte)
-                        });
-
-                        if result.is_empty() {
-                            break;
-                        }
-                    }
-                }
-
-                Ok(result)
-            }
-            Pattern::Not(_inner_pattern) => {
-                // Not is only meaningful inside AllOf as a filter
-                Ok(Vec::new())
-            }
-        }
-    }
-
-    /// Match rules against source code and return findings
-    #[instrument(skip(self, source, rules), fields(source_len = source.len(), rule_count = rules.len()))]
-    pub fn match_rules(
-        &mut self,
-        source: &str,
-        language: &Language,
-        file_path: &str,
-        rules: &[Rule],
-    ) -> Result<Vec<Finding>, QueryEngineError> {
-        // Filter rules for this language
-        let applicable_rules: Vec<&Rule> = rules
-            .iter()
-            .filter(|r| r.languages.contains(language))
-            .collect();
-
-        if applicable_rules.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // Parse source once
-        let (tree, _) = self.parse(source, language)?;
-
-        let mut findings = Vec::new();
-
-        for rule in applicable_rules {
-            match self.match_pattern(&rule.pattern, source, language, &tree) {
-                Ok(matches) => {
-                    for m in matches {
-                        // Skip synthetic matches from Not patterns
-                        if m.start_byte == 0 && m.end_byte == 0 && m.captures.is_empty() {
-                            continue;
-                        }
-                        findings.push(self.match_to_finding(&m, rule, file_path, source));
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        rule_id = %rule.id,
-                        error = %e,
-                        "Failed to match pattern for rule"
-                    );
-                }
-            }
-        }
-
-        debug!(finding_count = findings.len(), "Rule matching complete");
-        Ok(findings)
+        )),
+        data_flow_path: None,
+        snippet: Some(snippet),
     }
 }
 
-impl Default for TreeSitterQueryEngine {
-    fn default() -> Self {
-        Self::new()
+/// Calculate confidence based on rule and match quality
+pub fn calculate_confidence(rule: &Rule, match_result: &QueryMatchResult) -> Confidence {
+    // More captures = higher confidence (more specific match)
+    let capture_score = match match_result.captures.len() {
+        0..=1 => 0,
+        2..=3 => 1,
+        _ => 2,
+    };
+
+    // Critical/High severity rules tend to be more specific
+    let severity_score = match rule.severity {
+        Severity::Critical | Severity::High => 1,
+        _ => 0,
+    };
+
+    match capture_score + severity_score {
+        3 => Confidence::High,
+        2 => Confidence::Medium,
+        _ => Confidence::Low,
     }
+}
+
+/// Format finding description with captured context
+pub fn format_description(
+    rule: &Rule,
+    match_result: &QueryMatchResult,
+    snippet: &str,
+) -> String {
+    let mut desc = rule.description.clone();
+
+    // Append captured values for context
+    if !match_result.captures.is_empty() {
+        desc.push_str("\n\nMatched:");
+        for (name, info) in &match_result.captures {
+            desc.push_str(&format!(
+                "\n  @{}: `{}`",
+                name,
+                info.text.replace('\n', "\\n")
+            ));
+        }
+    }
+
+    // Add code snippet
+    if !snippet.is_empty() {
+        desc.push_str(&format!("\n\nCode:\n```\n{}\n```", snippet.trim()));
+    }
+
+    desc
+}
+
+/// Match a pattern (including composite patterns) against source code
+pub fn match_pattern(
+    pattern: &Pattern,
+    source: &str,
+    language: &Language,
+    tree: &Tree,
+) -> Result<Vec<QueryMatchResult>, QueryEngineError> {
+    match pattern {
+        Pattern::TreeSitterQuery(query_str) => {
+            let query = compile_query(query_str, language)?;
+            Ok(execute_query(&query, tree, source.as_bytes()))
+        }
+        Pattern::Metavariable(pattern_str) => {
+            // Parse the metavariable pattern
+            use crate::infrastructure::metavar_patterns::{
+                parse_metavar_pattern, translate_to_tree_sitter,
+            };
+
+            let parsed = parse_metavar_pattern(pattern_str);
+
+            // Translate to tree-sitter query
+            if let Some(ts_query_str) = translate_to_tree_sitter(&parsed, language) {
+                // Compile and execute the generated query
+                match compile_query(&ts_query_str, language) {
+                    Ok(query) => {
+                        let matches = execute_query(&query, tree, source.as_bytes());
+                        Ok(matches)
+                    }
+                    Err(e) => {
+                        warn!(
+                            pattern = pattern_str,
+                            error = %e,
+                            "Failed to compile metavariable pattern"
+                        );
+                        Ok(Vec::new())
+                    }
+                }
+            } else {
+                // Pattern structure not supported, return empty
+                debug!(
+                    pattern = pattern_str,
+                    "Metavariable pattern structure not supported for translation"
+                );
+                Ok(Vec::new())
+            }
+        }
+        Pattern::AnyOf(patterns) => {
+            // Union: collect all matches from all sub-patterns
+            let mut all_matches = Vec::new();
+            for sub_pattern in patterns {
+                let matches = match_pattern(sub_pattern, source, language, tree)?;
+                all_matches.extend(matches);
+            }
+            // Deduplicate by location
+            all_matches.sort_by_key(|m| (m.start_position, m.end_position));
+            all_matches.dedup_by(|a, b| {
+                a.start_position == b.start_position && a.end_position == b.end_position
+            });
+            Ok(all_matches)
+        }
+        Pattern::AllOf(patterns) => {
+            // Intersection: matches that appear in ALL positive sub-patterns,
+            // then filtered by any negative sub-patterns (pattern-not).
+            if patterns.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let (positives, negatives): (Vec<&Pattern>, Vec<&Pattern>) =
+                patterns.iter().partition(|p| !matches!(p, Pattern::Not(_)));
+
+            if positives.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut result = match_pattern(positives[0], source, language, tree)?;
+
+            for sub_pattern in positives.iter().skip(1) {
+                let other_matches = match_pattern(sub_pattern, source, language, tree)?;
+
+                // Keep only matches that overlap with other_matches
+                result.retain(|m| {
+                    other_matches.iter().any(|o| {
+                        // Check for overlapping ranges
+                        m.start_byte < o.end_byte && o.start_byte < m.end_byte
+                    })
+                });
+
+                if result.is_empty() {
+                    return Ok(result);
+                }
+            }
+
+            for sub_pattern in negatives {
+                if let Pattern::Not(inner) = sub_pattern {
+                    let negative_matches = match_pattern(inner, source, language, tree)?;
+                    result.retain(|m| {
+                        !negative_matches
+                            .iter()
+                            .any(|o| m.start_byte < o.end_byte && o.start_byte < m.end_byte)
+                    });
+
+                    if result.is_empty() {
+                        break;
+                    }
+                }
+            }
+
+            Ok(result)
+        }
+        Pattern::Not(_inner_pattern) => {
+            // Not is only meaningful inside AllOf as a filter
+            Ok(Vec::new())
+        }
+    }
+}
+
+/// Match rules against source code and return findings
+#[instrument(skip(source, rules), fields(source_len = source.len(), rule_count = rules.len()))]
+pub fn match_rules(
+    source: &str,
+    language: &Language,
+    file_path: &str,
+    rules: &[Rule],
+) -> Result<Vec<Finding>, QueryEngineError> {
+    // Filter rules for this language
+    let applicable_rules: Vec<&Rule> = rules
+        .iter()
+        .filter(|r| r.languages.contains(language))
+        .collect();
+
+    if applicable_rules.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Parse source once
+    let (tree, _) = parse(source, language)?;
+
+    let mut findings = Vec::new();
+
+    for rule in applicable_rules {
+        match match_pattern(&rule.pattern, source, language, &tree) {
+            Ok(matches) => {
+                for m in matches {
+                    // Skip synthetic matches from Not patterns
+                    if m.start_byte == 0 && m.end_byte == 0 && m.captures.is_empty() {
+                        continue;
+                    }
+                    findings.push(match_to_finding(&m, rule, file_path, source));
+                }
+            }
+            Err(e) => {
+                warn!(
+                    rule_id = %rule.id,
+                    error = %e,
+                    "Failed to match pattern for rule"
+                );
+            }
+        }
+    }
+
+    debug!(finding_count = findings.len(), "Rule matching complete");
+    Ok(findings)
 }
 
 /// Common tree-sitter queries for security analysis
@@ -747,14 +709,12 @@ mod tests {
 
     #[test]
     fn test_python_eval_detection() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 result = eval(user_input)
 safe = eval("1 + 2")
 "#;
 
-        let matches = engine
-            .query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
+        let matches = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
             .unwrap();
 
         assert_eq!(matches.len(), 2);
@@ -766,14 +726,12 @@ safe = eval("1 + 2")
 
     #[test]
     fn test_javascript_innerhtml_detection() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 element.innerHTML = userInput;
 div.textContent = safe;
 "#;
 
-        let matches = engine
-            .query(source, &Language::JavaScript, common_queries::JS_INNER_HTML)
+        let matches = query(source, &Language::JavaScript, common_queries::JS_INNER_HTML)
             .unwrap();
 
         assert_eq!(matches.len(), 1);
@@ -783,7 +741,6 @@ div.textContent = safe;
 
     #[test]
     fn test_rust_unwrap_detection() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 fn main() {
     let value = some_option.unwrap();
@@ -791,8 +748,7 @@ fn main() {
 }
 "#;
 
-        let matches = engine
-            .query(source, &Language::Rust, common_queries::RUST_UNWRAP)
+        let matches = query(source, &Language::Rust, common_queries::RUST_UNWRAP)
             .unwrap();
 
         assert_eq!(matches.len(), 1);
@@ -802,7 +758,6 @@ fn main() {
 
     #[test]
     fn test_rust_unsafe_detection() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 fn main() {
     unsafe {
@@ -812,8 +767,7 @@ fn main() {
 }
 "#;
 
-        let matches = engine
-            .query(source, &Language::Rust, common_queries::RUST_UNSAFE)
+        let matches = query(source, &Language::Rust, common_queries::RUST_UNSAFE)
             .unwrap();
 
         assert_eq!(matches.len(), 1);
@@ -821,7 +775,6 @@ fn main() {
 
     #[test]
     fn test_c_strcpy_detection() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 int main() {
     char dest[10];
@@ -830,8 +783,7 @@ int main() {
 }
 "#;
 
-        let matches = engine
-            .query(source, &Language::C, common_queries::C_STRCPY)
+        let matches = query(source, &Language::C, common_queries::C_STRCPY)
             .unwrap();
 
         assert_eq!(matches.len(), 1);
@@ -840,7 +792,6 @@ int main() {
 
     #[test]
     fn test_batch_query() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = r#"
 result = eval(user_input)
 os.system("rm -rf /")
@@ -851,8 +802,7 @@ os.system("rm -rf /")
             ("exec-call".to_string(), common_queries::PYTHON_EXEC_CALL),
         ];
 
-        let results = engine
-            .batch_query(source, &Language::Python, &queries)
+        let results = batch_query(source, &Language::Python, &queries)
             .unwrap();
 
         assert_eq!(results.get("eval-call").unwrap().len(), 1);
@@ -861,17 +811,15 @@ os.system("rm -rf /")
 
     #[test]
     fn test_batch_query_with_tree() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = "result = eval(user_input)\n";
-        let (tree, _) = engine.parse(source, &Language::Python).unwrap();
+        let (tree, _) = parse(source, &Language::Python).unwrap();
 
         let queries = vec![
             ("eval-call".to_string(), common_queries::PYTHON_EVAL_CALL),
             ("exec-call".to_string(), common_queries::PYTHON_EXEC_CALL),
         ];
 
-        let results = engine
-            .batch_query_with_tree(&tree, source, &Language::Python, &queries)
+        let results = batch_query_with_tree(&tree, source, &Language::Python, &queries)
             .unwrap();
 
         assert_eq!(results.get("eval-call").unwrap().len(), 1);
@@ -880,58 +828,46 @@ os.system("rm -rf /")
 
     #[test]
     fn test_composite_pattern_allof_with_not_filters() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = "foo(bar(x))";
-        let (tree, _) = engine.parse(source, &Language::Python).unwrap();
+        let (tree, _) = parse(source, &Language::Python).unwrap();
 
         let pattern = Pattern::AllOf(vec![
             Pattern::Metavariable("foo($X)".to_string()),
             Pattern::Not(Box::new(Pattern::Metavariable("bar($X)".to_string()))),
         ]);
 
-        let matches = engine
-            .match_pattern(&pattern, source, &Language::Python, &tree)
+        let matches = match_pattern(&pattern, source, &Language::Python, &tree)
             .unwrap();
 
         assert_eq!(matches.len(), 0);
     }
 
     #[test]
-    fn test_query_cache() {
-        let mut engine = TreeSitterQueryEngine::new();
+    fn test_query_compilation() {
         let source = "eval(x)";
 
-        // First query should compile
-        let _ = engine
-            .query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
+        // First query should compile and execute
+        let result1 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
             .unwrap();
+        assert_eq!(result1.len(), 1);
 
-        // Cache should have one entry
-        assert_eq!(engine.query_cache.len(), 1);
-
-        // Second query with same params should use cache
-        let _ = engine
-            .query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
+        // Second query with same params should also work (stateless)
+        let result2 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
             .unwrap();
+        assert_eq!(result2.len(), 1);
 
-        // Still one entry
-        assert_eq!(engine.query_cache.len(), 1);
-
-        // Different query should add new entry
-        let _ = engine
-            .query(source, &Language::Python, common_queries::PYTHON_EXEC_CALL)
+        // Different query should also work
+        let result3 = query(source, &Language::Python, common_queries::PYTHON_EXEC_CALL)
             .unwrap();
-
-        assert_eq!(engine.query_cache.len(), 2);
+        assert_eq!(result3.len(), 0);
     }
 
     #[test]
     fn test_invalid_query_error() {
-        let mut engine = TreeSitterQueryEngine::new();
         let source = "x = 1";
         let invalid_query = "(invalid_node_type_xyz)";
 
-        let result = engine.query(source, &Language::Python, invalid_query);
+        let result = query(source, &Language::Python, invalid_query);
         assert!(result.is_err());
 
         if let Err(QueryEngineError::QueryParseFailed(msg)) = result {

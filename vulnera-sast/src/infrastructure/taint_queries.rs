@@ -11,6 +11,7 @@ use crate::domain::value_objects::Language;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::LazyLock;
 
 // =============================================================================
 // TaintConfig Error Types
@@ -378,56 +379,92 @@ fn load_taint_file(toml_str: &str, label: &str) -> BuiltinTaintFile {
     }
 }
 
-/// Get built-in source patterns for a language.
-pub fn python_source_queries() -> Vec<TaintPattern> {
-    load_taint_file(PYTHON_TAINT_TOML, "python").sources
-}
-pub fn python_sink_queries() -> Vec<TaintPattern> {
-    load_taint_file(PYTHON_TAINT_TOML, "python").sinks
-}
-pub fn python_sanitizer_queries() -> Vec<TaintPattern> {
-    load_taint_file(PYTHON_TAINT_TOML, "python").sanitizers
+// =============================================================================
+// Lazy-initialized taint pattern sets (parsed once, reused across calls)
+// =============================================================================
+
+static PYTHON_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(PYTHON_TAINT_TOML, "python"));
+static JAVASCRIPT_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript"));
+static GO_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(GO_TAINT_TOML, "go"));
+static RUST_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(RUST_TAINT_TOML, "rust"));
+static C_CPP_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(C_CPP_TAINT_TOML, "c_cpp"));
+
+// =============================================================================
+// TaintLoader trait + BuiltinTaintLoader
+// =============================================================================
+
+/// Trait for loading taint patterns from various sources.
+pub trait TaintLoader: Send + Sync {
+    /// Load source patterns for the given language.
+    fn load_sources(&self, language: &Language) -> Vec<TaintPattern>;
+    /// Load sink patterns for the given language.
+    fn load_sinks(&self, language: &Language) -> Vec<TaintPattern>;
+    /// Load sanitizer patterns for the given language.
+    fn load_sanitizers(&self, language: &Language) -> Vec<TaintPattern>;
 }
 
-pub fn javascript_source_queries() -> Vec<TaintPattern> {
-    load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript").sources
-}
-pub fn javascript_sink_queries() -> Vec<TaintPattern> {
-    load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript").sinks
-}
-pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> {
-    load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript").sanitizers
+/// Loader for compile-time embedded TOML taint patterns.
+///
+/// Wraps the lazy-loaded `BuiltinTaintFile` statics behind the [`TaintLoader`]
+/// trait, enabling polymorphic usage alongside file-based loaders.
+pub struct BuiltinTaintLoader;
+
+impl BuiltinTaintLoader {
+    pub fn new() -> Self {
+        Self
+    }
+
+    fn taint_file_for(language: &Language) -> &'static BuiltinTaintFile {
+        match language {
+            Language::Python => &PYTHON_TAINT,
+            Language::JavaScript | Language::TypeScript => &JAVASCRIPT_TAINT,
+            Language::Go => &GO_TAINT,
+            Language::Rust => &RUST_TAINT,
+            Language::C | Language::Cpp => &C_CPP_TAINT,
+        }
+    }
 }
 
-pub fn go_source_queries() -> Vec<TaintPattern> {
-    load_taint_file(GO_TAINT_TOML, "go").sources
-}
-pub fn go_sink_queries() -> Vec<TaintPattern> {
-    load_taint_file(GO_TAINT_TOML, "go").sinks
-}
-pub fn go_sanitizer_queries() -> Vec<TaintPattern> {
-    load_taint_file(GO_TAINT_TOML, "go").sanitizers
+impl Default for BuiltinTaintLoader {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-pub fn rust_source_queries() -> Vec<TaintPattern> {
-    load_taint_file(RUST_TAINT_TOML, "rust").sources
-}
-pub fn rust_sink_queries() -> Vec<TaintPattern> {
-    load_taint_file(RUST_TAINT_TOML, "rust").sinks
-}
-pub fn rust_sanitizer_queries() -> Vec<TaintPattern> {
-    load_taint_file(RUST_TAINT_TOML, "rust").sanitizers
+impl TaintLoader for BuiltinTaintLoader {
+    fn load_sources(&self, language: &Language) -> Vec<TaintPattern> {
+        Self::taint_file_for(language).sources.clone()
+    }
+
+    fn load_sinks(&self, language: &Language) -> Vec<TaintPattern> {
+        Self::taint_file_for(language).sinks.clone()
+    }
+
+    fn load_sanitizers(&self, language: &Language) -> Vec<TaintPattern> {
+        Self::taint_file_for(language).sanitizers.clone()
+    }
 }
 
-pub fn c_source_queries() -> Vec<TaintPattern> {
-    load_taint_file(C_CPP_TAINT_TOML, "c_cpp").sources
-}
-pub fn c_sink_queries() -> Vec<TaintPattern> {
-    load_taint_file(C_CPP_TAINT_TOML, "c_cpp").sinks
-}
-pub fn c_sanitizer_queries() -> Vec<TaintPattern> {
-    load_taint_file(C_CPP_TAINT_TOML, "c_cpp").sanitizers
-}
+/// Get built-in source patterns for a language (convenience wrappers).
+pub fn python_source_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sources.clone() }
+pub fn python_sink_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sinks.clone() }
+pub fn python_sanitizer_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sanitizers.clone() }
+
+pub fn javascript_source_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sources.clone() }
+pub fn javascript_sink_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sinks.clone() }
+pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sanitizers.clone() }
+
+pub fn go_source_queries() -> Vec<TaintPattern> { GO_TAINT.sources.clone() }
+pub fn go_sink_queries() -> Vec<TaintPattern> { GO_TAINT.sinks.clone() }
+pub fn go_sanitizer_queries() -> Vec<TaintPattern> { GO_TAINT.sanitizers.clone() }
+
+pub fn rust_source_queries() -> Vec<TaintPattern> { RUST_TAINT.sources.clone() }
+pub fn rust_sink_queries() -> Vec<TaintPattern> { RUST_TAINT.sinks.clone() }
+pub fn rust_sanitizer_queries() -> Vec<TaintPattern> { RUST_TAINT.sanitizers.clone() }
+
+pub fn c_source_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sources.clone() }
+pub fn c_sink_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sinks.clone() }
+pub fn c_sanitizer_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sanitizers.clone() }
 
 // =============================================================================
 // Query Provider
@@ -438,13 +475,8 @@ pub fn get_source_queries(language: &Language, config: &TaintConfig) -> Vec<Tain
     let mut queries = Vec::new();
 
     if config.include_builtin {
-        queries.extend(match language {
-            Language::Python => python_source_queries(),
-            Language::JavaScript | Language::TypeScript => javascript_source_queries(),
-            Language::Go => go_source_queries(),
-            Language::Rust => rust_source_queries(),
-            Language::C | Language::Cpp => c_source_queries(),
-        });
+        let loader = BuiltinTaintLoader::new();
+        queries.extend(loader.load_sources(language));
     }
 
     // Add custom sources
@@ -461,13 +493,8 @@ pub fn get_sink_queries(language: &Language, config: &TaintConfig) -> Vec<TaintP
     let mut queries = Vec::new();
 
     if config.include_builtin {
-        queries.extend(match language {
-            Language::Python => python_sink_queries(),
-            Language::JavaScript | Language::TypeScript => javascript_sink_queries(),
-            Language::Go => go_sink_queries(),
-            Language::Rust => rust_sink_queries(),
-            Language::C | Language::Cpp => c_sink_queries(),
-        });
+        let loader = BuiltinTaintLoader::new();
+        queries.extend(loader.load_sinks(language));
     }
 
     // Add custom sinks
@@ -546,13 +573,8 @@ pub fn get_sanitizer_queries(language: &Language, config: &TaintConfig) -> Vec<T
     let mut queries = Vec::new();
 
     if config.include_builtin {
-        queries.extend(match language {
-            Language::Python => python_sanitizer_queries(),
-            Language::JavaScript | Language::TypeScript => javascript_sanitizer_queries(),
-            Language::Go => go_sanitizer_queries(),
-            Language::Rust => rust_sanitizer_queries(),
-            Language::C | Language::Cpp => c_sanitizer_queries(),
-        });
+        let loader = BuiltinTaintLoader::new();
+        queries.extend(loader.load_sanitizers(language));
     }
 
     // Add custom sanitizers

@@ -10,7 +10,6 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
@@ -26,7 +25,7 @@ use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
-use crate::infrastructure::rules::{RuleEngine, RuleRepository};
+use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
 use crate::infrastructure::taint_queries::{get_propagation_queries, TaintConfig};
@@ -297,14 +296,13 @@ impl ScanProjectUseCase {
         if self.config.enable_call_graph && effective_depth != AnalysisDepth::Quick {
             debug!("Phase 1: Building call graph with cross-file resolution");
             let mut call_graph = self.call_graph_builder.write().await;
-            let mut query_engine = SastEngine::new();
 
             // 1a. Parse all files and build initial graph
             for file in &files {
                 if let Ok(content) = std::fs::read_to_string(&file.path) {
                     let file_path_str = file.path.display().to_string();
 
-                    let tree = match query_engine.parse(&content, file.language).await {
+                    let tree = match self.sast_engine.parse(&content, file.language).await {
                         Ok(tree) => tree,
                         Err(_) => continue,
                     };
@@ -315,7 +313,7 @@ impl ScanProjectUseCase {
                         &tree,
                         &file.language,
                         &content,
-                        &mut query_engine,
+                        &self.sast_engine,
                     );
 
                     // Cache the parsed tree for reuse in analysis phase
@@ -398,12 +396,9 @@ impl ScanProjectUseCase {
                     }
                 }
 
-                let query_engine = SastEngine::new();
-                match query_engine.parse(&content, file.language).await {
-                    Ok(tree) => {
-                        cached_tree = Some(tree);
-                    }
-                    Err(_) => {}
+                let query_engine = &self.sast_engine;
+                if let Ok(tree) = query_engine.parse(&content, file.language).await {
+                    cached_tree = Some(tree);
                 }
             }
 
@@ -512,6 +507,7 @@ impl ScanProjectUseCase {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_tree_sitter_analysis(
         &self,
         file_path: &Path,
@@ -520,7 +516,7 @@ impl ScanProjectUseCase {
         rules: &[&Rule],
         suppressions: &FileSuppressions,
         is_test_context: bool,
-        tree: Option<&tree_sitter::Tree>,
+        _tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
         // Filter to tree-sitter query rules
@@ -953,7 +949,7 @@ impl ScanProjectUseCase {
     }
 
     /// Adjust severity for findings confirmed by data flow analysis
-    fn adjust_severity_for_data_flow(findings: &mut Vec<SastFinding>) {
+    fn adjust_severity_for_data_flow(findings: &mut [SastFinding]) {
         for finding in findings.iter_mut() {
             if finding.data_flow_path.is_some() {
                 // Escalate severity when data flow confirms the vulnerability
