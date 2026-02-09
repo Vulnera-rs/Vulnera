@@ -45,8 +45,6 @@ regex = { workspace = true }
 # Streaming iterator for tree-sitter queries
 streaming-iterator = { workspace = true }
 
-# Database
-sqlx = { workspace = true }
 
 # Caching serialization
 bincode = { workspace = true }
@@ -56,8 +54,6 @@ hex = { workspace = true }
 # UUID for entity IDs
 uuid = { workspace = true }
 
-# Time handling
-chrono = { workspace = true }
 
 # Glob patterns for file matching
 globset = { workspace = true }

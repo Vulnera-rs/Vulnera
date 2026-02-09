@@ -4,7 +4,6 @@
 //! - Tree-sitter as the primary analysis engine (S-expression pattern queries)
 //! - Inter-procedural data flow analysis (taint tracking)
 //! - Call graph analysis for cross-function vulnerability detection
-//! - PostgreSQL rule storage with hot-reload
 //! - SARIF v2.1.0 export
 
 use sha2::{Digest, Sha256};
@@ -28,9 +27,7 @@ use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch, TaintQueryEngine};
 use crate::infrastructure::parsers::ast_from_tree;
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
-use crate::infrastructure::rules::{
-    PostgresRuleRepository, RuleEngine, RuleRepository, SastRuleRepository,
-};
+use crate::infrastructure::rules::{RuleEngine, RuleRepository};
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::scanner::DirectoryScanner;
 use crate::infrastructure::taint_queries::get_propagation_queries;
@@ -218,23 +215,6 @@ impl ScanProjectUseCase {
             parsed_tree_cache: StdRwLock::new(HashMap::new()),
             config: analysis_config,
         }
-    }
-
-    pub async fn with_database_rules(
-        self,
-        db_repository: &PostgresRuleRepository,
-    ) -> Result<Self, ScanError> {
-        let tree_sitter_rules = db_repository
-            .get_tree_sitter_rules()
-            .await
-            .map_err(|e| ScanError::database("get_tree_sitter_rules", e.to_string()))?;
-
-        {
-            let mut repo = self.rule_repository.write().await;
-            repo.extend_with_rules(tree_sitter_rules);
-        }
-
-        Ok(self)
     }
 
     /// Add AST cache service for parsed file caching
@@ -1234,10 +1214,6 @@ pub enum ScanError {
     #[error("Query compilation failed for rule '{rule_id}': {message}")]
     QueryCompilation { rule_id: String, message: String },
 
-    /// Database operation failed
-    #[error("Database operation '{operation}' failed: {message}")]
-    Database { operation: String, message: String },
-
     /// Scan timeout exceeded
     #[error("Scan timeout after {duration_ms}ms for path '{path}'")]
     Timeout {
@@ -1279,14 +1255,6 @@ impl ScanError {
             language: language.to_string(),
             message: message.into(),
             line,
-        }
-    }
-
-    /// Create a database error
-    pub fn database(operation: impl Into<String>, message: impl Into<String>) -> Self {
-        Self::Database {
-            operation: operation.into(),
-            message: message.into(),
         }
     }
 

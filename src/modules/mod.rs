@@ -15,7 +15,6 @@ use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_deps::DependencyAnalyzerModule;
 use vulnera_orchestrator::infrastructure::ModuleRegistry;
 use vulnera_sast::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
-use vulnera_sast::infrastructure::rules::PostgresRuleRepository;
 use vulnera_sast::{AstCacheService, DragonflyAstCache, SastModule};
 use vulnera_secrets::SecretDetectionModule;
 
@@ -28,7 +27,6 @@ impl AnalysisModules {
     /// Initialize all analysis modules from configuration
     pub async fn init(
         config: &Config,
-        db_pool: Arc<sqlx::PgPool>,
         vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
         cache_service: Arc<CacheServiceImpl>,
         parser_factory: Arc<ParserFactory>,
@@ -46,7 +44,6 @@ impl AnalysisModules {
 
         // 2. Initialize SAST Module
         let sast_module = {
-            let rule_repository = PostgresRuleRepository::new((*db_pool).clone());
             let analysis_config = AnalysisConfig {
                 enable_data_flow: config.sast.enable_data_flow,
                 enable_call_graph: config.sast.enable_call_graph,
@@ -81,15 +78,6 @@ impl AnalysisModules {
                 use_case.with_ast_cache(cache)
             } else {
                 use_case
-            };
-
-            // Load database rules if available
-            let use_case = match use_case.with_database_rules(&rule_repository).await {
-                Ok(uc) => uc,
-                Err(e) => {
-                    tracing::warn!(error = %e, "Failed to load SAST rules from database, using defaults");
-                    ScanProjectUseCase::with_config(&config.sast, AnalysisConfig::default())
-                }
             };
 
             Arc::new(SastModule::with_use_case(Arc::new(use_case)))

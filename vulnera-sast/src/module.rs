@@ -44,16 +44,7 @@ impl SastModule {
 
     /// Create with a pre-built use case (dependency injection)
     ///
-    /// Use this when you want to inject a fully-configured ScanProjectUseCase,
-    /// e.g., one with database rules loaded and AST cache configured.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let use_case = ScanProjectUseCase::with_config(&config, analysis_config)
-    ///     .with_database_rules(&db_repo).await?
-    ///     .with_ast_cache(cache);
-    /// let module = SastModule::with_use_case(Arc::new(use_case));
-    /// ```
+    /// Use this when you want to inject a fully-configured ScanProjectUseCase.
     pub fn with_use_case(use_case: Arc<ScanProjectUseCase>) -> Self {
         Self { use_case }
     }
