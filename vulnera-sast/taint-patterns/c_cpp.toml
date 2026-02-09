@@ -1,0 +1,140 @@
+# C/C++ taint patterns
+
+# =============================================================================
+# Sources
+# =============================================================================
+
+[[sources]]
+name = "getenv"
+category = "environment"
+labels = ["environment"]
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "getenv")
+) @source
+'''
+
+[[sources]]
+name = "Input function"
+category = "user_input"
+labels = ["user_input"]
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(gets|fgets|scanf|fscanf|sscanf|read|recv|recvfrom|fread)$")
+) @source
+'''
+
+[[sources]]
+name = "argv access"
+category = "cli_input"
+labels = ["user_input", "cli"]
+query = '''
+(subscript_expression
+  argument: (identifier) @arg
+  (#eq? @arg "argv")
+) @source
+'''
+
+# =============================================================================
+# Sinks
+# =============================================================================
+
+[[sinks]]
+name = "system"
+category = "command_injection"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @arg)
+  (#eq? @fn "system")
+) @sink
+'''
+
+[[sinks]]
+name = "exec family"
+category = "command_injection"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @arg)
+  (#match? @fn "^(execl|execlp|execle|execv|execvp|execvpe|popen)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Unsafe string function"
+category = "buffer_overflow"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(sprintf|vsprintf|gets|strcpy|strcat)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Format string"
+category = "format_string"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @format)
+  (#match? @fn "^(printf|fprintf|sprintf|snprintf|syslog)$")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL execution"
+category = "sql_injection"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @query)
+  (#match? @fn "^(mysql_query|sqlite3_exec|PQexec)$")
+) @sink
+'''
+
+# =============================================================================
+# Sanitizers
+# =============================================================================
+
+[[sanitizers]]
+name = "snprintf"
+category = "buffer"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "snprintf")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Bounded string copy"
+category = "buffer"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(strncpy|strncat|strlcpy|strlcat)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Prepared statement"
+category = "sql"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(mysql_stmt_bind_param|sqlite3_bind_|PQexecParams)$")
+) @sanitizer
+'''

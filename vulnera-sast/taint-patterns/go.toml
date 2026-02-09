@@ -1,0 +1,506 @@
+# Go taint patterns
+
+# =============================================================================
+# Sources
+# =============================================================================
+
+[[sources]]
+name = "HTTP request data"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(selector_expression
+  operand: (identifier) @req
+  field: (field_identifier) @field
+  (#match? @field "^(Body|Form|PostForm|URL|Header|Cookie)$")
+) @source
+'''
+
+[[sources]]
+name = "URL query parameter"
+category = "user_input"
+labels = ["user_input", "web_request", "url_param"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (call_expression
+      function: (selector_expression
+        operand: (selector_expression
+          operand: (identifier) @req
+          field: (field_identifier) @url_field)
+        field: (field_identifier) @query_method))
+    field: (field_identifier) @get_method)
+  (#match? @url_field "^URL$")
+  (#match? @query_method "^Query$")
+  (#match? @get_method "^Get$")
+) @source
+'''
+
+[[sources]]
+name = "Form value"
+category = "user_input"
+labels = ["user_input", "web_request", "form_data"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @req
+    field: (field_identifier) @method)
+  (#match? @method "^(FormValue|PostFormValue)$")
+) @source
+'''
+
+[[sources]]
+name = "Gin context input"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @ctx
+    field: (field_identifier) @method)
+  (#match? @ctx "^c$")
+  (#match? @method "^(Query|Param|PostForm|DefaultQuery|DefaultPostForm|GetHeader|Cookie)$")
+) @source
+'''
+
+[[sources]]
+name = "Echo context input"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @ctx
+    field: (field_identifier) @method)
+  (#match? @ctx "^c$")
+  (#match? @method "^(QueryParam|Param|FormValue|QueryParams)$")
+) @source
+'''
+
+[[sources]]
+name = "Fiber context input"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @ctx
+    field: (field_identifier) @method)
+  (#match? @ctx "^c$")
+  (#match? @method "^(Query|Params|FormValue|Body|BodyParser)$")
+) @source
+'''
+
+[[sources]]
+name = "Command line arguments"
+category = "cli_input"
+labels = ["user_input", "cli"]
+query = '''
+(selector_expression
+  operand: (identifier) @pkg
+  field: (field_identifier) @field
+  (#eq? @pkg "os")
+  (#eq? @field "Args")
+) @source
+'''
+
+[[sources]]
+name = "Environment variable"
+category = "environment"
+labels = ["environment"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#eq? @pkg "os")
+  (#match? @fn "^(Getenv|LookupEnv)$")
+) @source
+'''
+
+[[sources]]
+name = "Read all from reader"
+category = "file_io"
+labels = ["file_input"]
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#match? @pkg "^(ioutil|io)$")
+  (#eq? @fn "ReadAll")
+) @source
+'''
+
+# =============================================================================
+# Sinks
+# =============================================================================
+
+[[sinks]]
+name = "exec.Command"
+category = "command_injection"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @arg)
+  (#eq? @pkg "exec")
+  (#eq? @fn "Command")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL with concatenation"
+category = "sql_injection"
+query = '''
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @method)
+  arguments: (argument_list
+    (binary_expression) @query)
+  (#match? @method "^(Exec|Query|QueryRow)$")
+) @sink
+'''
+
+[[sinks]]
+name = "fmt.Fprintf"
+category = "xss"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#eq? @pkg "fmt")
+  (#match? @fn "^(Fprintf|Fprint|Fprintln)$")
+) @sink
+'''
+
+[[sinks]]
+name = "template.HTML"
+category = "xss"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @arg)
+  (#eq? @pkg "template")
+  (#eq? @fn "HTML")
+) @sink
+'''
+
+[[sinks]]
+name = "File open with variable"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @path)
+  (#eq? @pkg "os")
+  (#match? @fn "^(Open|OpenFile|Create)$")
+) @sink
+'''
+
+[[sinks]]
+name = "http.Get with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @url)
+  (#eq? @pkg "http")
+  (#eq? @fn "Get")
+) @sink
+'''
+
+[[sinks]]
+name = "http.Post with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @url
+    (_)*)
+  (#eq? @pkg "http")
+  (#eq? @fn "Post")
+) @sink
+'''
+
+[[sinks]]
+name = "http.PostForm with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @url
+    (_)*)
+  (#eq? @pkg "http")
+  (#eq? @fn "PostForm")
+) @sink
+'''
+
+[[sinks]]
+name = "http.NewRequest with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (_)
+    (identifier) @url
+    (_)*)
+  (#eq? @pkg "http")
+  (#eq? @fn "NewRequest")
+) @sink
+'''
+
+[[sinks]]
+name = "http.NewRequestWithContext with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (_)
+    (_)
+    (identifier) @url
+    (_)*)
+  (#eq? @pkg "http")
+  (#eq? @fn "NewRequestWithContext")
+) @sink
+'''
+
+[[sinks]]
+name = "HTTP client.Do"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @method)
+  arguments: (argument_list
+    (identifier) @req)
+  (#eq? @method "Do")
+) @sink
+'''
+
+[[sinks]]
+name = "net.Dial with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (_)
+    (identifier) @addr)
+  (#eq? @pkg "net")
+  (#match? @fn "^(Dial|DialTimeout)$")
+) @sink
+'''
+
+[[sinks]]
+name = "HTTP client method with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @method)
+  arguments: (argument_list
+    (identifier) @url)
+  (#match? @method "^(Get|Post|Put|Delete|Patch|Head|Options|R|SetBaseURL)$")
+) @sink
+'''
+
+[[sinks]]
+name = "http.Get with dynamic URL"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (call_expression) @url_expr)
+  (#eq? @pkg "http")
+  (#eq? @fn "Get")
+) @sink
+'''
+
+[[sinks]]
+name = "HTTP client.Get with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @client
+    field: (field_identifier) @method)
+  arguments: (argument_list
+    [
+      (identifier) @url
+      (call_expression) @url
+    ])
+  (#eq? @method "Get")
+) @sink
+'''
+
+[[sinks]]
+name = "fmt.Sprintf URL construction"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (interpreted_string_literal) @format
+    (_)+ @args)
+  (#eq? @pkg "fmt")
+  (#eq? @fn "Sprintf")
+  (#match? @format "(http|https|://)")
+) @sink
+'''
+
+# =============================================================================
+# Sanitizers
+# =============================================================================
+
+[[sanitizers]]
+name = "html.EscapeString"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#eq? @pkg "html")
+  (#eq? @fn "EscapeString")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "URL escape"
+category = "url"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#eq? @pkg "url")
+  (#match? @fn "^(QueryEscape|PathEscape)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "URL parsing"
+category = "url"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (short_var_declaration
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "url")
+      (#match? @fn "^(Parse|ParseRequestURI)$")))
+  )
+  (assignment_statement
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "url")
+      (#match? @fn "^(Parse|ParseRequestURI)$")))
+  )
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.Clean"
+category = "path"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (short_var_declaration
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "path")
+      (#eq? @fn "Clean")))
+  )
+  (assignment_statement
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "path")
+      (#eq? @fn "Clean")))
+  )
+  (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "path")
+      (#eq? @fn "Clean")
+  ) @sanitizer
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "filepath.Clean"
+category = "path"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (short_var_declaration
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "filepath")
+      (#eq? @fn "Clean")))
+  )
+  (assignment_statement
+    left: (expression_list (identifier) @var)
+    right: (expression_list (call_expression
+      function: (selector_expression
+        operand: (identifier) @pkg
+        field: (field_identifier) @fn)
+      (#eq? @pkg "filepath")
+      (#eq? @fn "Clean")))
+  )
+] @sanitizer
+'''

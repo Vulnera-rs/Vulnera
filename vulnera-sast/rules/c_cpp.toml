@@ -1,0 +1,536 @@
+# C/C++ security rules — 26 rules
+
+[[rules]]
+id = "c-buffer-overflow"
+name = "Buffer Overflow (strcpy)"
+description = "strcpy does not check buffer bounds"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120", "CWE-119"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "c"]
+message = "Use strncpy or strlcpy with explicit size limit."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "strcpy")
+) @call
+'''
+
+[[rules]]
+id = "c-strcat"
+name = "Buffer Overflow (strcat)"
+description = "strcat does not check buffer bounds"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120", "CWE-119"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "c"]
+message = "Use strncat or strlcat with explicit size limit."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "strcat")
+) @call
+'''
+
+[[rules]]
+id = "c-gets"
+name = "Dangerous gets() Function"
+description = "gets() is inherently unsafe and should never be used"
+severity = "Critical"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120", "CWE-242"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "c"]
+message = "Use fgets() with size limit instead of gets()."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "gets")
+) @call
+'''
+
+[[rules]]
+id = "c-sprintf"
+name = "Buffer Overflow (sprintf)"
+description = "sprintf does not check buffer bounds"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120", "CWE-119"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "c"]
+message = "Use snprintf with explicit size limit."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "sprintf")
+) @call
+'''
+
+[[rules]]
+id = "c-scanf"
+name = "Buffer Overflow (scanf)"
+description = "scanf %s can overflow buffer without width specifier"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "c"]
+message = "Use width specifiers (e.g., %99s) or fgets."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "scanf")
+) @call
+'''
+
+[[rules]]
+id = "c-command-injection"
+name = "Command Injection (system)"
+description = "system() is vulnerable to command injection"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "c"]
+message = "Use execve family with argument array instead of system."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "system")
+) @call
+'''
+
+[[rules]]
+id = "c-popen"
+name = "Command Injection (popen)"
+description = "popen() is vulnerable to command injection"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "c"]
+message = "Validate and sanitize command arguments."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "popen")
+) @call
+'''
+
+[[rules]]
+id = "c-exec"
+name = "Command Execution (exec)"
+description = "exec family functions can execute arbitrary commands"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "c"]
+message = "Validate command arguments before execution."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(execl|execle|execlp|execv|execve|execvp)$")
+) @call
+'''
+
+[[rules]]
+id = "c-format-string"
+name = "Format String Vulnerability"
+description = "printf-family without format string is vulnerable"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-134"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["format-string", "c"]
+message = 'Use format string: printf("%s", str) instead of printf(str).'
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @arg
+  )
+  (#match? @fn "^(printf|sprintf|fprintf|snprintf|vprintf|vsprintf)$")
+) @call
+'''
+
+[[rules]]
+id = "c-malloc-zero"
+name = "Malloc Zero Size"
+description = "malloc(0) behavior is implementation-defined"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-131"]
+owasp_categories = []
+tags = ["memory", "undefined-behavior", "c"]
+message = "Avoid malloc(0). Always allocate at least 1 byte."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (number_literal) @size
+  )
+  (#eq? @fn "malloc")
+  (#eq? @size "0")
+) @call
+'''
+
+[[rules]]
+id = "c-free-null"
+name = "Free NULL Check"
+description = "free(NULL) is safe but may indicate logic error"
+severity = "Low"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-476"]
+owasp_categories = []
+tags = ["memory", "c"]
+message = "Check for potential logic errors if freeing NULL."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (null)
+  )
+  (#eq? @fn "free")
+) @call
+'''
+
+[[rules]]
+id = "c-use-after-free"
+name = "Potential Use After Free"
+description = "Variable may be used after being freed"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-416"]
+owasp_categories = []
+tags = ["memory", "use-after-free", "c"]
+message = "Set pointer to NULL after free to prevent use-after-free."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "free")
+) @free
+'''
+
+[[rules]]
+id = "c-integer-overflow"
+name = "Potential Integer Overflow"
+description = "Arithmetic operation may overflow"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-190", "CWE-191"]
+owasp_categories = []
+tags = ["overflow", "arithmetic", "c"]
+message = "Consider using safe integer arithmetic or bounds checking."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(binary_expression
+  operator: ["+" "-" "*"]
+) @overflow
+'''
+
+[[rules]]
+id = "cpp-raw-ptr"
+name = "Raw Pointer Usage"
+description = "Raw pointers should be avoided in modern C++"
+severity = "Low"
+languages = ["Cpp"]
+cwe_ids = ["CWE-401"]
+owasp_categories = []
+tags = ["memory", "modern-cpp", "cpp"]
+message = "Use smart pointers (unique_ptr, shared_ptr) instead of raw new."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(new_expression) @new
+'''
+
+[[rules]]
+id = "cpp-delete"
+name = "Delete Without Check"
+description = "delete on potentially null pointer"
+severity = "Low"
+languages = ["Cpp"]
+cwe_ids = ["CWE-476"]
+owasp_categories = []
+tags = ["memory", "cpp"]
+message = "Use smart pointers or RAII patterns."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(delete_expression) @delete
+'''
+
+[[rules]]
+id = "cpp-reinterpret-cast"
+name = "Reinterpret Cast"
+description = "reinterpret_cast can lead to undefined behavior"
+severity = "Medium"
+languages = ["Cpp"]
+cwe_ids = ["CWE-843"]
+owasp_categories = []
+tags = ["type-safety", "cpp"]
+message = "Avoid reinterpret_cast. Use static_cast or dynamic_cast."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(cast_expression
+  type: (type_descriptor) @cast
+  (#match? @cast "reinterpret_cast")
+) @reinterpret
+'''
+
+[[rules]]
+id = "c-memcpy"
+name = "Unsafe memcpy"
+description = "memcpy may cause buffer overflow without proper size validation"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120"]
+owasp_categories = []
+tags = ["buffer-overflow", "c"]
+message = "Ensure size parameter is validated before memcpy."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(memcpy|memmove|memset)$")
+) @call
+'''
+
+[[rules]]
+id = "c-insecure-rand"
+name = "Insecure Randomness"
+description = "rand() is not cryptographically secure"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-330"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "randomness", "c"]
+message = "Use getrandom() or /dev/urandom for security-sensitive random values."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "rand")
+) @call
+'''
+
+[[rules]]
+id = "c-mktemp"
+name = "Mktemp Race Condition"
+description = "mktemp() is vulnerable to race conditions"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-377"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["race-condition", "tempfile", "c"]
+message = "Use mkstemp() instead of mktemp() to avoid TOCTOU race conditions."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "mktemp")
+) @call
+'''
+
+[[rules]]
+id = "c-open-no-mode"
+name = "Open Without Mode"
+description = "open() with O_CREAT should specify mode"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-732"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["file", "permissions", "c"]
+message = "When using O_CREAT, always specify mode argument: open(path, O_CREAT, 0600)."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (argument_list
+    (_)
+    (identifier) @flags
+  )
+  (#eq? @fn "open")
+  (#match? @flags "O_CREAT")
+) @call
+'''
+
+[[rules]]
+id = "c-signal-unsafe"
+name = "Async-Signal-Unsafe Function"
+description = "Using non-reentrant functions in signal handlers is undefined behavior"
+severity = "High"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-479"]
+owasp_categories = []
+tags = ["signal", "async-safety", "c"]
+message = "Use sigaction() instead of signal(). Only call async-signal-safe functions in handlers."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "signal")
+) @call
+'''
+
+[[rules]]
+id = "c-realloc-unchecked"
+name = "Unchecked Realloc"
+description = "realloc() return must be checked; original pointer is lost on failure"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-401", "CWE-252"]
+owasp_categories = []
+tags = ["memory", "leak", "c"]
+message = "Store realloc() result in temp variable and check for NULL before overwriting original pointer."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_expression
+  left: (identifier) @ptr
+  right: (call_expression
+    function: (identifier) @fn
+    arguments: (argument_list
+      (identifier) @same_ptr
+    )
+  )
+  (#eq? @fn "realloc")
+) @call
+'''
+
+[[rules]]
+id = "c-atoi-unchecked"
+name = "Unchecked atoi"
+description = "atoi/atol cannot detect conversion errors"
+severity = "Low"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-252"]
+owasp_categories = []
+tags = ["conversion", "error-handling", "c"]
+message = "Use strtol/strtoll with errno checking for reliable conversion."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(atoi|atol|atoll|atof)$")
+) @call
+'''
+
+[[rules]]
+id = "c-strtok"
+name = "Non-Thread-Safe strtok"
+description = "strtok() uses static buffer and is not thread-safe"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-362"]
+owasp_categories = []
+tags = ["thread-safety", "c"]
+message = "Use strtok_r() for thread-safe string tokenization."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "strtok")
+) @call
+'''
+
+[[rules]]
+id = "c-realpath-buffer"
+name = "Realpath Buffer Overflow"
+description = "realpath() with fixed buffer may overflow if path exceeds PATH_MAX"
+severity = "Medium"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-120"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["buffer-overflow", "path", "c"]
+message = "Pass NULL as second argument to have realpath() allocate buffer dynamically."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "realpath")
+) @call
+'''
+
+[[rules]]
+id = "c-uninitialized-var"
+name = "Potentially Uninitialized Variable"
+description = "Stack variables without initialization contain garbage values"
+severity = "Low"
+languages = ["C", "Cpp"]
+cwe_ids = ["CWE-457"]
+owasp_categories = []
+tags = ["memory", "uninitialized", "c"]
+message = "Initialize variables at declaration to prevent use of garbage values."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(declaration
+  declarator: (init_declarator
+    declarator: (identifier) @var
+  )
+) @decl
+'''

@@ -67,6 +67,24 @@ impl Language {
     pub fn supports_jsx(&self) -> bool {
         matches!(self, Language::JavaScript | Language::TypeScript)
     }
+
+    /// Get the tree-sitter grammar for this language
+    pub fn grammar(&self) -> tree_sitter::Language {
+        match self {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        }
+    }
+
+    /// Get the TSX grammar (TypeScript with JSX support)
+    pub fn tsx_grammar() -> tree_sitter::Language {
+        tree_sitter_typescript::LANGUAGE_TSX.into()
+    }
 }
 
 /// Confidence level for findings

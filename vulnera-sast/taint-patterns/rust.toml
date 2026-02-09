@@ -1,0 +1,154 @@
+# Rust taint patterns
+
+# =============================================================================
+# Sources
+# =============================================================================
+
+[[sources]]
+name = "Command line args"
+category = "cli_input"
+labels = ["user_input", "cli"]
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  (#match? @path "env::(args|args_os)")
+) @source
+'''
+
+[[sources]]
+name = "Environment variable"
+category = "environment"
+labels = ["environment"]
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  (#match? @path "env::(var|var_os)")
+) @source
+'''
+
+[[sources]]
+name = "stdin read"
+category = "user_input"
+labels = ["user_input"]
+query = '''
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @method)
+  (#match? @method "^(read_line|read_to_string|read|read_exact)$")
+) @source
+'''
+
+[[sources]]
+name = "Web framework extractor"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(parameter
+  pattern: (identifier) @param
+  type: (generic_type
+    type: (type_identifier) @type)
+  (#match? @type "^(Json|Query|Path|Form|Bytes)$")
+) @source
+'''
+
+# =============================================================================
+# Sinks
+# =============================================================================
+
+[[sinks]]
+name = "Command::new"
+category = "command_injection"
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  arguments: (arguments
+    (identifier) @arg)
+  (#match? @path "Command::new")
+) @sink
+'''
+
+[[sinks]]
+name = "format! macro"
+category = "sql_injection"
+is_known = false
+query = '''
+(macro_invocation
+  macro: (identifier) @macro
+  (#match? @macro "^(format|concat)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Raw HTML"
+category = "xss"
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  (#match? @path "^(PreEscaped|Raw|raw)$")
+) @sink
+'''
+
+[[sinks]]
+name = "File open"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  arguments: (arguments
+    (identifier) @arg)
+  (#match? @path "File::(open|create)")
+) @sink
+'''
+
+# =============================================================================
+# Sanitizers
+# =============================================================================
+
+[[sanitizers]]
+name = "html_escape"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  (#match? @path "html_escape::(encode|encode_text)")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "ammonia::clean"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (scoped_identifier) @path
+  (#match? @path "ammonia::clean")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "parse::<T>"
+category = "type_coercion"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @method)
+  (#eq? @method "parse")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "sqlx query! macro"
+category = "sql"
+is_known = true
+clears_labels = []
+query = '''
+(macro_invocation
+  macro: (identifier) @macro
+  (#match? @macro "^(query|query_as|query_scalar)$")
+) @sanitizer
+'''

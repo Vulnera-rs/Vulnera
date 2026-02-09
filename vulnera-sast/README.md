@@ -141,7 +141,7 @@ The SAST module follows a layered architecture:
 
 - **Domain Layer**: Core entities (Finding, Rule, Location, etc.)
 - **Application Layer**: Use cases (ScanProjectUseCase)
-- **Infrastructure Layer**: 
+- **Infrastructure Layer**:
   - Parsers (Python, JavaScript, Rust)
   - Rules engine and repository
   - Directory scanner
@@ -174,15 +174,3 @@ When adding new rules or patterns:
 ## License
 
 See the main project LICENSE file.
-
-
-
-
-
-
-
-
-
-
-
-

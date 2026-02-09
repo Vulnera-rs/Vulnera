@@ -1,0 +1,785 @@
+# JavaScript/Node.js security rules — 33 rules
+
+[[rules]]
+id = "js-eval-direct"
+name = "Direct Eval"
+description = "Potentially unsafe eval() call"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-94", "CWE-95"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "code-execution", "javascript"]
+message = "Avoid using eval() with user-controlled input. Consider using JSON.parse() for data or a sandboxed evaluation environment."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "eval")
+) @call
+'''
+
+[[rules]]
+id = "js-eval-indirect"
+name = "Indirect Eval"
+description = "setTimeout/setInterval with string argument acts like eval()"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-94"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "code-execution", "javascript"]
+message = "Pass a function reference instead of a string to setTimeout/setInterval."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments (string) @str)
+  (#match? @fn "^(setTimeout|setInterval)$")
+) @call
+'''
+
+[[rules]]
+id = "js-new-function"
+name = "new Function Constructor"
+description = "new Function() constructor allows dynamic code execution similar to eval"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-94"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "code-execution", "javascript"]
+message = "Avoid using new Function() with user-controlled input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(new_expression
+  constructor: (identifier) @fn
+  (#eq? @fn "Function")
+) @call
+'''
+
+[[rules]]
+id = "js-child-process"
+name = "Child Process Execution"
+description = "Potential command injection via child_process"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "javascript"]
+message = "Validate and sanitize input before passing to child_process functions. Prefer execFile over exec."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  (#match? @fn "^(exec|execSync|spawn|spawnSync|execFile|execFileSync)$")
+) @call
+'''
+
+[[rules]]
+id = "js-xss"
+name = "innerHTML XSS"
+description = "Setting innerHTML can lead to XSS if input is not sanitized"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["xss", "javascript"]
+message = "Use textContent instead of innerHTML, or sanitize input with DOMPurify."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop
+  )
+  (#eq? @prop "innerHTML")
+) @assign
+'''
+
+[[rules]]
+id = "js-document-write"
+name = "document.write XSS"
+description = "document.write can lead to XSS vulnerabilities"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["xss", "javascript"]
+message = "Avoid document.write. Use DOM manipulation methods instead."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @fn
+  )
+  (#eq? @obj "document")
+  (#match? @fn "^(write|writeln)$")
+) @call
+'''
+
+[[rules]]
+id = "js-xss-react"
+name = "XSS via dangerouslySetInnerHTML"
+description = "Potential XSS using dangerouslySetInnerHTML or similar unsafe patterns"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["xss", "react", "javascript"]
+message = "Sanitize HTML content before using dangerouslySetInnerHTML."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(jsx_attribute
+  (property_identifier) @attr
+  (#eq? @attr "dangerouslySetInnerHTML")
+) @xss
+'''
+
+[[rules]]
+id = "js-outerhtml-xss"
+name = "outerHTML XSS"
+description = "Setting outerHTML can lead to XSS if input is not sanitized"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["xss", "javascript"]
+message = "Avoid setting outerHTML with untrusted input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop
+  )
+  (#eq? @prop "outerHTML")
+) @assign
+'''
+
+[[rules]]
+id = "js-ssti"
+name = "Server-Side Template Injection"
+description = "Potential SSTI vulnerability - template engine may execute user input"
+severity = "Critical"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-94", "CWE-1336"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["ssti", "injection", "javascript"]
+message = "Never pass user input directly to template engines. Use parameterized templates."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  (#match? @fn "^(compile|render|renderString|renderFile)$")
+) @call
+'''
+
+[[rules]]
+id = "js-path-traversal"
+name = "Path Traversal / Zip Slip"
+description = "Archive extraction without path validation may allow writing files outside target directory"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-22", "CWE-73"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["path-traversal", "zip-slip", "javascript"]
+message = "Validate that archive entry paths don't escape the target directory using path.resolve() and startsWith() check."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+[
+  (call_expression
+    function: (member_expression
+      object: (identifier) @obj
+      property: (property_identifier) @fn
+    )
+    arguments: (arguments
+      (binary_expression
+        operator: "+"
+      ) @concat
+    )
+    (#eq? @obj "fs")
+    (#match? @fn "^(readFileSync|writeFileSync|readFile|writeFile|createReadStream|createWriteStream)$")
+  ) @call
+  (call_expression
+    function: (member_expression
+      object: (identifier) @obj
+      property: (property_identifier) @fn
+    )
+    arguments: (arguments
+      (template_string) @template
+    )
+    (#eq? @obj "fs")
+    (#match? @fn "^(readFileSync|writeFileSync|readFile|writeFile|createReadStream|createWriteStream)$")
+  ) @call
+]
+'''
+
+[[rules]]
+id = "js-prototype-pollution"
+name = "Prototype Pollution"
+description = "Object merge/extend without proper filtering can lead to prototype pollution"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-1321"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["prototype-pollution", "javascript"]
+message = "Validate object keys before merging. Filter out __proto__, constructor, and prototype."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @fn
+  )
+  (#eq? @obj "Object")
+  (#eq? @fn "assign")
+) @call
+'''
+
+[[rules]]
+id = "js-open-redirect"
+name = "Open Redirect"
+description = "Potential open redirect vulnerability"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-601"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["redirect", "javascript"]
+message = "Validate redirect URLs against an allowlist of permitted domains."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_expression
+  left: (member_expression
+    object: [(identifier) @obj (member_expression)]
+    property: (property_identifier) @prop
+  )
+  (#match? @obj "^(window|location|document)$")
+  (#match? @prop "^(href|location)$")
+) @redirect
+'''
+
+[[rules]]
+id = "js-insecure-random"
+name = "Insecure Randomness"
+description = "Usage of Math.random() for security-sensitive operations is insecure"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-330"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "randomness", "javascript"]
+message = "Use crypto.randomBytes() or crypto.getRandomValues() for security-sensitive random values."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @fn
+  )
+  (#eq? @obj "Math")
+  (#eq? @fn "random")
+) @call
+'''
+
+[[rules]]
+id = "js-weak-crypto"
+name = "Weak Cryptographic Algorithm"
+description = "Usage of deprecated or weak cryptographic algorithms"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-327", "CWE-328"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "weak-algorithm", "javascript"]
+message = "Use strong cryptographic algorithms like SHA-256 or SHA-3."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (string) @algo
+  )
+  (#eq? @fn "createHash")
+  (#match? @algo "(?i)(md5|sha1)")
+) @call
+'''
+
+[[rules]]
+id = "js-cors-wildcard"
+name = "CORS Wildcard"
+description = "CORS configuration with wildcard origin can expose sensitive data"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-942"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["cors", "misconfiguration", "javascript"]
+message = "Specify allowed origins explicitly instead of using wildcard."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(object
+  (pair
+    key: (property_identifier) @key
+    value: (string) @value
+  )
+  (#match? @key "(?i)origin")
+  (#eq? @value "\"*\"")
+) @cors
+'''
+
+[[rules]]
+id = "js-disabled-security"
+name = "Disabled Security Feature"
+description = "Security feature disabled in configuration"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-614", "CWE-1004"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["cookies", "security", "javascript"]
+message = "Enable security features like secure, httpOnly, and sameSite for cookies."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(object
+  (pair
+    key: (property_identifier) @key
+    value: (false) @value
+  )
+  (#match? @key "(?i)(secure|httpOnly|sameSite)")
+) @config
+'''
+
+[[rules]]
+id = "js-sensitive-logging"
+name = "Sensitive Data Logging"
+description = "Potential logging of sensitive data"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-532"]
+owasp_categories = ["A09:2021 - Security Logging and Monitoring Failures"]
+tags = ["logging", "sensitive-data", "javascript"]
+message = "Avoid logging sensitive data. Mask or omit sensitive fields before logging."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (identifier) @arg
+  )
+  (#eq? @obj "console")
+  (#match? @fn "^(log|debug|info|warn|error)$")
+  (#match? @arg "(?i)(password|secret|token|key|credential)")
+) @log
+'''
+
+[[rules]]
+id = "js-unsafe-json-parse"
+name = "Unsafe JSON Parse"
+description = "JSON.parse without error handling can cause unhandled exceptions"
+severity = "Low"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-20"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["json", "error-handling", "javascript"]
+message = "Wrap JSON.parse in try-catch to handle malformed JSON gracefully."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @fn
+  )
+  (#eq? @obj "JSON")
+  (#eq? @fn "parse")
+) @call
+'''
+
+[[rules]]
+id = "js-postmessage-origin"
+name = "Unsafe PostMessage"
+description = "postMessage with wildcard origin can lead to data exposure"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-346"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["postmessage", "origin", "javascript"]
+message = "Specify target origin explicitly instead of using wildcard."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (_)
+    (string) @origin
+  )
+  (#eq? @fn "postMessage")
+  (#eq? @origin "\"*\"")
+) @call
+'''
+
+[[rules]]
+id = "js-nosql-injection"
+name = "NoSQL Injection"
+description = "Potential NoSQL injection via MongoDB query operators ($gt, $ne, $regex, etc.)"
+severity = "Critical"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-943", "CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["nosql", "mongodb", "injection", "javascript"]
+message = "Validate and sanitize user input before using in MongoDB queries. Use explicit query operators and avoid passing raw user input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (object) @query
+  )
+  (#match? @fn "^(find|findOne|findOneAndUpdate|findOneAndDelete|updateOne|updateMany|deleteOne|deleteMany|aggregate)$")
+) @call
+'''
+
+[[rules]]
+id = "js-xxe"
+name = "XML External Entity (XXE) Injection"
+description = "XML parser may be vulnerable to XXE attacks if external entities are not disabled"
+severity = "Critical"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-611", "CWE-827"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["xxe", "xml", "injection", "javascript"]
+message = "Disable external entity processing in XML parsers. Use {noent: false, noblanks: true} options."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  (#match? @fn "^(parseString|parseStringSync|parse|parseSync|parseXml|parseXmlString)$")
+) @call
+'''
+
+[[rules]]
+id = "js-jwt-none-algorithm"
+name = "JWT Algorithm None Bypass"
+description = "JWT verification without algorithm restriction allows signature bypass"
+severity = "Critical"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-347", "CWE-327"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["jwt", "authentication", "crypto", "javascript"]
+message = "Always specify algorithms option: jwt.verify(token, secret, {algorithms: ['HS256']})"
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (_)
+    (_)
+  )
+  (#match? @fn "^(verify|decode)$")
+) @call
+'''
+
+[[rules]]
+id = "js-regex-redos"
+name = "ReDoS Vulnerability"
+description = "Regular expression with potential catastrophic backtracking"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-1333", "CWE-400"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["redos", "regex", "dos", "javascript"]
+message = "Avoid nested quantifiers and overlapping patterns. Use safe-regex or re2 for user-controlled patterns."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(new_expression
+  constructor: (identifier) @ctor
+  arguments: (arguments
+    (regex) @pattern
+  )
+  (#eq? @ctor "RegExp")
+) @redos
+'''
+
+[[rules]]
+id = "js-file-upload-unsafe"
+name = "Unrestricted File Upload"
+description = "File upload without proper validation can lead to RCE"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-434"]
+owasp_categories = ["A04:2021 - Insecure Design"]
+tags = ["file-upload", "rce", "javascript"]
+message = "Validate file type, size, and content. Store uploads outside webroot."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(multer|upload|formidable)$")
+) @upload
+'''
+
+[[rules]]
+id = "js-cookie-no-httponly"
+name = "Cookie Missing HttpOnly"
+description = "Cookies without HttpOnly flag can be accessed via JavaScript XSS"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-1004"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["cookies", "httponly", "xss", "javascript"]
+message = "Set httpOnly: true for sensitive cookies to prevent XSS attacks."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (string)
+    (string)
+    (object) @options
+  )
+  (#eq? @fn "cookie")
+) @call
+'''
+
+[[rules]]
+id = "js-cookie-no-secure"
+name = "Cookie Missing Secure Flag"
+description = "Cookies without Secure flag can be transmitted over HTTP"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-614"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["cookies", "secure", "javascript"]
+message = "Set secure: true for cookies to ensure they're only sent over HTTPS."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop
+  )
+  (#eq? @prop "cookie")
+) @cookie
+'''
+
+[[rules]]
+id = "js-csrf-disabled"
+name = "CSRF Protection Disabled"
+description = "CSRF protection explicitly disabled or not configured"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-352"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["csrf", "security", "javascript"]
+message = "Enable CSRF protection for state-changing operations."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(object
+  (pair
+    key: (property_identifier) @key
+    value: (false)
+  )
+  (#match? @key "(?i)(csrf|csrfProtection|xsrfProtection)")
+) @config
+'''
+
+[[rules]]
+id = "js-graphql-introspection"
+name = "GraphQL Introspection Enabled"
+description = "GraphQL introspection enabled - may expose schema details"
+severity = "Low"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-200"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["graphql", "introspection", "javascript"]
+message = "Disable introspection in production: {introspection: false}"
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(object
+  (pair
+    key: (property_identifier) @key
+    value: (true)
+  )
+  (#eq? @key "introspection")
+) @config
+'''
+
+[[rules]]
+id = "js-graphql-no-depth-limit"
+name = "GraphQL No Depth Limit"
+description = "GraphQL queries without depth limit are vulnerable to DoS"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-400", "CWE-770"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["graphql", "dos", "javascript"]
+message = "Add depth limiting middleware: graphql-depth-limit or similar."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(ApolloServer|GraphQLServer|graphqlHTTP)$")
+) @server
+'''
+
+[[rules]]
+id = "js-helmet-missing"
+name = "Missing Security Headers"
+description = "Express app without Helmet middleware for security headers"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-693"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["helmet", "headers", "javascript"]
+message = "Use Helmet middleware: app.use(helmet()) for security headers."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (identifier) @fn
+  (#eq? @fn "express")
+) @app
+'''
+
+[[rules]]
+id = "js-no-rate-limit"
+name = "Missing Rate Limiting"
+description = "API endpoint without rate limiting is vulnerable to brute force"
+severity = "Medium"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-307", "CWE-799"]
+owasp_categories = ["A04:2021 - Insecure Design"]
+tags = ["rate-limit", "brute-force", "javascript"]
+message = "Add rate limiting to sensitive endpoints: express-rate-limit."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @app
+    property: (property_identifier) @method
+  )
+  (#match? @app "^(app|router)$")
+  (#match? @method "^(post|put|patch|delete)$")
+) @endpoint
+'''
+
+[[rules]]
+id = "js-sql-injection"
+name = "SQL Injection"
+description = "SQL query built with string concatenation is vulnerable to injection"
+severity = "Critical"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["sql", "injection", "javascript"]
+message = "Use parameterized queries: db.query('SELECT * FROM users WHERE id = ?', [id])"
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    [(binary_expression) (template_string)]
+  )
+  (#match? @fn "^(query|execute|raw|prepare)$")
+) @sql
+'''
+
+[[rules]]
+id = "js-sequelize-raw"
+name = "Sequelize Raw Query"
+description = "Sequelize raw query without parameterization"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["sql", "sequelize", "injection", "javascript"]
+message = "Use replacements or bind parameters: sequelize.query(sql, {replacements: {...}})"
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @fn
+  )
+  arguments: (arguments
+    (template_string) @query
+  )
+  (#eq? @fn "query")
+) @raw
+'''
