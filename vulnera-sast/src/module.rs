@@ -11,7 +11,7 @@ use vulnera_core::domain::module::{
 };
 
 use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
-use crate::domain::entities::Severity as SastSeverity;
+use crate::domain::{Finding as SastFinding, Severity as SastSeverity};
 
 /// SAST analysis module
 pub struct SastModule {

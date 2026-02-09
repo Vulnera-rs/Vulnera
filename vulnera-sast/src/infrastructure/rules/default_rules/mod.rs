@@ -9,7 +9,7 @@
 //! 2. Follow the `[[rules]]` table-array format — see existing entries.
 //! 3. Run `cargo test -p vulnera-sast` to validate deserialization.
 
-use crate::domain::entities::Rule;
+use crate::domain::Rule;
 use serde::Deserialize;
 use std::sync::LazyLock;
 use tracing::{debug, warn};

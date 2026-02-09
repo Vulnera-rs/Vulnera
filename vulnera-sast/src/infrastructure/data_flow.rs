@@ -8,9 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use tree_sitter::Tree;
 
-use crate::domain::entities::{
-    DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, TaintLabel, TaintState,
-};
+use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, TaintLabel, TaintState};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 use crate::infrastructure::taint_queries::{

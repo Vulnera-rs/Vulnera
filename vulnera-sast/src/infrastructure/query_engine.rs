@@ -8,7 +8,8 @@
 //! - Multi-language support via grammar selection
 //! - Efficient batch query execution
 
-use crate::domain::entities::{Finding, Location, Pattern, Rule, Severity};
+use crate::domain::finding::{Finding, Location, Severity};
+use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -5,7 +5,7 @@
 //! - YAML native rule format
 //! - Semgrep-style YAML rules (subset: pattern, patterns, pattern-either, pattern-not)
 
-use crate::domain::entities::{Pattern, Rule, Severity};
+use crate::domain::{Pattern, Rule, Severity};
 use crate::domain::value_objects::Language;
 use serde::Deserialize;
 use std::path::Path;
@@ -379,7 +379,7 @@ fn validate_rule(rule: &Rule) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::entities::{Pattern, Severity};
+    use crate::domain::{Pattern, Severity};
     use crate::domain::value_objects::Language;
 
     #[test]

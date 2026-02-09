@@ -6,7 +6,7 @@ mod loader;
 pub use default_rules::get_default_rules;
 pub use loader::{FileRuleLoader, RuleLoadError, RuleLoader};
 
-use crate::domain::entities::{Pattern, Rule};
+use crate::domain::{Pattern, Rule};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine::{
     QueryEngineError, QueryMatchResult, TreeSitterQueryEngine,

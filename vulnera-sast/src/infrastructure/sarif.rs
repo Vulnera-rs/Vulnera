@@ -6,11 +6,12 @@
 //! - CI/CD pipeline integration
 //! - Interoperability with other security tools
 
-use crate::domain::entities::{
-    Finding, Rule, SarifArtifactChange, SarifArtifactLocation, SarifDefaultConfiguration, SarifFix,
-    SarifInsertedContent, SarifInvocation, SarifLevel, SarifLocation, SarifMessage,
-    SarifPhysicalLocation, SarifRegion, SarifReplacement, SarifReport, SarifResult, SarifRule,
-    SarifRuleProperties, SarifRun, SarifSnippet, SarifTool, SarifToolDriver, Severity,
+use crate::domain::{
+    Finding, Rule, SarifArtifactChange, SarifArtifactLocation, SarifCodeFlow,
+    SarifDefaultConfiguration, SarifFix, SarifInsertedContent, SarifInvocation, SarifLevel,
+    SarifLocation, SarifMessage, SarifPhysicalLocation, SarifRegion, SarifReplacement,
+    SarifReport, SarifResult, SarifRule, SarifRuleProperties, SarifRun, SarifSnippet,
+    SarifThreadFlow, SarifThreadFlowLocation, SarifTool, SarifToolDriver, Severity,
 };
 use std::collections::HashMap;
 use tracing::{debug, instrument};
@@ -202,12 +203,12 @@ impl SarifExporter {
 
         // Build code flows from data flow path if available
         let code_flows = finding.data_flow_path.as_ref().map(|path| {
-            vec![crate::domain::entities::SarifCodeFlow {
-                thread_flows: vec![crate::domain::entities::SarifThreadFlow {
+            vec![SarifCodeFlow {
+                thread_flows: vec![SarifThreadFlow {
                     locations: path
                         .steps
                         .iter()
-                        .map(|step| crate::domain::entities::SarifThreadFlowLocation {
+                        .map(|step| SarifThreadFlowLocation {
                             location: SarifLocation {
                                 physical_location: SarifPhysicalLocation {
                                     artifact_location: SarifArtifactLocation {
@@ -321,7 +322,7 @@ impl Default for SarifExporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::entities::Location;
+    use crate::domain::Location;
     use crate::domain::value_objects::Confidence;
 
     fn sample_finding() -> Finding {
@@ -352,7 +353,7 @@ mod tests {
             description: "Detects potential SQL injection vulnerabilities".to_string(),
             severity: Severity::Critical,
             languages: vec![crate::domain::value_objects::Language::Python],
-            pattern: crate::domain::entities::Pattern::TreeSitterQuery("(call) @call".to_string()),
+            pattern: crate::domain::Pattern::TreeSitterQuery("(call) @call".to_string()),
             options: Default::default(),
             cwe_ids: vec!["CWE-89".to_string()],
             owasp_categories: vec!["A03:2021 - Injection".to_string()],

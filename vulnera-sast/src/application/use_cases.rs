@@ -17,10 +17,12 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
-use crate::domain::entities::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
-    Location, Pattern, Rule, Severity,
+use crate::domain::finding::{
+    DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding,
+    Location, Severity,
 };
+use crate::domain::pattern_types::{Pattern, PatternRule as Rule};
+use crate::domain::suppression::FileSuppressions;
 use crate::domain::value_objects::{AnalysisEngine, Language};
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;

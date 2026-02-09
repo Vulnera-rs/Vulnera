@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
-use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
+use crate::domain::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
 use crate::infrastructure::query_engine::TreeSitterQueryEngine;
