@@ -99,3 +99,25 @@ pub struct TaintPropagator {
     #[serde(default)]
     pub by_side_effect: bool,
 }
+
+/// Summary of a function's taint behavior for inter-procedural analysis.
+///
+/// Computed during intra-procedural analysis and consumed by callers
+/// to propagate taint across function boundaries.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FunctionTaintSummary {
+    /// Function ID
+    pub function_id: String,
+    /// Which parameters get propagated to return value (param indices)
+    pub params_to_return: std::collections::HashSet<usize>,
+    /// Which parameters flow to sinks (param_idx -> sink categories)
+    pub params_to_sinks: std::collections::HashMap<usize, Vec<String>>,
+    /// Whether return value is inherently tainted (e.g., reads user input)
+    pub return_tainted: bool,
+    /// Source categories introduced by this function
+    pub introduces_taint: Vec<String>,
+    /// Whether this function acts as a sanitizer
+    pub is_sanitizer: bool,
+    /// Which labels this sanitizer clears
+    pub clears_labels: Vec<String>,
+}

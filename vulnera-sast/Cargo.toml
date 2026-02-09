@@ -27,6 +27,9 @@ thiserror = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
+# Caching
+moka = { workspace = true }
+
 # SAST dependencies
 tree-sitter = { workspace = true }
 tree-sitter-python = { workspace = true }

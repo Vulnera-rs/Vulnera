@@ -95,14 +95,6 @@ pub enum Confidence {
     Low,
 }
 
-/// Analysis engine selection - tree-sitter is the only engine
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum AnalysisEngine {
-    /// Tree-sitter native query engine with data flow analysis
-    #[default]
-    TreeSitter,
-}
-
 /// Rule source indicating where rules are loaded from
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RuleSource {

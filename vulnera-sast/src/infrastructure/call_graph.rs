@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
-use crate::domain::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
+use crate::domain::{CallGraphNode, CallSite, FunctionSignature, FunctionTaintSummary, ParameterInfo};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
 use crate::infrastructure::sast_engine::SastEngine;
@@ -42,25 +42,6 @@ pub struct UnresolvedCall {
     /// Call location
     pub line: u32,
     pub column: u32,
-}
-
-/// Summary of a function's taint behavior for inter-procedural analysis
-#[derive(Debug, Clone, Default)]
-pub struct FunctionTaintSummary {
-    /// Function ID
-    pub function_id: String,
-    /// Which parameters get propagated to return value (param indices)
-    pub params_to_return: HashSet<usize>,
-    /// Which parameters flow to sinks (param_idx -> sink categories)
-    pub params_to_sinks: HashMap<usize, Vec<String>>,
-    /// Whether return value is inherently tainted (e.g., reads user input)
-    pub return_tainted: bool,
-    /// Source categories introduced by this function
-    pub introduces_taint: Vec<String>,
-    /// Whether this function acts as a sanitizer
-    pub is_sanitizer: bool,
-    /// Which labels this sanitizer clears
-    pub clears_labels: Vec<String>,
 }
 
 impl CallGraph {
@@ -432,6 +413,38 @@ impl CallGraph {
             .get(function_id)
             .map(|s| !s.params_to_return.is_empty() || s.return_tainted)
             .unwrap_or(false)
+    }
+
+    /// Extract file-level dependency map from cross-file call edges.
+    ///
+    /// Returns a map where each key is a file path and the value is the set of
+    /// other files it depends on (files containing functions it calls).
+    /// Only cross-file edges are included (self-dependencies are excluded).
+    pub fn file_dependencies(&self) -> HashMap<String, HashSet<String>> {
+        let mut deps: HashMap<String, HashSet<String>> = HashMap::new();
+
+        for (caller_id, call_sites) in &self.edges {
+            let caller_file = match self.nodes.get(caller_id) {
+                Some(node) => &node.file_path,
+                None => continue,
+            };
+
+            for call_site in call_sites {
+                let callee_file = match self.nodes.get(&call_site.target_id) {
+                    Some(node) => &node.file_path,
+                    None => continue,
+                };
+
+                // Only track cross-file dependencies
+                if caller_file != callee_file {
+                    deps.entry(caller_file.clone())
+                        .or_default()
+                        .insert(callee_file.clone());
+                }
+            }
+        }
+
+        deps
     }
 
     /// Get statistics about the call graph

@@ -6,10 +6,9 @@
 //! - Call graph analysis for cross-function vulnerability detection
 //! - SARIF v2.1.0 export
 
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
@@ -20,10 +19,11 @@ use crate::domain::{
     DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
     Location, Pattern, Rule, Severity,
 };
-use crate::domain::value_objects::{AnalysisEngine, Language};
+use crate::domain::value_objects::Language;
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
+use crate::infrastructure::incremental::IncrementalTracker;
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
@@ -41,8 +41,6 @@ pub struct ScanResult {
     pub files_skipped: usize,
     /// Number of files that failed to parse or analyze
     pub files_failed: usize,
-    /// Analysis engine used
-    pub analysis_engine: AnalysisEngine,
     /// Errors encountered during analysis (non-fatal)
     pub errors: Vec<String>,
     /// Total scan duration in milliseconds
@@ -105,6 +103,8 @@ pub struct AnalysisConfig {
     pub max_findings_per_file: usize,
     /// Maximum total findings across all files (None = no limit)
     pub max_total_findings: Option<usize>,
+    /// Path to incremental state file (None = full scan every time)
+    pub incremental_state_path: Option<PathBuf>,
 }
 
 impl Default for AnalysisConfig {
@@ -125,6 +125,7 @@ impl Default for AnalysisConfig {
             scan_timeout_seconds: None,
             max_findings_per_file: 100,
             max_total_findings: None,
+            incremental_state_path: None,
         }
     }
 }
@@ -147,6 +148,7 @@ impl From<&SastConfig> for AnalysisConfig {
             scan_timeout_seconds: config.scan_timeout_seconds,
             max_findings_per_file: config.max_findings_per_file.unwrap_or(100),
             max_total_findings: config.max_total_findings,
+            incremental_state_path: None,
         }
     }
 }
@@ -171,6 +173,8 @@ pub struct ScanProjectUseCase {
     data_flow_context: Arc<RwLock<InterProceduralContext>>,
     /// Call graph builder
     call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
+    /// Content-hash tracker for incremental analysis (skip unchanged files)
+    incremental_tracker: Mutex<Option<IncrementalTracker>>,
     /// Analysis configuration
     config: AnalysisConfig,
 }
@@ -190,6 +194,17 @@ impl ScanProjectUseCase {
             RuleRepository::new()
         };
 
+        // Load incremental state if path is configured
+        let incremental_tracker = analysis_config
+            .incremental_state_path
+            .as_deref()
+            .map(|path| {
+                IncrementalTracker::load_from_file(path).unwrap_or_else(|e| {
+                    warn!(error = %e, "Failed to load incremental state, starting fresh");
+                    IncrementalTracker::new()
+                })
+            });
+
         Self {
             scanner,
             rule_repository: Arc::new(RwLock::new(rule_repository)),
@@ -197,6 +212,7 @@ impl ScanProjectUseCase {
             ast_cache: None,
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
+            incremental_tracker: Mutex::new(incremental_tracker),
             config: analysis_config,
         }
     }
@@ -218,10 +234,8 @@ impl ScanProjectUseCase {
         }
     }
 
-    fn compute_content_hash(&self, content: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        hex::encode(hasher.finalize())
+    fn compute_content_hash(content: &str) -> String {
+        IncrementalTracker::hash_content(content)
     }
 
     fn resolve_analysis_depth(&self, file_count: usize, total_bytes: u64) -> AnalysisDepth {
@@ -334,6 +348,26 @@ impl ScanProjectUseCase {
                 entry_points = stats.entry_points,
                 "Call graph built with cross-file resolution"
             );
+
+            // Seed inter-procedural context from call graph for cross-function taint propagation
+            let mut df_ctx = self.data_flow_context.write().await;
+            df_ctx.seed_from_call_graph(call_graph.graph());
+            drop(df_ctx);
+
+            // Extract file-level dependencies for incremental tracking
+            {
+                let file_deps = call_graph.graph().file_dependencies();
+                if !file_deps.is_empty() {
+                    let mut tracker = self.incremental_tracker.lock().unwrap();
+                    if let Some(ref mut t) = *tracker {
+                        debug!(
+                            cross_file_edges = file_deps.len(),
+                            "Setting file dependencies from call graph"
+                        );
+                        t.set_file_dependencies(file_deps);
+                    }
+                }
+            }
         }
 
         // =========================================================================
@@ -374,7 +408,33 @@ impl ScanProjectUseCase {
             };
 
             let file_path_str = file.path.display().to_string();
-            let content_hash = self.compute_content_hash(&content);
+            let content_hash = Self::compute_content_hash(&content);
+
+            // Incremental check: skip files whose content hasn't changed
+            {
+                let tracker = self.incremental_tracker.lock().unwrap();
+                if let Some(ref t) = *tracker {
+                    let (needs, _) = t.needs_analysis(&file_path_str, &content);
+                    if !needs {
+                        debug!(file = %file_path_str, "Skipping unchanged file (incremental)");
+                        files_skipped += 1;
+                        // Still record previous findings in current state
+                        drop(tracker);
+                        let mut tracker = self.incremental_tracker.lock().unwrap();
+                        if let Some(ref mut t) = *tracker {
+                            let prev_count = t.get_previous_findings(&file_path_str).unwrap_or(0);
+                            t.record_file(
+                                &file_path_str,
+                                content_hash.clone(),
+                                content.len() as u64,
+                                prev_count,
+                            );
+                        }
+                        continue;
+                    }
+                }
+            }
+
             let mut cached_tree = parsed_files
                 .get(&file_path_str)
                 .map(|(tree, _)| tree.clone());
@@ -471,7 +531,30 @@ impl ScanProjectUseCase {
                         total_findings = all_findings.len(),
                         max_total, "Max total findings limit reached, stopping scan early"
                     );
+                    // Record this file before breaking
+                    let mut tracker = self.incremental_tracker.lock().unwrap();
+                    if let Some(ref mut t) = *tracker {
+                        t.record_file(
+                            &file_path_str,
+                            content_hash,
+                            content.len() as u64,
+                            file_finding_count,
+                        );
+                    }
                     break;
+                }
+            }
+
+            // Record file in incremental tracker
+            {
+                let mut tracker = self.incremental_tracker.lock().unwrap();
+                if let Some(ref mut t) = *tracker {
+                    t.record_file(
+                        &file_path_str,
+                        content_hash,
+                        content.len() as u64,
+                        file_finding_count,
+                    );
                 }
             }
         }
@@ -482,6 +565,26 @@ impl ScanProjectUseCase {
         }
 
         all_findings = Self::deduplicate_findings(all_findings);
+
+        // Finalize incremental tracker and persist state
+        {
+            let mut tracker = self.incremental_tracker.lock().unwrap();
+            if let Some(ref mut t) = *tracker {
+                t.finalize(files_scanned + files_skipped, files_skipped);
+                if let Some(ref state_path) = self.config.incremental_state_path {
+                    if let Err(e) = t.save_to_file(state_path) {
+                        warn!(error = %e, "Failed to save incremental state");
+                    }
+                }
+                let stats = t.stats();
+                info!(
+                    previous = stats.previous_files,
+                    analyzed = stats.files_analyzed,
+                    skipped = stats.files_skipped,
+                    "Incremental analysis stats"
+                );
+            }
+        }
 
         let duration_ms = start_time.elapsed().as_millis() as u64;
         info!(
@@ -501,7 +604,6 @@ impl ScanProjectUseCase {
             files_scanned,
             files_skipped,
             files_failed,
-            analysis_engine: AnalysisEngine::TreeSitter,
             errors,
             duration_ms,
         })
@@ -675,11 +777,7 @@ impl ScanProjectUseCase {
             );
         }
 
-        // Propagate taint through assignments
-        let mut changed = true;
-        let max_iterations = 10; // Prevent infinite loops
-        let mut iteration = 0;
-
+        // Propagate taint through assignments using work-list convergence
         // Create a set of sanitized variables to block propagation
         let sanitized_vars: std::collections::HashSet<&str> = sanitizers
             .iter()
@@ -691,74 +789,81 @@ impl ScanProjectUseCase {
             "Sanitized variables blocking taint propagation"
         );
 
-        while changed && iteration < max_iterations {
-            changed = false;
-            iteration += 1;
+        // Build a worklist: initially all assignments where the source might be tainted
+        let mut worklist: std::collections::VecDeque<usize> = (0..assignments.len()).collect();
+        let mut worklist_set: std::collections::HashSet<usize> = (0..assignments.len()).collect();
 
-            for (target, source_expr, line, column) in &assignments {
-                // Skip if target is already tainted
-                if analyzer.is_tainted(target) {
-                    continue;
-                }
+        while let Some(idx) = worklist.pop_front() {
+            worklist_set.remove(&idx);
 
-                // Skip if target is a sanitized variable (prevent re-tainting)
-                if sanitized_vars.contains(target.as_str()) {
-                    tracing::trace!(
-                        target = %target,
-                        "Skipping taint propagation to sanitized variable"
+            let (target, source_expr, line, column) = &assignments[idx];
+
+            // Skip if target is already tainted
+            if analyzer.is_tainted(target) {
+                continue;
+            }
+
+            // Skip if target is a sanitized variable (prevent re-tainting)
+            if sanitized_vars.contains(target.as_str()) {
+                continue;
+            }
+
+            let mut newly_tainted = false;
+
+            // Check if the source expression contains any tainted source
+            for source in &sources {
+                let source_var = source
+                    .variable_name
+                    .as_deref()
+                    .unwrap_or(&source.matched_text);
+
+                let source_in_expr = source_expr.contains(source_var)
+                    || source_expr.contains(&source.matched_text);
+
+                if source_in_expr {
+                    analyzer.mark_tainted(
+                        target,
+                        &format!("propagated from {}", source_var),
+                        &file_str,
+                        *line as u32 + 1,
+                        *column as u32,
                     );
-                    continue;
+                    newly_tainted = true;
+                    break;
                 }
+            }
 
-                // Check if the source expression contains any tainted source
-                // This handles both direct source references and method chain results
-                for source in &sources {
-                    // Check both variable_name and matched_text
-                    let source_var = source
+            // Also check transitive propagation via already-tainted variables
+            if !newly_tainted {
+                for prev_source in &sources {
+                    let prev_var = prev_source
                         .variable_name
                         .as_deref()
-                        .unwrap_or(&source.matched_text);
-
-                    // The source expression should contain some part of the tainted source
-                    // This handles cases like:
-                    // - Direct: targetURL := r.URL.Query().Get("url")
-                    // - Indirect: targetURL := someVar (where someVar was tainted)
-                    let source_in_expr = source_expr.contains(source_var)
-                        || source_expr.contains(&source.matched_text);
-
-                    if source_in_expr {
+                        .unwrap_or(&prev_source.matched_text);
+                    if source_expr.contains(prev_var) && analyzer.is_tainted(prev_var) {
                         analyzer.mark_tainted(
                             target,
-                            &format!("propagated from {}", source_var),
+                            &format!("propagated from {}", prev_var),
                             &file_str,
                             *line as u32 + 1,
                             *column as u32,
                         );
-                        changed = true;
+                        newly_tainted = true;
                         break;
                     }
                 }
+            }
 
-                // Also check if the source_expr contains any already-tainted variable
-                // This handles transitive propagation
-                if !changed {
-                    // Check each previously tainted variable (from sources and propagation)
-                    for prev_source in &sources {
-                        let prev_var = prev_source
-                            .variable_name
-                            .as_deref()
-                            .unwrap_or(&prev_source.matched_text);
-                        if source_expr.contains(prev_var) && analyzer.is_tainted(prev_var) {
-                            analyzer.mark_tainted(
-                                target,
-                                &format!("propagated from {}", prev_var),
-                                &file_str,
-                                *line as u32 + 1,
-                                *column as u32,
-                            );
-                            changed = true;
-                            break;
-                        }
+            // If we tainted a new variable, re-enqueue all assignments that
+            // reference it as a source — they may now propagate taint further
+            if newly_tainted {
+                for (other_idx, (_, other_source_expr, _, _)) in assignments.iter().enumerate() {
+                    if other_idx != idx
+                        && !worklist_set.contains(&other_idx)
+                        && other_source_expr.contains(target.as_str())
+                    {
+                        worklist.push_back(other_idx);
+                        worklist_set.insert(other_idx);
                     }
                 }
             }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tree_sitter::{Query, Tree};
 
-use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, TaintLabel, TaintState};
+use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, FunctionTaintSummary, TaintLabel, TaintState};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine;
 use crate::infrastructure::taint_queries::{
@@ -217,26 +217,57 @@ pub struct InterProceduralContext {
     param_taint: HashMap<String, HashMap<usize, TaintState>>,
     /// Return value taint: function_id -> taint_state
     return_taint: HashMap<String, TaintState>,
-    /// Function summaries computed during analysis
-    function_summaries: HashMap<String, FunctionSummary>,
-}
-
-/// Summary of a function's taint behavior (computed during analysis)
-#[derive(Debug, Clone, Default)]
-pub struct FunctionSummary {
-    /// Which parameters propagate to return value
-    pub params_to_return: HashSet<usize>,
-    /// Which parameters flow to sinks (dangerous)
-    pub params_to_sinks: HashMap<usize, Vec<String>>,
-    /// Whether return is inherently tainted
-    pub return_tainted: bool,
-    /// Whether this function acts as a sanitizer
-    pub is_sanitizer: bool,
+    /// Function summaries computed during analysis (unified type)
+    function_summaries: HashMap<String, FunctionTaintSummary>,
+    /// Call graph edges for inter-procedural propagation: caller_id -> call sites
+    call_edges: HashMap<String, Vec<crate::domain::CallSite>>,
+    /// Topological order of functions for analysis (callees first)
+    topo_order: Vec<String>,
 }
 
 impl InterProceduralContext {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Seed inter-procedural context from a built call graph.
+    ///
+    /// Imports call graph edges, function nodes, and topological order
+    /// so that inter-procedural taint propagation can follow actual call edges.
+    pub fn seed_from_call_graph(&mut self, graph: &crate::infrastructure::call_graph::CallGraph) {
+        // Import function summaries from call graph (if any pre-existing)
+        for func in graph.functions() {
+            self.enter_function(&func.id);
+            if let Some(summary) = graph.get_function_summary(&func.id) {
+                self.function_summaries
+                    .insert(func.id.clone(), summary.clone());
+            }
+        }
+
+        // Import call edges for inter-procedural traversal
+        for func in graph.functions() {
+            let calls = graph.get_calls(&func.id);
+            if !calls.is_empty() {
+                self.call_edges
+                    .insert(func.id.clone(), calls.to_vec());
+            }
+        }
+
+        // Cache topological order (callees before callers)
+        self.topo_order = graph.topological_order();
+    }
+
+    /// Get the topological order for analysis (callees first)
+    pub fn topo_order(&self) -> &[String] {
+        &self.topo_order
+    }
+
+    /// Get call edges from a function
+    pub fn get_call_edges(&self, function_id: &str) -> &[crate::domain::CallSite] {
+        self.call_edges
+            .get(function_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Enter a function context
@@ -279,13 +310,13 @@ impl InterProceduralContext {
     }
 
     /// Set the summary for a function (computed after analysis)
-    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionSummary) {
+    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionTaintSummary) {
         self.function_summaries
             .insert(function_id.to_string(), summary);
     }
 
     /// Get the summary for a function
-    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionSummary> {
+    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionTaintSummary> {
         self.function_summaries.get(function_id)
     }
 
@@ -369,7 +400,10 @@ impl InterProceduralContext {
     /// - Which parameters flow to dangerous sinks
     /// - Whether the function acts as a sanitizer
     pub fn compute_function_summary(&mut self, function_id: &str) {
-        let mut summary = FunctionSummary::default();
+        let mut summary = FunctionTaintSummary {
+            function_id: function_id.to_string(),
+            ..FunctionTaintSummary::default()
+        };
 
         // 1. Check if return is tainted and track its origin
         if let Some(return_state) = self.return_taint.get(function_id) {
@@ -488,7 +522,7 @@ pub struct InterProceduralStats {
 }
 
 // =============================================================================
-// TaintQueryEngine - Production-ready AST-aware taint detection
+// TaintQueryEngine - AST-aware taint detection
 // =============================================================================
 
 /// A detected taint location in code
@@ -525,8 +559,10 @@ pub struct TaintQueryEngine {
     config: TaintConfig,
     /// Cache: (language_key, pattern_type) -> patterns already retrieved
     pattern_cache: HashMap<(String, TaintPatternType), Vec<TaintPattern>>,
-    /// Cache: (language, query_string) -> compiled query
-    query_cache: HashMap<(Language, String), Arc<Query>>,
+    /// Shared compiled query cache (moka, lock-free)
+    shared_cache: Option<crate::infrastructure::sast_engine::QueryCache>,
+    /// Fallback local cache when no shared cache is provided
+    local_cache: HashMap<(Language, String), Arc<Query>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -536,24 +572,40 @@ enum TaintPatternType {
     Sanitizer,
 }
 
+impl Default for TaintQueryEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaintQueryEngine {
     /// Create a new taint query engine with default config
     pub fn new() -> Self {
         Self {
             config: TaintConfig::default(),
             pattern_cache: HashMap::new(),
-            query_cache: HashMap::new(),
+            shared_cache: None,
+            local_cache: HashMap::new(),
         }
     }
 
     /// Create with custom configuration
-    pub fn with_config(
-        config: TaintConfig,
-    ) -> Self {
+    pub fn with_config(config: TaintConfig) -> Self {
         Self {
             config,
             pattern_cache: HashMap::new(),
-            query_cache: HashMap::new(),
+            shared_cache: None,
+            local_cache: HashMap::new(),
+        }
+    }
+
+    /// Create with a shared moka query cache (injected from SastEngine)
+    pub fn with_shared_cache(cache: crate::infrastructure::sast_engine::QueryCache) -> Self {
+        Self {
+            config: TaintConfig::default(),
+            pattern_cache: HashMap::new(),
+            shared_cache: Some(cache),
+            local_cache: HashMap::new(),
         }
     }
 
@@ -652,14 +704,35 @@ impl TaintQueryEngine {
         let mut matches = Vec::new();
 
         for pattern in patterns {
-            // Get or compile the query
-            let query = if let Some(q) = self.query_cache.get(&(*language, pattern.query.clone())) {
+            // Get or compile the query using shared moka cache or local fallback
+            let cache_key = (*language, pattern.query.clone());
+            let query = if let Some(ref shared) = self.shared_cache {
+                // Try shared moka cache first
+                if let Some(q) = shared.get(&cache_key).await {
+                    q
+                } else {
+                    match query_engine::compile_query(&pattern.query, language) {
+                        Ok(q_arc) => {
+                            shared.insert(cache_key, q_arc.clone()).await;
+                            q_arc
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                pattern = %pattern.name,
+                                language = %language,
+                                error = %e,
+                                "Failed to compile taint query"
+                            );
+                            continue;
+                        }
+                    }
+                }
+            } else if let Some(q) = self.local_cache.get(&cache_key) {
                 q.clone()
             } else {
                 match query_engine::compile_query(&pattern.query, language) {
                     Ok(q_arc) => {
-                        self.query_cache
-                            .insert((*language, pattern.query.clone()), q_arc.clone());
+                        self.local_cache.insert(cache_key, q_arc.clone());
                         q_arc
                     }
                     Err(e) => {

@@ -3,20 +3,17 @@
 //! Eliminates triple-nested locks by combining query caching,
 //! parsing, and TaintQueryEngine into a single structure with consistent locking.
 //!
-//! ## Lock Ordering Policy 
+//! ## Lock Ordering Policy
 //!
-//! All mutable state uses `tokio::sync::RwLock`. To prevent deadlocks,
-//! locks **must** be acquired in the following strict order:
+//! Mutable state uses `tokio::sync::RwLock`. The compiled query cache uses
+//! moka (lock-free concurrent cache) and requires no external locking.
 //!
-//! 1. `compiled_queries` — query compilation cache (read-heavy, rarely written)
-//! 2. `parser`           — tree-sitter parser state (write per language switch)
-//! 3. `taint_engine`     — taint query engine (write for detection runs)
+//! 1. `parser`       — tree-sitter parser state (write per language switch)
+//! 2. `taint_engine` — taint query engine (write for detection runs)
 //!
 //! **Rules:**
-//! - Never hold `parser` while acquiring `compiled_queries`.
-//! - Never hold `taint_engine` while acquiring `parser` or `compiled_queries`.
-//! - Each public method acquires at most **two** locks, always in order.
-//! - `query()` acquires `compiled_queries` then `parser`.
+//! - Never hold `taint_engine` while acquiring `parser`.
+//! - `query()` uses the lock-free `query_cache`, then acquires `parser`.
 //! - `detect_taint()` acquires only `taint_engine`.
 //! - `parse()` acquires only `parser`.
 
@@ -32,7 +29,17 @@ use crate::domain::value_objects::{Confidence, Language};
 use crate::infrastructure::parsers::{ParseError, Parser, TreeSitterParser};
 use crate::infrastructure::query_engine::{QueryEngineError, QueryMatchResult};
 use crate::infrastructure::data_flow::{TaintMatch, TaintQueryEngine};
-use crate::infrastructure::taint_queries::{TaintConfig};
+use crate::infrastructure::taint_queries::TaintConfig;
+
+/// Shared compiled query cache backed by moka for bounded, lock-free concurrent access.
+pub type QueryCache = moka::future::Cache<(Language, String), Arc<Query>>;
+
+/// Create a new query cache with the given max capacity.
+pub fn new_query_cache(max_capacity: u64) -> QueryCache {
+    moka::future::Cache::builder()
+        .max_capacity(max_capacity)
+        .build()
+}
 
 /// Unified SAST engine with consistent locking
 ///
@@ -43,8 +50,8 @@ pub struct SastEngine {
     parser: RwLock<TreeSitterParser>,
     /// Taint query engine for data flow analysis
     taint_engine: RwLock<TaintQueryEngine>,
-    /// Cache of compiled tree-sitter queries
-    compiled_queries: RwLock<HashMap<(Language, String), Arc<Query>>>,
+    /// Bounded lock-free compiled query cache (shared with TaintQueryEngine)
+    query_cache: QueryCache,
 }
 
 /// Thread-safe handle to SastEngine
@@ -69,14 +76,20 @@ pub type Result<T> = std::result::Result<T, SastEngineError>;
 impl SastEngine {
     /// Create a new SAST engine with default configuration
     pub fn new() -> Self {
-        // Default parser for Python - will be reconfigured per language
+        Self::with_cache_capacity(512)
+    }
+
+    /// Create with a specific query cache capacity
+    pub fn with_cache_capacity(max_capacity: u64) -> Self {
         let parser = TreeSitterParser::new(Language::Python)
             .unwrap_or_else(|_| TreeSitterParser::new(Language::Rust).expect("Rust parser should work"));
 
+        let cache = new_query_cache(max_capacity);
+
         Self {
             parser: RwLock::new(parser),
-            taint_engine: RwLock::new(TaintQueryEngine::new_owned()),
-            compiled_queries: RwLock::new(HashMap::new()),
+            taint_engine: RwLock::new(TaintQueryEngine::with_shared_cache(cache.clone())),
+            query_cache: cache,
         }
     }
 
@@ -295,34 +308,32 @@ impl SastEngine {
         }
     }
 
-    /// Get or compile a query, caching the result
+    /// Get or compile a query, caching the result via moka (lock-free)
     async fn get_or_compile_query(
         &self,
         language: Language,
         query_str: &str,
     ) -> Result<Arc<Query>> {
         let cache_key = (language, query_str.to_string());
-        
-        // Fast path: check cache
-        {
-            let cache = self.compiled_queries.read().await;
-            if let Some(query) = cache.get(&cache_key) {
-                debug!("Query cache hit");
-                return Ok(query.clone());
-            }
-        }
-        
-        // Slow path: compile and cache
-        debug!("Query cache miss - compiling");
-        let grammar = language.grammar();
-        let query = Query::new(&grammar, query_str)
-            .map_err(|e| SastEngineError::InvalidQuery(format!("{:?}", e)))?;
-        
-        let mut cache = self.compiled_queries.write().await;
-        let query = Arc::new(query);
-        cache.insert(cache_key, query.clone());
-        
+
+        // moka's try_get_with handles dedup: only one compilation per key
+        let query = self
+            .query_cache
+            .try_get_with(cache_key, async {
+                let grammar = language.grammar();
+                Query::new(&grammar, query_str)
+                    .map(Arc::new)
+                    .map_err(|e| SastEngineError::InvalidQuery(format!("{:?}", e)))
+            })
+            .await
+            .map_err(|e| SastEngineError::InvalidQuery(e.to_string()))?;
+
         Ok(query)
+    }
+
+    /// Get the shared query cache (for use by other components)
+    pub fn shared_query_cache(&self) -> &QueryCache {
+        &self.query_cache
     }
 }
 
