@@ -93,7 +93,6 @@ pub async fn create_app(
     let parser_factory = Arc::new(ParserFactory::new());
     let modules = AnalysisModules::init(
         &config,
-        infra.db_pool.clone(),
         vulnerability_repository.clone(),
         cache_service.clone(),
         parser_factory.clone(),

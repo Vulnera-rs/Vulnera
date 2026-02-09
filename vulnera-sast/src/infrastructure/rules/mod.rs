@@ -2,13 +2,9 @@
 
 mod default_rules;
 mod loader;
-pub mod repository;
 
 pub use default_rules::get_default_rules;
 pub use loader::{FileRuleLoader, RuleLoadError, RuleLoader};
-pub use repository::{
-    PostgresRuleRepository, RuleHotReloader, RuleRepositoryError, SastRuleRepository,
-};
 
 use crate::domain::entities::{Pattern, Rule};
 use crate::domain::value_objects::Language;
@@ -225,17 +221,6 @@ impl RuleRepository {
         &self.rules
     }
 
-    /// Add rules from database (used with PostgresRuleRepository)
-    pub fn extend_with_rules(&mut self, rules: Vec<Rule>) {
-        debug!(new_rule_count = rules.len(), "Extending rule repository");
-        self.rules.extend(rules);
-    }
-
-    /// Replace all rules (used for hot-reload)
-    pub fn replace_rules(&mut self, rules: Vec<Rule>) {
-        debug!(new_rule_count = rules.len(), "Replacing all rules");
-        self.rules = rules;
-    }
 }
 
 impl Default for RuleRepository {
