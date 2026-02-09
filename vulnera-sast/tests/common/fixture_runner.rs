@@ -1,10 +1,12 @@
 //! Core fixture runner: scans test case code and compares against expected findings.
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use vulnera_core::config::SastConfig;
-use vulnera_core::domain::module::{AnalysisModule, ModuleConfig, ModuleResult};
+use vulnera_core::domain::module::{AnalysisModule, ModuleConfig};
 use vulnera_sast::SastModule;
 
 use super::accuracy::{CaseOutcome, LanguageMetrics};
@@ -271,7 +273,7 @@ fn rule_id_matches(expected: &str, actual: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::rule_id_matches;
 
     #[test]
     fn test_rule_id_exact_match() {
@@ -287,8 +289,10 @@ mod tests {
     #[test]
     fn test_rule_id_partial_match() {
         assert!(rule_id_matches("ssrf", "go-ssrf"));
+        assert!(rule_id_matches("ssrf", "data-flow-ssrf")); // Data flow findings
         assert!(rule_id_matches("deserialization", "unsafe-deserialization"));
         assert!(rule_id_matches("ssti", "js-ssti"));
+        assert!(rule_id_matches("path_traversal", "data-flow-path_traversal"));
     }
 
     #[test]

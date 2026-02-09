@@ -112,28 +112,32 @@ message = "Validate and sanitize user-controlled URLs before making HTTP request
 type = "TreeSitterQuery"
 value = '''
 [
+  ; Direct http.Get/Post with any argument (identifier, selector expression, call result)
   (call_expression
     function: (selector_expression
       operand: (identifier) @pkg
       field: (field_identifier) @fn
-    )
-    arguments: (argument_list
-      . (identifier) @url_var
     )
     (#eq? @pkg "http")
-    (#match? @fn "^(Get|Post|Head|PostForm)$")
+    (#match? @fn "^(Get|Post|Head|PostForm|Do)$")
   ) @call
+  
+  ; http.NewRequest with any arguments
   (call_expression
     function: (selector_expression
       operand: (identifier) @pkg
       field: (field_identifier) @fn
-    )
-    arguments: (argument_list
-      (_)
-      (identifier) @url_var
     )
     (#eq? @pkg "http")
     (#eq? @fn "NewRequest")
+  ) @call
+  
+  ; Client methods like client.Get, client.Post
+  (call_expression
+    function: (selector_expression
+      field: (field_identifier) @fn
+    )
+    (#match? @fn "^(Get|Post|Do|Head|PostForm)$")
   ) @call
 ]
 '''

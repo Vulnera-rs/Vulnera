@@ -157,46 +157,31 @@ message = "Use yaml.safe_load() instead of yaml.load()."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-[
-  (call
-    function: (attribute
-      object: (identifier) @mod
-      attribute: (identifier) @fn
-    )
-    arguments: (argument_list) @args
-    (#eq? @mod "yaml")
-    (#eq? @fn "load")
-    (#not-match? @args "SafeLoader")
-  ) @call
-  (call
-    function: (attribute
-      object: (identifier) @mod
-      attribute: (identifier) @fn
-    )
-    (#eq? @mod "yaml")
-    (#match? @fn "^(unsafe_load|full_load)$")
-  ) @call
-  (call
-    function: (attribute
-      object: (identifier) @mod
-      attribute: (identifier) @fn
-    )
-    arguments: (argument_list
-      (_)
-      (keyword_argument
-        name: (identifier) @kw_name
-        value: (attribute
-          attribute: (identifier) @loader_type
-        )
-      )
-    )
-    (#eq? @mod "yaml")
-    (#eq? @fn "load")
-    (#eq? @kw_name "Loader")
-    (#match? @loader_type "^(Loader|UnsafeLoader|FullLoader|CLoader)$")
-  ) @call
-]
+; Match yaml.load() and yaml.unsafe_load() calls
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "yaml")
+  (#match? @fn "^(load|unsafe_load|full_load)$")
+) @call
 '''
+
+# Exclusions to prevent false positives
+[[rules.exclusions]]
+pattern = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "yaml")
+  (#eq? @fn "safe_load")
+) @safe
+'''
+
+type = "TreeSitterQuery"
 
 [[rules]]
 id = "python-marshal"

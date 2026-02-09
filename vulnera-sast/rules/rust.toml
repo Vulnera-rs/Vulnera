@@ -124,12 +124,17 @@ message = "Review unsafe code carefully. Document safety invariants."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-[
-  (unsafe_block) @unsafe
-  (function_item
-    (unsafe) @kw
-  ) @unsafe
-]
+; Match any unsafe block
+(unsafe_block) @unsafe
+
+; Match unsafe function declarations
+(function_item
+  (function_signature
+    (function_modifiers
+      (unsafe)
+    )
+  )
+) @unsafe
 '''
 
 [[rules]]
@@ -188,19 +193,11 @@ message = "Validate and sanitize command arguments."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
+; Match Command::new() with any argument (identifier, string, expression)
 (call_expression
   function: (scoped_identifier
     path: (identifier) @mod
     name: (identifier) @fn
-  )
-  arguments: (arguments
-    [
-      (identifier) @cmd
-      (field_expression) @cmd
-      (call_expression) @cmd
-      (binary_expression) @cmd
-      (format_expression) @cmd
-    ]
   )
   (#eq? @mod "Command")
   (#eq? @fn "new")

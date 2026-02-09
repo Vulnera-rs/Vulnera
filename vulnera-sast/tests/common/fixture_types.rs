@@ -3,6 +3,8 @@
 //! Each YAML fixture describes a vulnerability class with multiple test cases containing
 //! both **vulnerable** (true-positive) and **safe** (false-positive check) code samples.
 
+#![allow(dead_code)]
+
 use serde::Deserialize;
 use std::path::Path;
 

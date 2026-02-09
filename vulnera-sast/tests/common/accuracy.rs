@@ -1,5 +1,7 @@
 //! Precision / Recall / F1 computation for SAST accuracy measurement.
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -186,7 +188,7 @@ impl fmt::Display for AccuracyReport {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::LanguageMetrics;
 
     #[test]
     fn test_perfect_precision_recall() {

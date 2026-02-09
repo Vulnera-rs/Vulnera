@@ -2103,7 +2103,7 @@ impl<'a> SymbolTableBuilder<'a> {
                     } else if let Some(path_node) = child.child_by_field_name("path") {
                         // Extract package name from path
                         let path = self.node_text(path_node);
-                        path.trim_matches('"').split('/').last().unwrap_or("").to_string()
+                        path.trim_matches('"').split('/').next_back().unwrap_or("").to_string()
                     } else {
                         continue;
                     };
@@ -2124,7 +2124,7 @@ impl<'a> SymbolTableBuilder<'a> {
                                 self.node_text(name_node)
                             } else if let Some(path_node) = spec.child_by_field_name("path") {
                                 let path = self.node_text(path_node);
-                                path.trim_matches('"').split('/').last().unwrap_or("").to_string()
+                                path.trim_matches('"').split('/').next_back().unwrap_or("").to_string()
                             } else {
                                 continue;
                             };
@@ -2698,7 +2698,8 @@ impl<'a> SymbolTableBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{SymbolTable, Symbol, SymbolKind, ScopeKind, TypeInfo};
+    use crate::domain::finding::{Location, TaintState};
 
     #[test]
     fn test_symbol_table_creation() {
