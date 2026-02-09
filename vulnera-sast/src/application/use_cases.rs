@@ -341,7 +341,7 @@ impl ScanProjectUseCase {
         // =========================================================================
         // Phase 1: Build Call Graph & Parse All Files
         // =========================================================================
-        // In enterprise mode, we first build the complete call graph by parsing
+        // we first build the complete call graph by parsing
         // all files, then resolve cross-file references before analysis.
 
         let mut parsed_files: HashMap<String, (tree_sitter::Tree, String)> = HashMap::new();

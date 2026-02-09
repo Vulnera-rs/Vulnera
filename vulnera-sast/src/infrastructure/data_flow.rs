@@ -11,6 +11,7 @@ use tree_sitter::{Query, Tree};
 use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, FunctionTaintSummary, TaintLabel, TaintState};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine;
+use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::{
     TaintConfig, TaintPattern, get_sanitizer_queries, get_sink_queries, get_source_queries,
 };
@@ -18,7 +19,9 @@ use crate::infrastructure::taint_queries::{
 /// Data flow analyzer for taint tracking
 #[derive(Debug)]
 pub struct DataFlowAnalyzer {
-    /// Active taint states indexed by variable/expression
+    /// Symbol table for scope-aware variable tracking
+    symbol_table: SymbolTable,
+    /// Active taint states indexed by variable/expression (legacy, for transition)
     taint_states: HashMap<String, TaintState>,
     /// Detected data flow paths (source -> sink)
     detected_paths: Vec<DataFlowFinding>,
@@ -29,6 +32,7 @@ pub struct DataFlowAnalyzer {
 impl DataFlowAnalyzer {
     pub fn new() -> Self {
         Self {
+            symbol_table: SymbolTable::new(),
             taint_states: HashMap::new(),
             detected_paths: Vec::new(),
             rules: Vec::new(),
@@ -130,6 +134,189 @@ impl DataFlowAnalyzer {
             // Remove from taint tracking
             self.taint_states.remove(expr);
         }
+
+        // Also clear in symbol table if present
+        self.symbol_table.clear_taint(expr);
+    }
+
+    // ====================================================================
+    // Symbol Table Integration - Scope-aware taint tracking
+    // ====================================================================
+
+    /// Build symbol table from AST before analysis
+    pub fn build_symbols(&mut self, tree: &Tree, source: &str, language: Language, file_path: &str) {
+        let builder = SymbolTableBuilder::new(source, language, file_path);
+        self.symbol_table = builder.build_from_ast(tree.root_node());
+    }
+
+    /// Get reference to the symbol table
+    pub fn symbol_table(&self) -> &SymbolTable {
+        &self.symbol_table
+    }
+
+    /// Get mutable reference to the symbol table
+    pub fn symbol_table_mut(&mut self) -> &mut SymbolTable {
+        &mut self.symbol_table
+    }
+
+    /// Mark a variable as tainted with symbol table awareness
+    pub fn mark_tainted_symbol(
+        &mut self,
+        var_name: &str,
+        source_name: &str,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) {
+        let label = TaintLabel {
+            source: source_name.to_string(),
+            category: self.categorize_source(source_name),
+        };
+
+        let state = TaintState {
+            labels: vec![label],
+            origin_file: file.to_string(),
+            origin_line: line,
+            flow_path: vec![FlowStep {
+                kind: FlowStepKind::Source,
+                expression: var_name.to_string(),
+                file: file.to_string(),
+                line,
+                column,
+                note: Some(format!("Tainted from {}", source_name)),
+            }],
+        };
+
+        // Update symbol table if symbol exists
+        if self.symbol_table.resolve(var_name).is_some() {
+            self.symbol_table.update_taint(var_name, state.clone());
+        }
+
+        // Also update legacy taint states for transition period
+        self.taint_states.insert(var_name.to_string(), state);
+    }
+
+    /// Check if expression is tainted with symbol table awareness
+    pub fn is_tainted_symbol(&self, expr: &str) -> bool {
+        // First check symbol table (scope-aware)
+        if self.symbol_table.is_tainted(expr) {
+            return true;
+        }
+        // Fall back to legacy lookup
+        self.taint_states.contains_key(expr)
+    }
+
+    /// Get taint state for an expression with symbol table awareness
+    pub fn get_taint_state_symbol(&self, expr: &str) -> Option<&TaintState> {
+        // First check symbol table
+        if let Some(taint) = self.symbol_table.get_taint(expr) {
+            return Some(taint);
+        }
+        // Fall back to legacy lookup
+        self.taint_states.get(expr)
+    }
+
+    /// Propagate taint from one expression to another with symbol awareness
+    pub fn propagate_taint_symbol(
+        &mut self,
+        from_expr: &str,
+        to_expr: &str,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) {
+        // Get source taint from symbol table first, then legacy
+        let source_state = self.symbol_table.get_taint(from_expr)
+            .or_else(|| self.taint_states.get(from_expr));
+
+        if let Some(source) = source_state {
+            let mut new_state = source.clone();
+            new_state.flow_path.push(FlowStep {
+                kind: FlowStepKind::Propagation,
+                expression: to_expr.to_string(),
+                file: file.to_string(),
+                line,
+                column,
+                note: Some(format!("Propagated from {}", from_expr)),
+            });
+
+            // Update symbol table if target symbol exists
+            if self.symbol_table.resolve(to_expr).is_some() {
+                self.symbol_table.update_taint(to_expr, new_state.clone());
+            }
+
+            // Also update legacy taint states
+            self.taint_states.insert(to_expr.to_string(), new_state);
+        }
+    }
+
+    /// Sanitize with symbol table awareness
+    pub fn sanitize_symbol(
+        &mut self,
+        expr: &str,
+        sanitizer_name: &str,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) {
+        // Record sanitizer in flow path if we have taint
+        if let Some(state) = self.taint_states.get_mut(expr) {
+            state.flow_path.push(FlowStep {
+                kind: FlowStepKind::Sanitizer,
+                expression: expr.to_string(),
+                file: file.to_string(),
+                line,
+                column,
+                note: Some(format!("Sanitized by {}", sanitizer_name)),
+            });
+        }
+
+        // Clear taint from both symbol table and legacy
+        self.symbol_table.clear_taint(expr);
+        self.taint_states.remove(expr);
+    }
+
+    /// Check if tainted data reaches a sink with symbol awareness
+    pub fn check_sink_symbol(
+        &mut self,
+        expr: &str,
+        sink_name: &str,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) -> Option<DataFlowFinding> {
+        // Get taint state from symbol table first, then legacy
+        let state = self.symbol_table.get_taint(expr)
+            .or_else(|| self.taint_states.get(expr))?;
+
+        let path = DataFlowFinding {
+            rule_id: String::new(), // Will be set by caller
+            source: state
+                .flow_path
+                .first()
+                .cloned()
+                .unwrap_or_else(|| FlowStep {
+                    kind: FlowStepKind::Source,
+                    expression: expr.to_string(),
+                    file: file.to_string(),
+                    line,
+                    column,
+                    note: None,
+                }),
+            sink: FlowStep {
+                kind: FlowStepKind::Sink,
+                expression: expr.to_string(),
+                file: file.to_string(),
+                line,
+                column,
+                note: Some(format!("Flows to sink: {}", sink_name)),
+            },
+            intermediate_steps: state.flow_path[1..].to_vec(),
+            labels: state.labels.clone(),
+        };
+
+        self.detected_paths.push(path.clone());
+        Some(path)
     }
 
     /// Check if tainted data reaches a sink
