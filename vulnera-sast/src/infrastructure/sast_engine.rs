@@ -30,6 +30,7 @@ use crate::domain::value_objects::{Confidence, Language};
 use crate::infrastructure::parsers::{ParseError, Parser, TreeSitterParser};
 use crate::infrastructure::query_engine::{QueryEngineError, QueryMatchResult};
 use crate::infrastructure::data_flow::{TaintMatch, TaintQueryEngine};
+use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::TaintConfig;
 
 /// Shared compiled query cache backed by moka for bounded, lock-free concurrent access.
@@ -223,6 +224,175 @@ impl SastEngine {
         debug!(match_count = matches.len(), "Taint detection complete");
         
         matches
+    }
+
+    // ====================================================================
+    // Symbol Table Integration - Scope-aware analysis
+    // ====================================================================
+
+    /// Build symbol table from parsed AST
+    #[instrument(skip(self, tree, source), fields(language = %language, file_path = %file_path))]
+    pub fn build_symbol_table(
+        &self,
+        tree: &Tree,
+        source: &str,
+        language: Language,
+        file_path: &str,
+    ) -> SymbolTable {
+        let builder = SymbolTableBuilder::new(source, language, file_path);
+        builder.build_from_ast(tree.root_node())
+    }
+
+    /// Analyze file with symbol-aware taint tracking
+    #[instrument(skip(self, source), fields(language = %language, file_path = %file_path))]
+    pub async fn analyze_with_symbols(
+        &self,
+        source: &str,
+        file_path: &str,
+        language: Language,
+        rules: &[&Rule],
+    ) -> Result<Vec<Finding>> {
+        use crate::infrastructure::data_flow::DataFlowAnalyzer;
+
+        // 1. Parse the source
+        let tree = self.parse(source, language).await?;
+
+        // 2. Build symbol table
+        let mut analyzer = DataFlowAnalyzer::new();
+        analyzer.build_symbols(&tree, source, language, file_path);
+
+        // 3. Detect taint sources, sinks, and sanitizers
+        let taint_matches = self.detect_taint(&tree, source.as_bytes(), language, &TaintConfig::default()).await;
+
+        // 4. Process taint matches with symbol awareness
+        for tm in &taint_matches {
+            if let Some(var_name) = &tm.variable_name {
+                // Check if this is a source, sink, or sanitizer based on pattern name
+                let is_source = tm.category.contains("source") ||
+                    matches!(tm.pattern_name.as_str(),
+                        "user-input" | "request-get" | "env-read" | "file-read" |
+                        "network-read" | "command-line-arg" | "form-input");
+
+                let is_sink = tm.category.contains("sink") ||
+                    matches!(tm.pattern_name.as_str(),
+                        "sql-injection" | "command-injection" | "xss" | "path-traversal" |
+                        "eval" | "exec" | "ssrf" | "unsafe-deserialization");
+
+                let is_sanitizer = tm.category.contains("sanitizer") ||
+                    tm.clears_labels.is_some();
+
+                if is_source {
+                    analyzer.mark_tainted_symbol(
+                        var_name,
+                        &tm.pattern_name,
+                        file_path,
+                        tm.line as u32,
+                        tm.column as u32,
+                    );
+                } else if is_sanitizer && analyzer.is_tainted_symbol(var_name) {
+                    analyzer.sanitize_symbol(
+                        var_name,
+                        &tm.pattern_name,
+                        file_path,
+                        tm.line as u32,
+                        tm.column as u32,
+                    );
+                } else if is_sink {
+                    // Check if tainted data reaches sink
+                    let _ = analyzer.check_sink_symbol(
+                        var_name,
+                        &tm.pattern_name,
+                        file_path,
+                        tm.line as u32,
+                        tm.column as u32,
+                    );
+                }
+            }
+        }
+
+        // 5. Convert data flow findings to regular findings
+        let mut findings = Vec::new();
+        for path in analyzer.get_detected_paths() {
+            let finding = self.dataflow_to_finding(path, file_path);
+            findings.push(finding);
+        }
+
+        // 6. Also run regular pattern matching rules
+        let pattern_results = self.query_batch(source, language, rules).await;
+        for (rule_id, matches) in pattern_results {
+            if let Some(rule) = rules.iter().find(|r| r.id == rule_id) {
+                for match_result in matches {
+                    findings.push(self.match_to_finding(&match_result, rule, file_path, source));
+                }
+            }
+        }
+
+        debug!(finding_count = findings.len(), "Analysis complete");
+        Ok(findings)
+    }
+
+    /// Convert a data flow finding to a regular Finding
+    fn dataflow_to_finding(
+        &self,
+        df: &crate::domain::DataFlowFinding,
+        file_path: &str,
+    ) -> Finding {
+        use crate::domain::DataFlowPath;
+
+        // Build data flow path from the data flow finding
+        let data_flow_path = Some(DataFlowPath {
+            source: crate::domain::DataFlowNode {
+                location: crate::domain::Location {
+                    file_path: df.source.file.clone(),
+                    line: df.source.line,
+                    column: Some(df.source.column),
+                    end_line: Some(df.source.line),
+                    end_column: Some(df.source.column),
+                },
+                description: df.source.note.clone().unwrap_or_default(),
+                expression: df.source.expression.clone(),
+            },
+            steps: df.intermediate_steps.iter().map(|step| crate::domain::DataFlowNode {
+                location: crate::domain::Location {
+                    file_path: step.file.clone(),
+                    line: step.line,
+                    column: Some(step.column),
+                    end_line: Some(step.line),
+                    end_column: Some(step.column),
+                },
+                description: step.note.clone().unwrap_or_default(),
+                expression: step.expression.clone(),
+            }).collect(),
+            sink: crate::domain::DataFlowNode {
+                location: crate::domain::Location {
+                    file_path: df.sink.file.clone(),
+                    line: df.sink.line,
+                    column: Some(df.sink.column),
+                    end_line: Some(df.sink.line),
+                    end_column: Some(df.sink.column),
+                },
+                description: df.sink.note.clone().unwrap_or_default(),
+                expression: df.sink.expression.clone(),
+            },
+        });
+
+        Finding {
+            id: format!("{}-{}-{}", df.rule_id, file_path, df.sink.line),
+            rule_id: df.rule_id.clone(),
+            location: crate::domain::Location {
+                file_path: file_path.to_string(),
+                line: df.sink.line,
+                column: Some(df.sink.column),
+                end_line: Some(df.sink.line),
+                end_column: Some(df.sink.column),
+            },
+            severity: crate::domain::Severity::High,
+            confidence: crate::domain::Confidence::High,
+            description: format!("Tainted data flows to sink: {}", df.sink.note.clone().unwrap_or_default()),
+            recommendation: Some("Sanitize input before using in sensitive operations".to_string()),
+            data_flow_path,
+            snippet: Some(df.sink.expression.clone()),
+        }
     }
 
     /// Compile a tree-sitter query (for backward compatibility with call graph)
