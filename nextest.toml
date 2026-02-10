@@ -3,7 +3,6 @@
 
 [profile.default]
 # Number of test threads to run in parallel
-# Set to 0 to use all available CPU cores
 test-threads = 0
 
 # Retry flaky tests up to 3 times
@@ -35,18 +34,6 @@ run-ignored = "only"
 matcher = { test-name = "integration|bench" }
 test-timeout = "600s"
 slow-timeout = "120s"
-
-# Override for property-based tests (proptest)
-matcher = { test-name = "proptest" }
-test-timeout = "180s"
-
-# Override for serial tests
-matcher = { test-name = "serial" }
-test-threads = 1
-
-# Override for tests that need database
-matcher = { test-name = "database|postgres|sqlx" }
-test-timeout = "300s"
 
 [profile.ci]
 # CI profile with stricter settings

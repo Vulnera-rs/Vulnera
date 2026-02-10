@@ -19,6 +19,14 @@ value = '''
     operand: (identifier) @pkg
     field: (field_identifier) @fn
   )
+  arguments: (argument_list
+    [
+      (identifier)
+      (selector_expression)
+      (call_expression)
+      (index_expression)
+    ] @arg
+  )
   (#eq? @pkg "exec")
   (#eq? @fn "Command")
 ) @call
@@ -42,6 +50,15 @@ value = '''
   function: (selector_expression
     operand: (identifier) @pkg
     field: (field_identifier) @fn
+  )
+  arguments: (argument_list
+    (_)
+    [
+      (identifier)
+      (selector_expression)
+      (call_expression)
+      (index_expression)
+    ] @arg
   )
   (#eq? @pkg "exec")
   (#eq? @fn "CommandContext")
@@ -118,6 +135,14 @@ value = '''
       operand: (identifier) @pkg
       field: (field_identifier) @fn
     )
+    arguments: (argument_list
+      [
+        (identifier)
+        (selector_expression)
+        (call_expression)
+        (index_expression)
+      ] @url
+    )
     (#eq? @pkg "http")
     (#match? @fn "^(Get|Post|Head|PostForm|Do)$")
   ) @call
@@ -128,6 +153,14 @@ value = '''
       operand: (identifier) @pkg
       field: (field_identifier) @fn
     )
+    arguments: (argument_list
+      [
+        (identifier)
+        (selector_expression)
+        (call_expression)
+        (index_expression)
+      ] @url
+    )
     (#eq? @pkg "http")
     (#eq? @fn "NewRequest")
   ) @call
@@ -136,6 +169,14 @@ value = '''
   (call_expression
     function: (selector_expression
       field: (field_identifier) @fn
+    )
+    arguments: (argument_list
+      [
+        (identifier)
+        (selector_expression)
+        (call_expression)
+        (index_expression)
+      ] @url
     )
     (#match? @fn "^(Get|Post|Do|Head|PostForm)$")
   ) @call
@@ -255,12 +296,16 @@ value = '''
 [
   (for_statement
     body: (block
+      (_)*
       (defer_statement) @defer
+      (_)*
     )
   ) @loop
   (for_range_statement
     body: (block
+      (_)*
       (defer_statement) @defer
+      (_)*
     )
   ) @loop
 ]
@@ -347,11 +392,19 @@ message = "Never set InsecureSkipVerify: true in production. Use proper certific
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(keyed_element
-  (field_identifier) @field
-  (true)
-  (#eq? @field "InsecureSkipVerify")
-) @config
+[
+  (keyed_element
+    (field_identifier) @field
+    (true)
+    (#eq? @field "InsecureSkipVerify")
+  )
+  (keyed_element
+    (field_identifier) @field
+    (identifier) @value
+    (#eq? @field "InsecureSkipVerify")
+    (#eq? @value "true")
+  )
+] @config
 '''
 
 [[rules]]
@@ -408,14 +461,39 @@ message = "Use subtle.ConstantTimeCompare() for secret comparison."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-(call_expression
-  function: (selector_expression
-    operand: (identifier) @pkg
-    field: (field_identifier) @fn
-  )
-  (#eq? @pkg "bytes")
-  (#eq? @fn "Equal")
-) @call
+[
+  (call_expression
+    function: (selector_expression
+      operand: (identifier) @pkg
+      field: (field_identifier) @fn
+    )
+    (#eq? @pkg "bytes")
+    (#eq? @fn "Equal")
+  ) @call
+
+  (function_declaration
+    name: (identifier) @fn_name
+    body: (block
+      [
+        (return_statement
+          (binary_expression
+            left: (identifier) @left
+            operator: "=="
+            right: (identifier) @right
+          )
+        )
+        (expression_statement
+          (binary_expression
+            left: (identifier) @left
+            operator: "=="
+            right: (identifier) @right
+          )
+        )
+      ]
+    )
+    (#match? @fn_name "(?i)(token|secret|key|password|signature|auth|verify)")
+  ) @call
+]
 '''
 
 [[rules]]

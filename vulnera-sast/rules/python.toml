@@ -121,7 +121,7 @@ value = '''
 id = "unsafe-deserialization"
 name = "Unsafe Deserialization"
 description = "Potential unsafe deserialization vulnerability (pickle and similar serializers)"
-severity = "High"
+severity = "Critical"
 languages = ["Python"]
 cwe_ids = ["CWE-502"]
 owasp_categories = ["A08:2021 - Software and Data Integrity Failures"]
@@ -147,7 +147,7 @@ value = '''
 id = "python-yaml-load"
 name = "Unsafe YAML Load"
 description = "yaml.load without safe Loader is vulnerable to code execution"
-severity = "High"
+severity = "Critical"
 languages = ["Python"]
 cwe_ids = ["CWE-502"]
 owasp_categories = ["A08:2021 - Software and Data Integrity Failures"]
@@ -178,6 +178,33 @@ pattern = '''
   )
   (#eq? @mod "yaml")
   (#eq? @fn "safe_load")
+) @safe
+'''
+
+type = "TreeSitterQuery"
+
+[[rules.exclusions]]
+pattern = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (_)
+    (keyword_argument
+      name: (identifier) @kw
+      value: (attribute
+        object: (identifier) @yaml
+        attribute: (identifier) @loader
+      )
+    )
+  )
+  (#eq? @mod "yaml")
+  (#eq? @fn "load")
+  (#eq? @kw "Loader")
+  (#eq? @yaml "yaml")
+  (#eq? @loader "SafeLoader")
 ) @safe
 '''
 
@@ -381,7 +408,7 @@ value = '''
   function: (attribute
     attribute: (identifier) @fn
   )
-  (#match? @fn "^(raw|execute)$")
+  (#eq? @fn "raw")
 ) @call
 '''
 

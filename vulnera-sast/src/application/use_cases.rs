@@ -795,6 +795,8 @@ impl ScanProjectUseCase {
             )
         };
 
+        let ssrf_sanitized = sanitizers.iter().any(|s| s.category == "ssrf");
+
         debug!(
             file = %file_str,
             sources = sources.len(),
@@ -965,6 +967,24 @@ impl ScanProjectUseCase {
 
         // Check sinks for tainted data
         for sink in &sinks {
+            if sink.category == "ssrf" && ssrf_sanitized {
+                debug!(
+                    sink = %sink.pattern_name,
+                    "Skipping SSRF sink due to explicit SSRF sanitizer presence"
+                );
+                continue;
+            }
+            if matches!(sink.category.as_str(), "ssrf" | "path_traversal")
+                && Self::mentions_sanitized_var(&sanitized_vars, &sink.matched_text)
+            {
+                debug!(
+                    sink = %sink.pattern_name,
+                    category = %sink.category,
+                    "Skipping sink due to sanitized variable in expression"
+                );
+                continue;
+            }
+
             // Try to find a tainted variable in the sink expression
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
@@ -986,13 +1006,14 @@ impl ScanProjectUseCase {
             // Strategy 2: Check if any active tainted variable is part of the sink expression
             // This handles cases like: sink("prefix" + source)
             // CRITICAL: Only consider variables that are STILL tainted (not sanitized)
-            let active_taints: Vec<&str> = sources
-                .iter()
-                .filter_map(|s| s.variable_name.as_deref())
-                .filter(|var| analyzer.is_tainted(var))
+            let active_taints: Vec<String> = analyzer
+                .symbol_table()
+                .get_all_tainted_in_all_scopes()
+                .into_iter()
+                .map(|(name, _)| name.to_string())
                 .collect();
 
-            for tainted_var in active_taints {
+            for tainted_var in &active_taints {
                 // Skip if we already checked this var as sink_var
                 if tainted_var == sink_var {
                     continue;
@@ -1027,6 +1048,7 @@ impl ScanProjectUseCase {
         sink: &TaintMatch,
         file_str: &str,
     ) {
+        let severity = Self::data_flow_severity_for_category(&sink.category);
         // Build the finding with data flow path
         let source_node = DataFlowNode {
             location: Location {
@@ -1089,7 +1111,7 @@ impl ScanProjectUseCase {
                 end_line: Some(sink.end_line as u32 + 1),
                 end_column: Some(sink.end_column as u32),
             },
-            severity: Severity::High,
+            severity,
             confidence: crate::domain::value_objects::Confidence::High,
             description: format!(
                 "Tainted data from {} flows to {}: {}",
@@ -1111,6 +1133,28 @@ impl ScanProjectUseCase {
         findings.push(finding);
     }
 
+    fn data_flow_severity_for_category(category: &str) -> Severity {
+        match category.to_lowercase().as_str() {
+            "deserialization" | "ssti" | "code_injection" => Severity::Critical,
+            "sql_injection" | "command_injection" | "ssrf" | "path_traversal" | "xss" => {
+                Severity::High
+            }
+            _ => Severity::High,
+        }
+    }
+
+    fn mentions_sanitized_var(
+        sanitized_vars: &std::collections::HashSet<&str>,
+        expression: &str,
+    ) -> bool {
+        sanitized_vars.iter().any(|var| {
+            let pattern = format!(r"\b{}\b", regex::escape(var));
+            regex_cache::get_regex(&pattern)
+                .map(|re| re.is_match(expression))
+                .unwrap_or_else(|_| expression.contains(var))
+        })
+    }
+
     /// Adjust severity for findings confirmed by data flow analysis
     fn adjust_severity_for_data_flow(findings: &mut [SastFinding]) {
         for finding in findings.iter_mut() {
@@ -1119,7 +1163,6 @@ impl ScanProjectUseCase {
                 match finding.severity {
                     Severity::Low => finding.severity = Severity::Medium,
                     Severity::Medium => finding.severity = Severity::High,
-                    Severity::High => finding.severity = Severity::Critical,
                     _ => {}
                 }
             }

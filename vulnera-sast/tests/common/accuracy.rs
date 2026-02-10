@@ -187,6 +187,7 @@ impl fmt::Display for AccuracyReport {
 }
 
 #[cfg(test)]
+
 mod tests {
     use super::LanguageMetrics;
 

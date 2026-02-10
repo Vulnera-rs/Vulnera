@@ -759,6 +759,7 @@ query = '''
 (call_expression
   function: (identifier) @fn
   arguments: (arguments
+    (identifier) @arg
     (_)*
     (object
       (pair
@@ -766,5 +767,69 @@ query = '''
         (#eq? @key "strip")))
     (_)*)
   (#eq? @fn "decompress")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.resolve"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (variable_declarator
+    name: (identifier) @var
+    value: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (_)*
+        (member_expression
+          property: (property_identifier) @prop
+          (#match? @prop "^(path|name|fileName|entryName)$"))))
+    (#eq? @lib "path")
+    (#eq? @method "resolve")
+  )
+  (assignment_expression
+    left: (identifier) @var
+    right: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (_)*
+        (member_expression
+          property: (property_identifier) @prop
+          (#match? @prop "^(path|name|fileName|entryName)$"))))
+    (#eq? @lib "path")
+    (#eq? @method "resolve")
+  )
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "tar.extract with filter"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (object
+          (pair
+            key: (property_identifier) @key
+            (#eq? @key "filter")))))
+      (#eq? @lib "tar")
+      (#eq? @method "extract"))
+    property: (property_identifier) @end)
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @end "end")
 ) @sanitizer
 '''

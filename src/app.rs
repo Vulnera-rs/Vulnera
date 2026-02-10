@@ -110,7 +110,7 @@ pub async fn create_app(
         infra.s3_service.clone(),
     ));
     let module_selector = Arc::new(RuleBasedModuleSelector::with_entitlement(
-        config.enterprise.as_ref().map_or(false, |e| e.enabled),
+        config.enterprise.as_ref().is_some_and(|e| e.enabled),
     ));
 
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
@@ -382,7 +382,7 @@ pub async fn create_app(
 
         // Config and metadata
         config: config_arc.clone(),
-        startup_time: startup_time.clone(),
+        startup_time,
     };
 
     // 14. Spawn Background Workers

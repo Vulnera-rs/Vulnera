@@ -216,6 +216,13 @@ value = '''
     )
     (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
   ) @sql
+
+  (binary_expression
+    left: (string) @sql_start
+    operator: "+"
+    right: (_) @rhs
+  ) @sql
+  (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
 ]
 '''
 

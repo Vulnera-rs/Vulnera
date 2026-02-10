@@ -96,7 +96,12 @@ type = "TreeSitterQuery"
 value = '''
 (call_expression
   function: (identifier) @fn
+  arguments: (argument_list
+    (string_literal) @fmt
+  )
   (#eq? @fn "scanf")
+  (#match? @fmt "%s")
+  (#not-match? @fmt "%[0-9]+s")
 ) @call
 '''
 
@@ -514,4 +519,5 @@ value = '''
     declarator: (identifier) @var
   )
 ) @decl
+(#not-match? @decl "=")
 '''

@@ -195,7 +195,20 @@ value = '''
   function: (member_expression
     property: (property_identifier) @fn
   )
+  arguments: (arguments
+    [
+      (member_expression
+        object: (identifier) @req
+        property: (property_identifier) @prop)
+      (subscript_expression
+        object: (member_expression
+          object: (identifier) @req
+          property: (property_identifier) @prop))
+    ]
+  )
   (#match? @fn "^(compile|render|renderString|renderFile)$")
+  (#match? @req "^(req|request)$")
+  (#match? @prop "^(body|query|params|cookies|headers|files|file)$")
 ) @call
 '''
 
@@ -433,8 +446,21 @@ value = '''
     object: (identifier) @obj
     property: (property_identifier) @fn
   )
+  arguments: (arguments
+    [
+      (member_expression
+        object: (identifier) @req
+        property: (property_identifier) @prop)
+      (subscript_expression
+        object: (member_expression
+          object: (identifier) @req
+          property: (property_identifier) @prop))
+    ]
+  )
   (#eq? @obj "JSON")
   (#eq? @fn "parse")
+  (#match? @req "^(req|request)$")
+  (#match? @prop "^(body|query|params|cookies|headers|files|file)$")
 ) @call
 '''
 
@@ -506,8 +532,10 @@ type = "TreeSitterQuery"
 value = '''
 (call_expression
   function: (member_expression
+    object: (identifier) @obj
     property: (property_identifier) @fn
   )
+  (#match? @obj "(?i)(xml|xml2js|libxml|libxmljs|sax|fastxml|fast_xml|fast-xml|xmldom|parser)")
   (#match? @fn "^(parseString|parseStringSync|parse|parseSync|parseXml|parseXmlString)$")
 ) @call
 '''
@@ -770,6 +798,13 @@ value = '''
     )
     (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
   ) @sql
+
+  (binary_expression
+    left: (string) @sql_start
+    operator: "+"
+    right: (_) @rhs
+  ) @sql
+  (#match? @sql_start "(?i)\\b(select|insert|update|delete|drop)\\b")
 ]
 '''
 

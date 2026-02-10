@@ -802,34 +802,44 @@ impl TaintQueryEngine {
                 // Extract variable name from captures if available
                 // Captures is HashMap<String, CaptureInfo>
                 // We check multiple common capture names used in taint patterns
-                let variable_name = qm
-                    .captures
-                    .iter()
-                    .find(|(name, _)| {
-                        matches!(
-                            name.as_str(),
-                            "name"
-                                | "var"
-                                | "target"
-                                | "source"
-                                | "arg"
-                                | "url"
-                                | "path"
-                                | "query"
-                                | "value"
-                                | "addr"
-                                | "req"
-                        )
-                    })
-                    .map(|(_, info)| info.text.clone());
+                let preferred_names = [
+                    "var",
+                    "target",
+                    "name",
+                    "arg",
+                    "url",
+                    "path",
+                    "query",
+                    "value",
+                    "addr",
+                    "req",
+                    "entry",
+                    "file",
+                    "template",
+                    "buffer",
+                    "data",
+                    "sql",
+                    "payload",
+                    "body",
+                    "client",
+                ];
 
-                // Get matched text from the first capture or construct from positions
-                let matched_text = qm
-                    .captures
-                    .values()
-                    .next()
-                    .map(|info| info.text.clone())
-                    .unwrap_or_default();
+                let variable_name = preferred_names.iter().find_map(|name| {
+                    qm.captures_by_name
+                        .get(*name)
+                        .and_then(|infos| infos.first())
+                        .map(|info| info.text.clone())
+                });
+
+                // Get matched text from the preferred capture (if any), else first capture
+                let matched_text = variable_name.clone().unwrap_or_else(|| {
+                    qm.captures_by_name
+                        .values()
+                        .next()
+                        .and_then(|infos| infos.first())
+                        .map(|info| info.text.clone())
+                        .unwrap_or_default()
+                });
 
                 let taint_match = TaintMatch {
                     pattern_name: pattern.name.clone(),

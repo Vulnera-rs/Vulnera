@@ -124,17 +124,14 @@ message = "Review unsafe code carefully. Document safety invariants."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-; Match any unsafe block
-(unsafe_block) @unsafe
+[
+  ; Match any unsafe block
+  (unsafe_block) @unsafe
 
-; Match unsafe function declarations
-(function_item
-  (function_signature
-    (function_modifiers
-      (unsafe)
-    )
-  )
-) @unsafe
+  ; Match unsafe function declarations (robust text match)
+  (function_item) @unsafe_fn
+  (#match? @unsafe_fn "\bunsafe\b")
+]
 '''
 
 [[rules]]
@@ -198,6 +195,15 @@ value = '''
   function: (scoped_identifier
     path: (identifier) @mod
     name: (identifier) @fn
+  )
+  arguments: (arguments
+    [
+      (identifier)
+      (field_expression)
+      (call_expression)
+      (macro_invocation)
+      (index_expression)
+    ] @arg
   )
   (#eq? @mod "Command")
   (#eq? @fn "new")

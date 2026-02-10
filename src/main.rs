@@ -51,8 +51,7 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_timeout = Duration::from_secs(config.sync.shutdown_timeout_seconds);
 
     let app_handle = create_app(config).await.map_err(|e| {
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Box::new(std::io::Error::other(
             format!("Failed to create application: {}", e),
         ))
     })?;

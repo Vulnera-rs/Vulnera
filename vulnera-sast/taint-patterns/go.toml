@@ -443,6 +443,84 @@ query = '''
 '''
 
 [[sanitizers]]
+name = "URL parsing argument"
+category = "url"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  arguments: (argument_list
+    (identifier) @arg)
+  (#eq? @pkg "url")
+  (#match? @fn "^(Parse|ParseRequestURI)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "URL validation (SSRF)"
+category = "ssrf"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn)
+  (#eq? @pkg "url")
+  (#match? @fn "^(Parse|ParseRequestURI)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "HTTP client redirect disabled"
+category = "ssrf"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (short_var_declaration
+    left: (expression_list (identifier) @var)
+    right: (expression_list
+      (unary_expression
+        operator: "&"
+        argument: (composite_literal
+          type: (qualified_type
+            package: (identifier) @pkg
+            name: (type_identifier) @type)
+          body: (literal_value
+            (keyed_element
+              (field_identifier) @field
+              (_)))))
+    )
+    (#eq? @pkg "http")
+    (#eq? @type "Client")
+    (#eq? @field "CheckRedirect")
+  )
+  (assignment_statement
+    left: (expression_list (identifier) @var)
+    right: (expression_list
+      (unary_expression
+        operator: "&"
+        argument: (composite_literal
+          type: (qualified_type
+            package: (identifier) @pkg
+            name: (type_identifier) @type)
+          body: (literal_value
+            (keyed_element
+              (field_identifier) @field
+              (_)))))
+    )
+    (#eq? @pkg "http")
+    (#eq? @type "Client")
+    (#eq? @field "CheckRedirect")
+  )
+] @sanitizer
+'''
+
+[[sanitizers]]
 name = "path.Clean"
 category = "path"
 is_known = true
