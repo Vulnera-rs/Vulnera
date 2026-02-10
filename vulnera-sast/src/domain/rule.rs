@@ -141,29 +141,6 @@ pub struct RuleSet {
 }
 
 // =============================================================================
-// Legacy Support
-// =============================================================================
-
-/// Alias for PatternRule (backwards compatibility)
-pub type Rule = PatternRule;
-
-/// Legacy RulePattern enum - use Pattern instead
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RulePattern {
-    TreeSitterQuery(String),
-}
-
-impl From<RulePattern> for super::pattern_types::Pattern {
-    fn from(rp: RulePattern) -> Self {
-        match rp {
-            RulePattern::TreeSitterQuery(q) => {
-                super::pattern_types::Pattern::TreeSitterQuery(q)
-            }
-        }
-    }
-}
-
-// =============================================================================
 // SARIF Export Types (v2.1.0)
 // =============================================================================
 

@@ -6,10 +6,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
-use crate::domain::{CallGraphNode, CallSite, FunctionSignature, FunctionTaintSummary, ParameterInfo};
+use crate::domain::call_graph::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
+use crate::domain::taint_types::FunctionTaintSummary;
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
-use crate::infrastructure::sast_engine::SastEngine;
 
 /// Call graph for inter-procedural analysis
 #[derive(Debug, Default)]
@@ -484,14 +484,7 @@ impl CallGraphBuilder {
     }
 
     /// Analyze a source file using Tree-sitter AST
-    pub fn analyze_ast(
-        &mut self,
-        file_path: &str,
-        tree: &Tree,
-        language: &Language,
-        source: &str,
-        query_engine: &SastEngine,
-    ) {
+    pub fn analyze_ast(&mut self, file_path: &str, tree: &Tree, language: &Language, source: &str) {
         let source_bytes = source.as_bytes();
 
         // Get query strings for this language
@@ -555,8 +548,11 @@ impl CallGraphBuilder {
         // 1. Extract class/struct contexts first
         let mut class_contexts: Vec<ClassContext> = Vec::new();
         if let Some(class_query) = class_query_str {
-            if let Ok(query) = query_engine.compile_query(class_query, language) {
-                let matches = query_engine.execute_query(&query, tree, source_bytes);
+            if let Ok(query) =
+                crate::infrastructure::query_engine::compile_query(class_query, language)
+            {
+                let matches =
+                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
                 for m in matches {
                     // Look for class.name, type.name, or struct.name depending on language
                     let class_name = m
@@ -580,8 +576,11 @@ impl CallGraphBuilder {
         // 2. Extract parameters for functions (build a map: func_name -> params)
         let mut function_params: HashMap<String, Vec<ParameterInfo>> = HashMap::new();
         if let Some(param_query) = param_query_str {
-            if let Ok(query) = query_engine.compile_query(param_query, language) {
-                let matches = query_engine.execute_query(&query, tree, source_bytes);
+            if let Ok(query) =
+                crate::infrastructure::query_engine::compile_query(param_query, language)
+            {
+                let matches =
+                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
                 for m in matches {
                     let name_node = m.captures.get("name");
                     let param_node = m.captures.get("param.name");
@@ -620,8 +619,11 @@ impl CallGraphBuilder {
         let mut functions: Vec<DefinedFunction> = Vec::new();
 
         // 3. Find Definitions and build qualified IDs
-        if let Ok(query) = query_engine.compile_query(def_query_str, language) {
-            let matches = query_engine.execute_query(&query, tree, source_bytes);
+        if let Ok(query) =
+            crate::infrastructure::query_engine::compile_query(def_query_str, language)
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
             for m in matches {
                 let name_node = m.captures.get("name");
                 if let Some(name_n) = name_node {
@@ -680,8 +682,11 @@ impl CallGraphBuilder {
             })
             .collect();
 
-        if let Ok(query) = query_engine.compile_query(call_query_str, language) {
-            let matches = query_engine.execute_query(&query, tree, source_bytes);
+        if let Ok(query) =
+            crate::infrastructure::query_engine::compile_query(call_query_str, language)
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
             for m in matches {
                 let name_node = m.captures.get("name");
                 if let Some(name_n) = name_node {

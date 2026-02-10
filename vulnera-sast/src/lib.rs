@@ -1,7 +1,7 @@
 //! Vulnera SAST - Static Application Security Testing module
 //!
 //! This crate provides static code analysis capabilities to detect security vulnerabilities
-//! in source code. It supports multiple programming languages (Python, JavaScript, Rust)
+//! in source code. It supports multiple programming languages (Python, JavaScript, Rust, etc.)
 //! and uses configurable rule sets to identify potential security issues.
 //!
 //! ## Features

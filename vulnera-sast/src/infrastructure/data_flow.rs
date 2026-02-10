@@ -8,10 +8,14 @@ use std::sync::Arc;
 
 use tree_sitter::{Query, Tree};
 
-use crate::domain::{DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, FunctionTaintSummary, TaintLabel, TaintState};
+use crate::domain::call_graph::CallSite;
+use crate::domain::finding::{
+    DataFlowFinding, FlowStep, FlowStepKind, Location, TaintLabel, TaintState,
+};
+use crate::domain::taint_types::{DataFlowRule, FunctionTaintSummary};
 use crate::domain::value_objects::Language;
 use crate::infrastructure::query_engine;
-use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
+use crate::infrastructure::symbol_table::{Symbol, SymbolKind, SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::{
     TaintConfig, TaintPattern, get_sanitizer_queries, get_sink_queries, get_source_queries,
 };
@@ -21,8 +25,7 @@ use crate::infrastructure::taint_queries::{
 pub struct DataFlowAnalyzer {
     /// Symbol table for scope-aware variable tracking
     symbol_table: SymbolTable,
-    /// Active taint states indexed by variable/expression (legacy, for transition)
-    taint_states: HashMap<String, TaintState>,
+
     /// Detected data flow paths (source -> sink)
     detected_paths: Vec<DataFlowFinding>,
     /// Rules for source/sink/sanitizer detection
@@ -33,7 +36,6 @@ impl DataFlowAnalyzer {
     pub fn new() -> Self {
         Self {
             symbol_table: SymbolTable::new(),
-            taint_states: HashMap::new(),
             detected_paths: Vec::new(),
             rules: Vec::new(),
         }
@@ -77,7 +79,8 @@ impl DataFlowAnalyzer {
             }],
         };
 
-        self.taint_states.insert(var_name.to_string(), state);
+        self.ensure_symbol(var_name, file, line, column);
+        let _ = self.symbol_table.update_taint_any_scope(var_name, state);
     }
 
     /// Propagate taint from one expression to another
@@ -89,7 +92,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) {
-        if let Some(source_state) = self.taint_states.get(from_expr).cloned() {
+        if let Some(source_state) = self.symbol_table.get_taint_any_scope(from_expr).cloned() {
             let mut new_state = source_state;
             new_state.flow_path.push(FlowStep {
                 kind: FlowStepKind::Propagation,
@@ -99,18 +102,19 @@ impl DataFlowAnalyzer {
                 column,
                 note: Some(format!("Propagated from {}", from_expr)),
             });
-            self.taint_states.insert(to_expr.to_string(), new_state);
+            self.ensure_symbol(to_expr, file, line, column);
+            let _ = self.symbol_table.update_taint_any_scope(to_expr, new_state);
         }
     }
 
     /// Check if expression is tainted
     pub fn is_tainted(&self, expr: &str) -> bool {
-        self.taint_states.contains_key(expr)
+        self.symbol_table.is_tainted_any_scope(expr)
     }
 
     /// Get taint state for an expression
     pub fn get_taint_state(&self, expr: &str) -> Option<&TaintState> {
-        self.taint_states.get(expr)
+        self.symbol_table.get_taint_any_scope(expr)
     }
 
     /// Remove taint (sanitization)
@@ -122,7 +126,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) {
-        if let Some(state) = self.taint_states.get_mut(expr) {
+        if let Some(mut state) = self.symbol_table.get_taint_any_scope(expr).cloned() {
             state.flow_path.push(FlowStep {
                 kind: FlowStepKind::Sanitizer,
                 expression: expr.to_string(),
@@ -131,12 +135,9 @@ impl DataFlowAnalyzer {
                 column,
                 note: Some(format!("Sanitized by {}", sanitizer_name)),
             });
-            // Remove from taint tracking
-            self.taint_states.remove(expr);
         }
 
-        // Also clear in symbol table if present
-        self.symbol_table.clear_taint(expr);
+        self.symbol_table.clear_taint_any_scope(expr);
     }
 
     // ====================================================================
@@ -144,7 +145,13 @@ impl DataFlowAnalyzer {
     // ====================================================================
 
     /// Build symbol table from AST before analysis
-    pub fn build_symbols(&mut self, tree: &Tree, source: &str, language: Language, file_path: &str) {
+    pub fn build_symbols(
+        &mut self,
+        tree: &Tree,
+        source: &str,
+        language: Language,
+        file_path: &str,
+    ) {
         let builder = SymbolTableBuilder::new(source, language, file_path);
         self.symbol_table = builder.build_from_ast(tree.root_node());
     }
@@ -159,166 +166,6 @@ impl DataFlowAnalyzer {
         &mut self.symbol_table
     }
 
-    /// Mark a variable as tainted with symbol table awareness
-    pub fn mark_tainted_symbol(
-        &mut self,
-        var_name: &str,
-        source_name: &str,
-        file: &str,
-        line: u32,
-        column: u32,
-    ) {
-        let label = TaintLabel {
-            source: source_name.to_string(),
-            category: self.categorize_source(source_name),
-        };
-
-        let state = TaintState {
-            labels: vec![label],
-            origin_file: file.to_string(),
-            origin_line: line,
-            flow_path: vec![FlowStep {
-                kind: FlowStepKind::Source,
-                expression: var_name.to_string(),
-                file: file.to_string(),
-                line,
-                column,
-                note: Some(format!("Tainted from {}", source_name)),
-            }],
-        };
-
-        // Update symbol table if symbol exists
-        if self.symbol_table.resolve(var_name).is_some() {
-            self.symbol_table.update_taint(var_name, state.clone());
-        }
-
-        // Also update legacy taint states for transition period
-        self.taint_states.insert(var_name.to_string(), state);
-    }
-
-    /// Check if expression is tainted with symbol table awareness
-    pub fn is_tainted_symbol(&self, expr: &str) -> bool {
-        // First check symbol table (scope-aware)
-        if self.symbol_table.is_tainted(expr) {
-            return true;
-        }
-        // Fall back to legacy lookup
-        self.taint_states.contains_key(expr)
-    }
-
-    /// Get taint state for an expression with symbol table awareness
-    pub fn get_taint_state_symbol(&self, expr: &str) -> Option<&TaintState> {
-        // First check symbol table
-        if let Some(taint) = self.symbol_table.get_taint(expr) {
-            return Some(taint);
-        }
-        // Fall back to legacy lookup
-        self.taint_states.get(expr)
-    }
-
-    /// Propagate taint from one expression to another with symbol awareness
-    pub fn propagate_taint_symbol(
-        &mut self,
-        from_expr: &str,
-        to_expr: &str,
-        file: &str,
-        line: u32,
-        column: u32,
-    ) {
-        // Get source taint from symbol table first, then legacy
-        let source_state = self.symbol_table.get_taint(from_expr)
-            .or_else(|| self.taint_states.get(from_expr));
-
-        if let Some(source) = source_state {
-            let mut new_state = source.clone();
-            new_state.flow_path.push(FlowStep {
-                kind: FlowStepKind::Propagation,
-                expression: to_expr.to_string(),
-                file: file.to_string(),
-                line,
-                column,
-                note: Some(format!("Propagated from {}", from_expr)),
-            });
-
-            // Update symbol table if target symbol exists
-            if self.symbol_table.resolve(to_expr).is_some() {
-                self.symbol_table.update_taint(to_expr, new_state.clone());
-            }
-
-            // Also update legacy taint states
-            self.taint_states.insert(to_expr.to_string(), new_state);
-        }
-    }
-
-    /// Sanitize with symbol table awareness
-    pub fn sanitize_symbol(
-        &mut self,
-        expr: &str,
-        sanitizer_name: &str,
-        file: &str,
-        line: u32,
-        column: u32,
-    ) {
-        // Record sanitizer in flow path if we have taint
-        if let Some(state) = self.taint_states.get_mut(expr) {
-            state.flow_path.push(FlowStep {
-                kind: FlowStepKind::Sanitizer,
-                expression: expr.to_string(),
-                file: file.to_string(),
-                line,
-                column,
-                note: Some(format!("Sanitized by {}", sanitizer_name)),
-            });
-        }
-
-        // Clear taint from both symbol table and legacy
-        self.symbol_table.clear_taint(expr);
-        self.taint_states.remove(expr);
-    }
-
-    /// Check if tainted data reaches a sink with symbol awareness
-    pub fn check_sink_symbol(
-        &mut self,
-        expr: &str,
-        sink_name: &str,
-        file: &str,
-        line: u32,
-        column: u32,
-    ) -> Option<DataFlowFinding> {
-        // Get taint state from symbol table first, then legacy
-        let state = self.symbol_table.get_taint(expr)
-            .or_else(|| self.taint_states.get(expr))?;
-
-        let path = DataFlowFinding {
-            rule_id: String::new(), // Will be set by caller
-            source: state
-                .flow_path
-                .first()
-                .cloned()
-                .unwrap_or_else(|| FlowStep {
-                    kind: FlowStepKind::Source,
-                    expression: expr.to_string(),
-                    file: file.to_string(),
-                    line,
-                    column,
-                    note: None,
-                }),
-            sink: FlowStep {
-                kind: FlowStepKind::Sink,
-                expression: expr.to_string(),
-                file: file.to_string(),
-                line,
-                column,
-                note: Some(format!("Flows to sink: {}", sink_name)),
-            },
-            intermediate_steps: state.flow_path[1..].to_vec(),
-            labels: state.labels.clone(),
-        };
-
-        self.detected_paths.push(path.clone());
-        Some(path)
-    }
-
     /// Check if tainted data reaches a sink
     pub fn check_sink(
         &mut self,
@@ -328,7 +175,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) -> Option<DataFlowFinding> {
-        if let Some(state) = self.taint_states.get(expr) {
+        if let Some(state) = self.symbol_table.get_taint_any_scope(expr) {
             let path = DataFlowFinding {
                 rule_id: String::new(), // Will be set by caller
                 source: state
@@ -368,7 +215,29 @@ impl DataFlowAnalyzer {
 
     /// Clear all taint states (e.g., between function analyses)
     pub fn clear(&mut self) {
-        self.taint_states.clear();
+        self.symbol_table.clear_all_taints();
+    }
+
+    fn ensure_symbol(&mut self, name: &str, file: &str, line: u32, column: u32) {
+        if self.symbol_table.resolve(name).is_some() {
+            return;
+        }
+
+        let location = Location {
+            file_path: file.to_string(),
+            line,
+            column: Some(column),
+            end_line: Some(line),
+            end_column: Some(column),
+        };
+
+        let symbol = Symbol::new(
+            name,
+            SymbolKind::Variable,
+            self.symbol_table.current_scope_id(),
+            location,
+        );
+        let _ = self.symbol_table.declare(symbol);
     }
 
     /// Categorize a source by its name
@@ -407,7 +276,7 @@ pub struct InterProceduralContext {
     /// Function summaries computed during analysis (unified type)
     function_summaries: HashMap<String, FunctionTaintSummary>,
     /// Call graph edges for inter-procedural propagation: caller_id -> call sites
-    call_edges: HashMap<String, Vec<crate::domain::CallSite>>,
+    call_edges: HashMap<String, Vec<CallSite>>,
     /// Topological order of functions for analysis (callees first)
     topo_order: Vec<String>,
 }
@@ -435,8 +304,7 @@ impl InterProceduralContext {
         for func in graph.functions() {
             let calls = graph.get_calls(&func.id);
             if !calls.is_empty() {
-                self.call_edges
-                    .insert(func.id.clone(), calls.to_vec());
+                self.call_edges.insert(func.id.clone(), calls.to_vec());
             }
         }
 
@@ -450,7 +318,7 @@ impl InterProceduralContext {
     }
 
     /// Get call edges from a function
-    pub fn get_call_edges(&self, function_id: &str) -> &[crate::domain::CallSite] {
+    pub fn get_call_edges(&self, function_id: &str) -> &[CallSite] {
         self.call_edges
             .get(function_id)
             .map(|v| v.as_slice())
@@ -565,19 +433,7 @@ impl InterProceduralContext {
             return None;
         }
 
-        // Fallback: Use legacy parameter taint tracking
-        for (idx, arg_taint) in argument_taints.iter().enumerate() {
-            if arg_taint.is_some()
-                && self.get_param_taint(function_id, idx).is_some()
-            {
-                if let Some(ret_taint) = self.get_return_taint(function_id) {
-                    return Some(ret_taint.clone());
-                }
-            }
-        }
-
-        // Check if function has inherent return taint
-        self.get_return_taint(function_id).cloned()
+        None
     }
 
     /// Compute summary for a function based on its analysis results
@@ -644,7 +500,9 @@ impl InterProceduralContext {
                     if let Some(analyzer) = self.function_contexts.get(function_id) {
                         let param_source = format!("param:{}", param_idx);
 
-                        for taint_state in analyzer.taint_states.values() {
+                        for (_, taint_state) in
+                            analyzer.symbol_table().get_all_tainted_in_all_scopes()
+                        {
                             // Check if this state has labels from the parameter
                             let from_param =
                                 taint_state.labels.iter().any(|l| l.source == param_source);
@@ -820,7 +678,8 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Source,
-        ).await
+        )
+        .await
     }
 
     /// Detect taint sinks in the parsed AST
@@ -837,7 +696,8 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Sink,
-        ).await
+        )
+        .await
     }
 
     /// Detect sanitizers in the parsed AST
@@ -854,7 +714,8 @@ impl TaintQueryEngine {
             language,
             &patterns,
             TaintPatternType::Sanitizer,
-        ).await
+        )
+        .await
     }
 
     /// Get patterns for a language and type, using cache
@@ -1007,7 +868,8 @@ impl TaintQueryEngine {
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sources(tree, source_code, language).await
+        self.detect_sources(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }
@@ -1020,7 +882,8 @@ impl TaintQueryEngine {
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sinks(tree, source_code, language).await
+        self.detect_sinks(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }
@@ -1033,7 +896,8 @@ impl TaintQueryEngine {
         language: &Language,
         line: usize,
     ) -> Option<TaintMatch> {
-        self.detect_sanitizers(tree, source_code, language).await
+        self.detect_sanitizers(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }

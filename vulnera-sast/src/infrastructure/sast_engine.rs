@@ -17,19 +17,20 @@
 //! - `detect_taint()` acquires only `taint_engine`.
 //! - `parse()` acquires only `parser`.
 
+use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use regex::Regex;
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
-use tree_sitter::{Query, QueryPredicateArg, Tree};
 use tracing::{debug, instrument, trace};
+use tree_sitter::{Query, QueryPredicateArg, Tree};
 
-use crate::domain::{Finding, Location, Pattern, Rule};
+use crate::domain::finding::{DataFlowFinding, DataFlowNode, DataFlowPath, Finding, Location, Severity};
+use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
+use crate::infrastructure::data_flow::{TaintMatch, TaintQueryEngine};
 use crate::infrastructure::parsers::{ParseError, Parser, TreeSitterParser};
 use crate::infrastructure::query_engine::{QueryEngineError, QueryMatchResult};
-use crate::infrastructure::data_flow::{TaintMatch, TaintQueryEngine};
 use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::TaintConfig;
 
@@ -83,8 +84,9 @@ impl SastEngine {
 
     /// Create with a specific query cache capacity
     pub fn with_cache_capacity(max_capacity: u64) -> Self {
-        let parser = TreeSitterParser::new(Language::Python)
-            .unwrap_or_else(|_| TreeSitterParser::new(Language::Rust).expect("Rust parser should work"));
+        let parser = TreeSitterParser::new(Language::Python).unwrap_or_else(|_| {
+            TreeSitterParser::new(Language::Rust).expect("Rust parser should work")
+        });
 
         let cache = new_query_cache(max_capacity);
 
@@ -99,12 +101,12 @@ impl SastEngine {
     #[instrument(skip(self, source), fields(language = %language, source_len = source.len()))]
     pub async fn parse(&self, source: &str, language: Language) -> Result<Tree> {
         let mut parser = self.parser.write().await;
-        
+
         // Reinitialize parser for the target language if needed
         if (*parser).language() != language {
             *parser = TreeSitterParser::new(language)?;
         }
-        
+
         parser.parse_tree(source).map_err(SastEngineError::Parse)
     }
 
@@ -117,15 +119,15 @@ impl SastEngine {
         query_str: &str,
     ) -> Result<Vec<QueryMatchResult>> {
         let query = self.get_or_compile_query(language, query_str).await?;
-        
+
         // Parse the source
         let tree = self.parse(source, language).await?;
-        
+
         // Execute query against the tree
         let mut cursor = tree_sitter::QueryCursor::new();
         let root_node = tree.root_node();
         let mut matches = cursor.matches(&query, root_node, source.as_bytes());
-        
+
         let mut results = Vec::new();
         while let Some(match_result) = {
             matches.advance();
@@ -141,11 +143,11 @@ impl SastEngine {
             }
 
             let mut captures = HashMap::new();
-            
+
             for capture in match_result.captures {
                 let node = capture.node;
                 let capture_name = query.capture_names()[capture.index as usize];
-                
+
                 captures.insert(
                     capture_name.to_string(),
                     crate::infrastructure::query_engine::CaptureInfo {
@@ -158,21 +160,33 @@ impl SastEngine {
                     },
                 );
             }
-            
+
             results.push(QueryMatchResult {
                 pattern_index: match_result.pattern_index,
                 captures,
-                start_byte: match_result.captures.first().map(|c| c.node.start_byte()).unwrap_or(0),
-                end_byte: match_result.captures.first().map(|c| c.node.end_byte()).unwrap_or(0),
-                start_position: match_result.captures.first()
+                start_byte: match_result
+                    .captures
+                    .first()
+                    .map(|c| c.node.start_byte())
+                    .unwrap_or(0),
+                end_byte: match_result
+                    .captures
+                    .first()
+                    .map(|c| c.node.end_byte())
+                    .unwrap_or(0),
+                start_position: match_result
+                    .captures
+                    .first()
                     .map(|c| (c.node.start_position().row, c.node.start_position().column))
                     .unwrap_or((0, 0)),
-                end_position: match_result.captures.first()
+                end_position: match_result
+                    .captures
+                    .first()
                     .map(|c| (c.node.end_position().row, c.node.end_position().column))
                     .unwrap_or((0, 0)),
             });
         }
-        
+
         debug!(match_count = results.len(), "Query executed");
         Ok(results)
     }
@@ -183,10 +197,10 @@ impl SastEngine {
         &self,
         source: &str,
         language: Language,
-        rules: &[&Rule],
+        rules: &[&PatternRule],
     ) -> Vec<(String, Vec<QueryMatchResult>)> {
         let mut results = Vec::new();
-        
+
         for rule in rules {
             if let Pattern::TreeSitterQuery(query_str) = &rule.pattern {
                 match self.query(source, language, query_str).await {
@@ -200,7 +214,7 @@ impl SastEngine {
                 }
             }
         }
-        
+
         results
     }
 
@@ -214,15 +228,19 @@ impl SastEngine {
         config: &TaintConfig,
     ) -> Vec<TaintMatch> {
         let mut engine = self.taint_engine.write().await;
-        
+
         // Combine sources, sinks, and sanitizers into one list
         let mut matches = Vec::new();
         matches.extend(engine.detect_sources(tree, source_bytes, &language).await);
         matches.extend(engine.detect_sinks(tree, source_bytes, &language).await);
-        matches.extend(engine.detect_sanitizers(tree, source_bytes, &language).await);
-        
+        matches.extend(
+            engine
+                .detect_sanitizers(tree, source_bytes, &language)
+                .await,
+        );
+
         debug!(match_count = matches.len(), "Taint detection complete");
-        
+
         matches
     }
 
@@ -250,7 +268,7 @@ impl SastEngine {
         source: &str,
         file_path: &str,
         language: Language,
-        rules: &[&Rule],
+        rules: &[&PatternRule],
     ) -> Result<Vec<Finding>> {
         use crate::infrastructure::data_flow::DataFlowAnalyzer;
 
@@ -262,35 +280,51 @@ impl SastEngine {
         analyzer.build_symbols(&tree, source, language, file_path);
 
         // 3. Detect taint sources, sinks, and sanitizers
-        let taint_matches = self.detect_taint(&tree, source.as_bytes(), language, &TaintConfig::default()).await;
+        let taint_matches = self
+            .detect_taint(&tree, source.as_bytes(), language, &TaintConfig::default())
+            .await;
 
         // 4. Process taint matches with symbol awareness
         for tm in &taint_matches {
             if let Some(var_name) = &tm.variable_name {
                 // Check if this is a source, sink, or sanitizer based on pattern name
-                let is_source = tm.category.contains("source") ||
-                    matches!(tm.pattern_name.as_str(),
-                        "user-input" | "request-get" | "env-read" | "file-read" |
-                        "network-read" | "command-line-arg" | "form-input");
+                let is_source = tm.category.contains("source")
+                    || matches!(
+                        tm.pattern_name.as_str(),
+                        "user-input"
+                            | "request-get"
+                            | "env-read"
+                            | "file-read"
+                            | "network-read"
+                            | "command-line-arg"
+                            | "form-input"
+                    );
 
-                let is_sink = tm.category.contains("sink") ||
-                    matches!(tm.pattern_name.as_str(),
-                        "sql-injection" | "command-injection" | "xss" | "path-traversal" |
-                        "eval" | "exec" | "ssrf" | "unsafe-deserialization");
+                let is_sink = tm.category.contains("sink")
+                    || matches!(
+                        tm.pattern_name.as_str(),
+                        "sql-injection"
+                            | "command-injection"
+                            | "xss"
+                            | "path-traversal"
+                            | "eval"
+                            | "exec"
+                            | "ssrf"
+                            | "unsafe-deserialization"
+                    );
 
-                let is_sanitizer = tm.category.contains("sanitizer") ||
-                    tm.clears_labels.is_some();
+                let is_sanitizer = tm.category.contains("sanitizer") || tm.clears_labels.is_some();
 
                 if is_source {
-                    analyzer.mark_tainted_symbol(
+                    analyzer.mark_tainted(
                         var_name,
                         &tm.pattern_name,
                         file_path,
                         tm.line as u32,
                         tm.column as u32,
                     );
-                } else if is_sanitizer && analyzer.is_tainted_symbol(var_name) {
-                    analyzer.sanitize_symbol(
+                } else if is_sanitizer && analyzer.is_tainted(var_name) {
+                    analyzer.sanitize(
                         var_name,
                         &tm.pattern_name,
                         file_path,
@@ -299,7 +333,7 @@ impl SastEngine {
                     );
                 } else if is_sink {
                     // Check if tainted data reaches sink
-                    let _ = analyzer.check_sink_symbol(
+                    let _ = analyzer.check_sink(
                         var_name,
                         &tm.pattern_name,
                         file_path,
@@ -332,17 +366,11 @@ impl SastEngine {
     }
 
     /// Convert a data flow finding to a regular Finding
-    fn dataflow_to_finding(
-        &self,
-        df: &crate::domain::DataFlowFinding,
-        file_path: &str,
-    ) -> Finding {
-        use crate::domain::DataFlowPath;
-
+    fn dataflow_to_finding(&self, df: &DataFlowFinding, file_path: &str) -> Finding {
         // Build data flow path from the data flow finding
         let data_flow_path = Some(DataFlowPath {
-            source: crate::domain::DataFlowNode {
-                location: crate::domain::Location {
+            source: DataFlowNode {
+                location: Location {
                     file_path: df.source.file.clone(),
                     line: df.source.line,
                     column: Some(df.source.column),
@@ -352,19 +380,23 @@ impl SastEngine {
                 description: df.source.note.clone().unwrap_or_default(),
                 expression: df.source.expression.clone(),
             },
-            steps: df.intermediate_steps.iter().map(|step| crate::domain::DataFlowNode {
-                location: crate::domain::Location {
-                    file_path: step.file.clone(),
-                    line: step.line,
-                    column: Some(step.column),
-                    end_line: Some(step.line),
-                    end_column: Some(step.column),
-                },
-                description: step.note.clone().unwrap_or_default(),
-                expression: step.expression.clone(),
-            }).collect(),
-            sink: crate::domain::DataFlowNode {
-                location: crate::domain::Location {
+            steps: df
+                .intermediate_steps
+                .iter()
+                .map(|step| DataFlowNode {
+                    location: Location {
+                        file_path: step.file.clone(),
+                        line: step.line,
+                        column: Some(step.column),
+                        end_line: Some(step.line),
+                        end_column: Some(step.column),
+                    },
+                    description: step.note.clone().unwrap_or_default(),
+                    expression: step.expression.clone(),
+                })
+                .collect(),
+            sink: DataFlowNode {
+                location: Location {
                     file_path: df.sink.file.clone(),
                     line: df.sink.line,
                     column: Some(df.sink.column),
@@ -379,94 +411,30 @@ impl SastEngine {
         Finding {
             id: format!("{}-{}-{}", df.rule_id, file_path, df.sink.line),
             rule_id: df.rule_id.clone(),
-            location: crate::domain::Location {
+            location: Location {
                 file_path: file_path.to_string(),
                 line: df.sink.line,
                 column: Some(df.sink.column),
                 end_line: Some(df.sink.line),
                 end_column: Some(df.sink.column),
             },
-            severity: crate::domain::Severity::High,
-            confidence: crate::domain::Confidence::High,
-            description: format!("Tainted data flows to sink: {}", df.sink.note.clone().unwrap_or_default()),
+            severity: Severity::High,
+            confidence: Confidence::High,
+            description: format!(
+                "Tainted data flows to sink: {}",
+                df.sink.note.clone().unwrap_or_default()
+            ),
             recommendation: Some("Sanitize input before using in sensitive operations".to_string()),
             data_flow_path,
             snippet: Some(df.sink.expression.clone()),
         }
     }
 
-    /// Compile a tree-sitter query (for backward compatibility with call graph)
-    pub fn compile_query(&self, query_str: &str, language: &Language) -> Result<Query> {
-        let grammar = language.grammar();
-        Query::new(&grammar, query_str)
-            .map_err(|e| SastEngineError::InvalidQuery(format!("{:?}", e)))
-    }
-
-    /// Execute a compiled query against a tree (for backward compatibility with call graph)
-    pub fn execute_query(
-        &self,
-        query: &Query,
-        tree: &Tree,
-        source_bytes: &[u8],
-    ) -> Vec<QueryMatchResult> {
-        let mut cursor = tree_sitter::QueryCursor::new();
-        let mut matches = cursor.matches(query, tree.root_node(), source_bytes);
-        let mut results = Vec::new();
-        
-        while let Some(match_result) = {
-            matches.advance();
-            matches.get()
-        } {
-            if match_result.captures.is_empty() {
-                continue;
-            }
-
-            // Evaluate text predicates (#eq?, #match?, #not-eq?, #not-match?)
-            if !evaluate_predicates(query, match_result, source_bytes) {
-                continue;
-            }
-
-            let mut captures = HashMap::new();
-            
-            for capture in match_result.captures {
-                let node = capture.node;
-                let capture_name = query.capture_names()[capture.index as usize];
-                
-                captures.insert(
-                    capture_name.to_string(),
-                    crate::infrastructure::query_engine::CaptureInfo {
-                        text: String::from_utf8_lossy(&source_bytes[node.start_byte()..node.end_byte()]).to_string(),
-                        start_byte: node.start_byte(),
-                        end_byte: node.end_byte(),
-                        start_position: (node.start_position().row, node.start_position().column),
-                        end_position: (node.end_position().row, node.end_position().column),
-                        kind: node.kind().to_string(),
-                    },
-                );
-            }
-            
-            results.push(QueryMatchResult {
-                pattern_index: match_result.pattern_index,
-                captures,
-                start_byte: match_result.captures.first().map(|c| c.node.start_byte()).unwrap_or(0),
-                end_byte: match_result.captures.first().map(|c| c.node.end_byte()).unwrap_or(0),
-                start_position: match_result.captures.first()
-                    .map(|c| (c.node.start_position().row, c.node.start_position().column))
-                    .unwrap_or((0, 0)),
-                end_position: match_result.captures.first()
-                    .map(|c| (c.node.end_position().row, c.node.end_position().column))
-                    .unwrap_or((0, 0)),
-            });
-        }
-        
-        results
-    }
-
     /// Convert a query match to a Finding
     pub fn match_to_finding(
         &self,
         match_result: &QueryMatchResult,
-        rule: &Rule,
+        rule: &PatternRule,
         file_path: &str,
         source: &str,
     ) -> Finding {
@@ -474,10 +442,10 @@ impl SastEngine {
         let column = Some(match_result.start_position.1 as u32);
         let end_line = Some(match_result.end_position.0 as u32 + 1);
         let end_column = Some(match_result.end_position.1 as u32);
-        
+
         // Extract code snippet
         let snippet = source[match_result.start_byte..match_result.end_byte].to_string();
-        
+
         Finding {
             id: format!("{}-{}-{}", rule.id, file_path, line),
             rule_id: rule.id.clone(),
@@ -698,22 +666,18 @@ mod tests {
     #[tokio::test]
     async fn test_query_with_cache() {
         let engine = SastEngine::new();
-        
+
         // First query - cache miss
-        let result1 = engine.query(
-            "fn main() {}",
-            Language::Rust,
-            "(function_item) @fn"
-        ).await;
+        let result1 = engine
+            .query("fn main() {}", Language::Rust, "(function_item) @fn")
+            .await;
         assert!(result1.is_ok());
         assert_eq!(result1.unwrap().len(), 1);
-        
+
         // Second query - cache hit
-        let result2 = engine.query(
-            "fn test() {}",
-            Language::Rust,
-            "(function_item) @fn"
-        ).await;
+        let result2 = engine
+            .query("fn test() {}", Language::Rust, "(function_item) @fn")
+            .await;
         assert!(result2.is_ok());
         assert_eq!(result2.unwrap().len(), 1);
     }
@@ -726,8 +690,15 @@ mod tests {
         let code = r#"eval(); safe_func();"#;
         let query_str = r#"(call_expression function: (identifier) @fn (#eq? @fn "eval")) @call"#;
 
-        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
-        assert_eq!(results.len(), 1, "Should match only eval(), not safe_func()");
+        let results = engine
+            .query(code, Language::JavaScript, query_str)
+            .await
+            .unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "Should match only eval(), not safe_func()"
+        );
     }
 
     #[tokio::test]
@@ -735,9 +706,13 @@ mod tests {
         let engine = SastEngine::new();
 
         let code = r#"exec("cmd"); spawn("sh"); JSON.parse("{}");"#;
-        let query_str = r#"(call_expression function: (identifier) @fn (#match? @fn "^(exec|spawn)$")) @call"#;
+        let query_str =
+            r#"(call_expression function: (identifier) @fn (#match? @fn "^(exec|spawn)$")) @call"#;
 
-        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
+        let results = engine
+            .query(code, Language::JavaScript, query_str)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2, "Should match exec and spawn but not JSON");
     }
 
@@ -746,9 +721,13 @@ mod tests {
         let engine = SastEngine::new();
 
         let code = r#"eval(); safe();"#;
-        let query_str = r#"(call_expression function: (identifier) @fn (#not-eq? @fn "eval")) @call"#;
+        let query_str =
+            r#"(call_expression function: (identifier) @fn (#not-eq? @fn "eval")) @call"#;
 
-        let results = engine.query(code, Language::JavaScript, query_str).await.unwrap();
+        let results = engine
+            .query(code, Language::JavaScript, query_str)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1, "Should match safe() but not eval()");
     }
 

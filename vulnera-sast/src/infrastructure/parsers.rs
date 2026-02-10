@@ -67,7 +67,11 @@ impl TreeSitterParser {
     /// This is useful for executing queries directly against the AST.
     pub fn parse_tree(&mut self, source: &str) -> Result<tree_sitter::Tree, ParseError> {
         self.parser.parse(source, None).ok_or_else(|| {
-            let label = if self.is_tsx { "TSX" } else { self.lang.to_tree_sitter_name() };
+            let label = if self.is_tsx {
+                "TSX"
+            } else {
+                self.lang.to_tree_sitter_name()
+            };
             warn!(language = label, "Failed to parse code");
             ParseError::ParseFailed(format!("Failed to parse {} code", label))
         })
@@ -117,15 +121,6 @@ impl Parser for TreeSitterParser {
         Ok(convert_tree_sitter_node(root_node, source, None))
     }
 }
-
-// Backwards-compatible type aliases for external code
-pub type PythonParser = TreeSitterParser;
-pub type JavaScriptParser = TreeSitterParser;
-pub type TypeScriptParser = TreeSitterParser;
-pub type RustParser = TreeSitterParser;
-pub type GoParser = TreeSitterParser;
-pub type CParser = TreeSitterParser;
-pub type CppParser = TreeSitterParser;
 
 /// Parser factory
 pub struct ParserFactory;
@@ -186,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_python_field_names() {
-        if let Ok(mut parser) = PythonParser::new(Language::Python) {
+        if let Ok(mut parser) = TreeSitterParser::new(Language::Python) {
             let code = "def foo(x): pass";
             let ast = parser.parse(code).expect("Should parse");
 

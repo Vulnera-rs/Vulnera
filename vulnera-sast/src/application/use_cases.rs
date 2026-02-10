@@ -16,11 +16,12 @@ use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
-use crate::domain::value_objects::Language;
-use crate::domain::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, FileSuppressions, Finding as SastFinding,
-    Location, Pattern, Rule, Severity,
+use crate::domain::finding::{
+    DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding, Location, Severity,
 };
+use crate::domain::pattern_types::{Pattern, PatternRule};
+use crate::domain::suppression::FileSuppressions;
+use crate::domain::value_objects::Language;
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
@@ -52,7 +53,7 @@ impl ScanResult {
     /// Export findings to SARIF JSON string
     pub fn to_sarif_json(
         &self,
-        rules: &[Rule],
+        rules: &[PatternRule],
         tool_name: Option<&str>,
         tool_version: Option<&str>,
     ) -> Result<String, serde_json::Error> {
@@ -311,7 +312,7 @@ impl ScanProjectUseCase {
 
         let files = self.scanner.scan(root).map_err(|e| {
             error!(error = %e, "Failed to scan directory");
-            ScanError::Io(e)
+            ScanError::scan_failed(root, e)
         })?;
 
         let file_count = files.len();
@@ -361,13 +362,7 @@ impl ScanProjectUseCase {
                     };
 
                     // Build call graph nodes and edges
-                    call_graph.analyze_ast(
-                        &file_path_str,
-                        &tree,
-                        &file.language,
-                        &content,
-                        &self.sast_engine,
-                    );
+                    call_graph.analyze_ast(&file_path_str, &tree, &file.language, &content);
 
                     // Cache the parsed tree for reuse in analysis phase
                     if parsed_files.len() < self.config.tree_cache_max_entries {
@@ -507,7 +502,7 @@ impl ScanProjectUseCase {
             files_scanned += 1;
 
             // Get rules applicable to this language
-            let applicable_rules: Vec<&Rule> = all_rules
+            let applicable_rules: Vec<&PatternRule> = all_rules
                 .iter()
                 .filter(|r| r.languages.contains(&file.language))
                 .collect();
@@ -654,14 +649,14 @@ impl ScanProjectUseCase {
         file_path: &Path,
         language: &Language,
         content: &str,
-        rules: &[&Rule],
+        rules: &[&PatternRule],
         suppressions: &FileSuppressions,
         is_test_context: bool,
         _tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
         // Filter to tree-sitter query rules
-        let ts_rules: Vec<&Rule> = rules
+        let ts_rules: Vec<&PatternRule> = rules
             .iter()
             .filter(|r| matches!(&r.pattern, Pattern::TreeSitterQuery(_)))
             .copied()
@@ -806,6 +801,7 @@ impl ScanProjectUseCase {
         let mut ctx = self.data_flow_context.write().await;
         ctx.enter_function(&file_str);
         let analyzer = ctx.get_analyzer(&file_str);
+        analyzer.build_symbols(&tree, content, *language, &file_str);
 
         // Mark all detected sources as tainted
         for source in &sources {
@@ -1247,6 +1243,13 @@ pub enum ScanError {
         message: String,
     },
 
+    /// Failed to scan directory or resolve file listing
+    #[error("Failed to scan path '{path}': {message}")]
+    ScanFailed {
+        path: std::path::PathBuf,
+        message: String,
+    },
+
     /// Failed to parse source code
     #[error("Failed to parse {language} file '{path}': {message}")]
     ParseFailed {
@@ -1275,9 +1278,6 @@ pub enum ScanError {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// Generic IO error (for backward compatibility)
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 }
 
 impl ScanError {
@@ -1301,6 +1301,14 @@ impl ScanError {
             language: language.to_string(),
             message: message.into(),
             line,
+        }
+    }
+
+    /// Create a scan error with context
+    pub fn scan_failed(path: impl Into<std::path::PathBuf>, source: std::io::Error) -> Self {
+        Self::ScanFailed {
+            path: path.into(),
+            message: source.to_string(),
         }
     }
 

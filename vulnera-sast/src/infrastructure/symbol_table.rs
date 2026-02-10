@@ -296,9 +296,7 @@ impl SymbolTable {
 
     /// Get current scope kind
     pub fn current_scope_kind(&self) -> Option<ScopeKind> {
-        self.scopes
-            .get(self.current_scope)
-            .map(|s| s.kind)
+        self.scopes.get(self.current_scope).map(|s| s.kind)
     }
 
     /// Get a scope by ID
@@ -323,11 +321,7 @@ impl SymbolTable {
     }
 
     /// Declare a symbol in a specific scope
-    pub fn declare_in_scope(
-        &mut self,
-        scope_id: usize,
-        symbol: Symbol,
-    ) -> Result<(), SymbolError> {
+    pub fn declare_in_scope(&mut self, scope_id: usize, symbol: Symbol) -> Result<(), SymbolError> {
         let scope = self
             .scopes
             .get_mut(scope_id)
@@ -405,9 +399,7 @@ impl SymbolTable {
 
     /// Check if a resolved symbol is tainted
     pub fn is_tainted(&self, name: &str) -> bool {
-        self.resolve(name)
-            .map(|s| s.is_tainted())
-            .unwrap_or(false)
+        self.resolve(name).map(|s| s.is_tainted()).unwrap_or(false)
     }
 
     /// Get taint state for a resolved symbol
@@ -434,6 +426,67 @@ impl SymbolTable {
         }
 
         result
+    }
+
+    /// Get taint state by name across all scopes (ignores current scope)
+    pub fn get_taint_any_scope(&self, name: &str) -> Option<&TaintState> {
+        for scope in &self.scopes {
+            if let Some(symbol) = scope.resolve(name) {
+                if let Some(taint) = symbol.taint_state() {
+                    return Some(taint);
+                }
+            }
+        }
+        None
+    }
+
+    /// Check if a symbol is tainted in any scope
+    pub fn is_tainted_any_scope(&self, name: &str) -> bool {
+        self.get_taint_any_scope(name).is_some()
+    }
+
+    /// Get all tainted symbols in all scopes
+    pub fn get_all_tainted_in_all_scopes(&self) -> Vec<(&str, &TaintState)> {
+        let mut result = Vec::new();
+        for scope in &self.scopes {
+            for (name, symbol) in &scope.symbols {
+                if let Some(taint) = symbol.taint_state() {
+                    result.push((name.as_str(), taint));
+                }
+            }
+        }
+        result
+    }
+
+    /// Update taint state for a symbol in any scope
+    pub fn update_taint_any_scope(&mut self, name: &str, taint: TaintState) -> bool {
+        for scope in &mut self.scopes {
+            if let Some(symbol) = scope.resolve_mut(name) {
+                symbol.set_taint(taint);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Clear taint for a symbol in any scope
+    pub fn clear_taint_any_scope(&mut self, name: &str) -> bool {
+        for scope in &mut self.scopes {
+            if let Some(symbol) = scope.resolve_mut(name) {
+                symbol.clear_taint();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Clear taint for all symbols in all scopes
+    pub fn clear_all_taints(&mut self) {
+        for scope in &mut self.scopes {
+            for symbol in scope.symbols.values_mut() {
+                symbol.clear_taint();
+            }
+        }
     }
 
     /// Get all symbols in a specific scope
@@ -465,10 +518,7 @@ impl SymbolTable {
 
     /// Check if a name would shadow an outer scope symbol
     pub fn would_shadow(&self, name: &str) -> bool {
-        let mut current = self
-            .scopes
-            .get(self.current_scope)
-            .and_then(|s| s.parent);
+        let mut current = self.scopes.get(self.current_scope).and_then(|s| s.parent);
 
         while let Some(scope_id) = current {
             if let Some(scope) = self.scopes.get(scope_id) {
@@ -590,12 +640,17 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Function {
-                    params: Vec::new(), // Will be populated from parameters
-                    return_type: Box::new(TypeInfo::Unknown),
-                })
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Function {
+                params: Vec::new(), // Will be populated from parameters
+                return_type: Box::new(TypeInfo::Unknown),
+            })
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
 
@@ -632,9 +687,14 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Class, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Object(name))
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Class,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Object(name))
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
 
@@ -659,7 +719,12 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(child);
                     let location = self.node_location(child);
 
-                    let symbol = Symbol::new(name, SymbolKind::Parameter, self.table.current_scope_id(), location);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Parameter,
+                        self.table.current_scope_id(),
+                        location,
+                    );
 
                     let _ = self.table.declare(symbol);
                 }
@@ -669,7 +734,12 @@ impl<'a> SymbolTableBuilder<'a> {
                         let name = self.node_text(ident);
                         let location = self.node_location(ident);
 
-                        let symbol = Symbol::new(name, SymbolKind::Parameter, self.table.current_scope_id(), location);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::Parameter,
+                            self.table.current_scope_id(),
+                            location,
+                        );
 
                         let _ = self.table.declare(symbol);
                     }
@@ -694,7 +764,12 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Variable,
+                    self.table.current_scope_id(),
+                    location,
+                );
 
                 let _ = self.table.declare(symbol);
             }
@@ -830,8 +905,13 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(child);
                     let location = self.node_location(child);
 
-                    let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Import,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_mutable(false);
 
                     let _ = self.table.declare(symbol);
                 }
@@ -841,8 +921,13 @@ impl<'a> SymbolTableBuilder<'a> {
                         let name = self.node_text(name_node);
                         let location = self.node_location(name_node);
 
-                        let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                            .with_mutable(false);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::Import,
+                            self.table.current_scope_id(),
+                            location,
+                        )
+                        .with_mutable(false);
 
                         let _ = self.table.declare(symbol);
                     }
@@ -932,12 +1017,17 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Function {
-                    params: Vec::new(),
-                    return_type: Box::new(TypeInfo::Unknown),
-                })
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Function {
+                params: Vec::new(),
+                return_type: Box::new(TypeInfo::Unknown),
+            })
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -981,8 +1071,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1012,7 +1107,12 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(child);
                     let location = self.node_location(child);
 
-                    let symbol = Symbol::new(name, SymbolKind::Parameter, self.table.current_scope_id(), location);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Parameter,
+                        self.table.current_scope_id(),
+                        location,
+                    );
 
                     let _ = self.table.declare(symbol);
                 }
@@ -1034,7 +1134,12 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Variable,
+                    self.table.current_scope_id(),
+                    location,
+                );
 
                 let _ = self.table.declare(symbol);
             }
@@ -1069,8 +1174,9 @@ impl<'a> SymbolTableBuilder<'a> {
                         self.table.current_scope_id()
                     };
 
-                    let symbol = Symbol::new(name.clone(), SymbolKind::Variable, target_scope, location)
-                        .with_mutable(!is_const); // const is immutable
+                    let symbol =
+                        Symbol::new(name.clone(), SymbolKind::Variable, target_scope, location)
+                            .with_mutable(!is_const); // const is immutable
 
                     let _ = self.table.declare_in_scope(target_scope, symbol);
                 }
@@ -1088,9 +1194,14 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Class, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Object(name))
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Class,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Object(name))
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
 
@@ -1241,8 +1352,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Import,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -1255,8 +1371,13 @@ impl<'a> SymbolTableBuilder<'a> {
                             let name = self.node_text(name_node);
                             let location = self.node_location(name_node);
 
-                            let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                                .with_mutable(false);
+                            let symbol = Symbol::new(
+                                name,
+                                SymbolKind::Import,
+                                self.table.current_scope_id(),
+                                location,
+                            )
+                            .with_mutable(false);
 
                             let _ = self.table.declare(symbol);
                         }
@@ -1269,8 +1390,13 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(name_node);
                     let location = self.node_location(name_node);
 
-                    let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Import,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_mutable(false);
 
                     let _ = self.table.declare(symbol);
                 }
@@ -1384,12 +1510,17 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Function {
-                    params: Vec::new(),
-                    return_type: Box::new(TypeInfo::Unknown),
-                })
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Function {
+                params: Vec::new(),
+                return_type: Box::new(TypeInfo::Unknown),
+            })
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1452,8 +1583,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1486,8 +1622,13 @@ impl<'a> SymbolTableBuilder<'a> {
                     // Also check for self keyword
                     if child.kind() == "self_parameter" {
                         let location = self.node_location(child);
-                        let symbol = Symbol::new("self", SymbolKind::Parameter, self.table.current_scope_id(), location)
-                            .with_mutable(false);
+                        let symbol = Symbol::new(
+                            "self",
+                            SymbolKind::Parameter,
+                            self.table.current_scope_id(),
+                            location,
+                        )
+                        .with_mutable(false);
                         let _ = self.table.declare(symbol);
                     }
                 }
@@ -1502,7 +1643,12 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Parameter, self.table.current_scope_id(), location);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Parameter,
+                    self.table.current_scope_id(),
+                    location,
+                );
 
                 let _ = self.table.declare(symbol);
             }
@@ -1525,8 +1671,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(child);
                 let location = self.node_location(child);
 
-                let symbol = Symbol::new(name, SymbolKind::TypeAlias, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::TypeAlias,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -1559,8 +1710,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location)
-                    .with_mutable(is_mutable);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Variable,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(is_mutable);
 
                 let _ = self.table.declare(symbol);
             }
@@ -1580,8 +1736,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Variable,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1595,8 +1756,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location)
-                .with_mutable(true); // static is mutable
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Variable,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(true); // static is mutable
 
             let _ = self.table.declare(symbol);
         }
@@ -1617,8 +1783,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Import,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -1644,9 +1815,14 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Class, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Object(name))
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Class,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Object(name))
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
 
@@ -1664,8 +1840,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Class, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Class,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1681,8 +1862,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::TypeAlias, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::TypeAlias,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1808,8 +1994,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Variable,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -1855,8 +2046,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Module, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Module,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1924,8 +2120,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1952,8 +2153,13 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name,
+                SymbolKind::Function,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -1991,7 +2197,12 @@ impl<'a> SymbolTableBuilder<'a> {
                         let name = self.node_text(param_child);
                         let location = self.node_location(param_child);
 
-                        let symbol = Symbol::new(name, SymbolKind::Parameter, self.table.current_scope_id(), location);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::Parameter,
+                            self.table.current_scope_id(),
+                            location,
+                        );
 
                         let _ = self.table.declare(symbol);
                     }
@@ -2009,7 +2220,12 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(name_node);
                     let location = self.node_location(name_node);
 
-                    let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Variable,
+                        self.table.current_scope_id(),
+                        location,
+                    );
 
                     let _ = self.table.declare(symbol);
                 }
@@ -2031,7 +2247,12 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(child);
                     let location = self.node_location(child);
 
-                    let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Variable,
+                        self.table.current_scope_id(),
+                        location,
+                    );
 
                     let _ = self.table.declare(symbol);
                 }
@@ -2053,8 +2274,13 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(name_node);
                     let location = self.node_location(name_node);
 
-                    let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location)
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Variable,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_mutable(false);
 
                     let _ = self.table.declare(symbol);
                 }
@@ -2076,9 +2302,14 @@ impl<'a> SymbolTableBuilder<'a> {
                     let name = self.node_text(name_node);
                     let location = self.node_location(name_node);
 
-                    let symbol = Symbol::new(name.clone(), SymbolKind::Class, self.table.current_scope_id(), location)
-                        .with_type(TypeInfo::Object(name))
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name.clone(),
+                        SymbolKind::Class,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_type(TypeInfo::Object(name))
+                    .with_mutable(false);
 
                     let _ = self.table.declare(symbol);
                 }
@@ -2103,15 +2334,24 @@ impl<'a> SymbolTableBuilder<'a> {
                     } else if let Some(path_node) = child.child_by_field_name("path") {
                         // Extract package name from path
                         let path = self.node_text(path_node);
-                        path.trim_matches('"').split('/').next_back().unwrap_or("").to_string()
+                        path.trim_matches('"')
+                            .split('/')
+                            .next_back()
+                            .unwrap_or("")
+                            .to_string()
                     } else {
                         continue;
                     };
 
                     let location = self.node_location(child);
 
-                    let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::Import,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_mutable(false);
 
                     let _ = self.table.declare(symbol);
                 }
@@ -2124,15 +2364,24 @@ impl<'a> SymbolTableBuilder<'a> {
                                 self.node_text(name_node)
                             } else if let Some(path_node) = spec.child_by_field_name("path") {
                                 let path = self.node_text(path_node);
-                                path.trim_matches('"').split('/').next_back().unwrap_or("").to_string()
+                                path.trim_matches('"')
+                                    .split('/')
+                                    .next_back()
+                                    .unwrap_or("")
+                                    .to_string()
                             } else {
                                 continue;
                             };
 
                             let location = self.node_location(spec);
 
-                            let symbol = Symbol::new(name, SymbolKind::Import, self.table.current_scope_id(), location)
-                                .with_mutable(false);
+                            let symbol = Symbol::new(
+                                name,
+                                SymbolKind::Import,
+                                self.table.current_scope_id(),
+                                location,
+                            )
+                            .with_mutable(false);
 
                             let _ = self.table.declare(symbol);
                         }
@@ -2184,7 +2433,12 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Variable,
+                    self.table.current_scope_id(),
+                    location,
+                );
 
                 let _ = self.table.declare(symbol);
             }
@@ -2195,7 +2449,12 @@ impl<'a> SymbolTableBuilder<'a> {
                         let name = self.node_text(child);
                         let location = self.node_location(child);
 
-                        let symbol = Symbol::new(name, SymbolKind::Variable, self.table.current_scope_id(), location);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::Variable,
+                            self.table.current_scope_id(),
+                            location,
+                        );
 
                         let _ = self.table.declare(symbol);
                     }
@@ -2308,8 +2567,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Function,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -2492,9 +2756,14 @@ impl<'a> SymbolTableBuilder<'a> {
             let name = self.node_text(name_node);
             let location = self.node_location(name_node);
 
-            let symbol = Symbol::new(name.clone(), SymbolKind::Class, self.table.current_scope_id(), location)
-                .with_type(TypeInfo::Object(name))
-                .with_mutable(false);
+            let symbol = Symbol::new(
+                name.clone(),
+                SymbolKind::Class,
+                self.table.current_scope_id(),
+                location,
+            )
+            .with_type(TypeInfo::Object(name))
+            .with_mutable(false);
 
             let _ = self.table.declare(symbol);
         }
@@ -2525,8 +2794,13 @@ impl<'a> SymbolTableBuilder<'a> {
 
         let location = self.node_location(node);
 
-        let symbol = Symbol::new(name, SymbolKind::Module, self.table.current_scope_id(), location)
-            .with_mutable(false);
+        let symbol = Symbol::new(
+            name,
+            SymbolKind::Module,
+            self.table.current_scope_id(),
+            location,
+        )
+        .with_mutable(false);
 
         let _ = self.table.declare(symbol);
 
@@ -2548,13 +2822,20 @@ impl<'a> SymbolTableBuilder<'a> {
         if let Some(params) = node.child_by_field_name("parameters") {
             let mut cursor = params.walk();
             for child in params.children(&mut cursor) {
-                if child.kind() == "type_parameter_declaration" || child.kind() == "parameter_declaration" {
+                if child.kind() == "type_parameter_declaration"
+                    || child.kind() == "parameter_declaration"
+                {
                     if let Some(name_node) = child.child_by_field_name("name") {
                         let name = self.node_text(name_node);
                         let location = self.node_location(name_node);
 
-                        let symbol = Symbol::new(name, SymbolKind::TypeAlias, self.table.current_scope_id(), location)
-                            .with_mutable(false);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::TypeAlias,
+                            self.table.current_scope_id(),
+                            location,
+                        )
+                        .with_mutable(false);
 
                         let _ = self.table.declare(symbol);
                     }
@@ -2604,8 +2885,13 @@ impl<'a> SymbolTableBuilder<'a> {
                 let name = self.node_text(node);
                 let location = self.node_location(node);
 
-                let symbol = Symbol::new(name, SymbolKind::Function, self.table.current_scope_id(), location)
-                    .with_mutable(false);
+                let symbol = Symbol::new(
+                    name,
+                    SymbolKind::Function,
+                    self.table.current_scope_id(),
+                    location,
+                )
+                .with_mutable(false);
 
                 let _ = self.table.declare(symbol);
             }
@@ -2624,7 +2910,9 @@ impl<'a> SymbolTableBuilder<'a> {
             if let Some(params) = node.child_by_field_name("parameters") {
                 let mut cursor = params.walk();
                 for child in params.children(&mut cursor) {
-                    if child.kind() == "parameter_declaration" || child.kind() == "optional_parameter_declaration" {
+                    if child.kind() == "parameter_declaration"
+                        || child.kind() == "optional_parameter_declaration"
+                    {
                         self.handle_cpp_parameter(child);
                     }
                 }
@@ -2698,7 +2986,7 @@ impl<'a> SymbolTableBuilder<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SymbolTable, Symbol, SymbolKind, ScopeKind, TypeInfo};
+    use super::{ScopeKind, Symbol, SymbolKind, SymbolTable, TypeInfo};
     use crate::domain::finding::{Location, TaintState};
 
     #[test]
@@ -2774,7 +3062,12 @@ mod tests {
         assert_eq!(table.resolve("x").unwrap().scope_id, 0);
 
         // Declare local y
-        let local_y = Symbol::new("y", SymbolKind::Variable, table.current_scope_id(), loc.clone());
+        let local_y = Symbol::new(
+            "y",
+            SymbolKind::Variable,
+            table.current_scope_id(),
+            loc.clone(),
+        );
         table.declare(local_y).unwrap();
 
         // Should see both
@@ -2926,13 +3219,11 @@ mod tests {
     #[test]
     fn test_symbol_with_type() {
         let loc = Location::new("test.py".to_string(), 1);
-        let symbol = Symbol::new("items", SymbolKind::Variable, 0, loc)
-            .with_type(TypeInfo::List(Box::new(TypeInfo::Primitive("str".to_string()))));
-
-        assert!(matches!(
-            symbol.type_info,
-            Some(TypeInfo::List(_))
+        let symbol = Symbol::new("items", SymbolKind::Variable, 0, loc).with_type(TypeInfo::List(
+            Box::new(TypeInfo::Primitive("str".to_string())),
         ));
+
+        assert!(matches!(symbol.type_info, Some(TypeInfo::List(_))));
     }
 
     #[test]

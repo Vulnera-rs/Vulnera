@@ -1,7 +1,7 @@
 //! Metavariable Pattern Support
 //!
-//! This module provides parsing and translation of Semgrep-style metavariable
-//! patterns into tree-sitter queries.
+//! This module provides parsing and translation of metavariable-style patterns
+//! into tree-sitter queries.
 //!
 //! # Supported Syntax
 //! - `$VAR` - matches any single expression

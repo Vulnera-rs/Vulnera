@@ -228,7 +228,7 @@ owasp_categories = ["A03:2021 - Injection"]
 | Type                | Example                                               | Use Case                                    |
 | ------------------- | ----------------------------------------------------- | ------------------------------------------- |
 | **TreeSitterQuery** | `(call function: (identifier) @fn (#eq? @fn "eval"))` | Native AST queries, most powerful           |
-| **Metavariable**    | `$DB.execute($QUERY)`                                 | Semgrep-like syntax (Semgrep compat future) |
+| **Metavariable**    | `$DB.execute($QUERY)`                                 | Metavariable syntax (execution planned)     |
 | **AnyOf**           | `[pattern1, pattern2, ...]`                           | Match any pattern in list                   |
 | **AllOf**           | `[pattern1, pattern2, ...]`                           | Match all patterns in sequence              |
 | **Not**             | `{not: pattern}`                                      | Exclude pattern                             |
@@ -483,7 +483,7 @@ pub fn setup_modules(
 1. **Rust Parser**: Tree-sitter-rust covers most cases; advanced macro expansion not yet supported
 2. **Custom Patterns**: Reserved for future extensibility; currently Pattern::Custom is a no-op
 3. **Context Sensitivity**: Confidence based on pattern structure, not full abstract interpretation
-4. **Semgrep Compatibility**: Metavariable patterns parsed but not yet executed (planned)
+4. **Metavariable Execution**: Patterns are parsed but not yet executed (planned)
 
 ## Contributing
 

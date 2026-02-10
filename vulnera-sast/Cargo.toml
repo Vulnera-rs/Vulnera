@@ -61,7 +61,7 @@ uuid = { workspace = true }
 # Glob patterns for file matching
 globset = { workspace = true }
 
-# Temporary files for Semgrep rules
+# Temporary files for rule fixtures
 tempfile = { workspace = true }
 
 [dev-dependencies]

@@ -39,6 +39,58 @@ pub struct PatternRule {
     /// Suggested fix (can include metavariables)
     #[serde(default)]
     pub fix: Option<String>,
+    /// Metavariable constraints for filtering matches
+    ///
+    /// After the base pattern matches, each constraint is evaluated against
+    /// the captured metavariable's AST subtree. A match is retained only if
+    /// all constraints pass.
+    ///
+    #[serde(default)]
+    pub metavariable_constraints: Vec<MetavariableConstraint>,
+}
+
+// =============================================================================
+// Metavariable Constraints
+// =============================================================================
+
+/// A constraint on a captured metavariable.
+///
+/// After the base pattern matches and binds `$VAR` to a subtree, the
+/// constraint is evaluated against that subtree to accept or reject
+/// the match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetavariableConstraint {
+    /// The metavariable name this constraint applies to (e.g. `"$ARG"`).
+    pub metavariable: String,
+    /// The condition to evaluate on the captured content.
+    pub condition: MetavariableCondition,
+}
+
+/// The kind of condition to evaluate on a captured metavariable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub enum MetavariableCondition {
+    /// The captured content must match (or not match) a nested pattern.
+    ///
+    /// Evaluated by re-running the pattern matcher on the captured AST
+    /// subtree (see `Metavariable_pattern.ml`).
+    #[serde(rename = "pattern")]
+    Pattern {
+        /// Patterns the captured content must satisfy.
+        #[serde(default)]
+        patterns: Vec<Pattern>,
+        /// Patterns the captured content must NOT satisfy.
+        #[serde(default)]
+        patterns_not: Vec<Pattern>,
+    },
+    /// The captured content's text must match a regex.
+    ///
+    /// Evaluated by `Metavariable_regex.ml`.
+    #[serde(rename = "regex")]
+    Regex {
+        /// Regex pattern applied to the metavariable's text representation.
+        regex: String,
+    },
 }
 
 /// Pattern types for matching code
@@ -49,7 +101,7 @@ pub enum Pattern {
     /// Example: `(call function: (identifier) @fn (#eq? @fn "eval"))`
     TreeSitterQuery(String),
 
-    /// Metavariable pattern (Semgrep-like syntax)
+    /// Metavariable pattern
     /// Example: `$DB.execute($QUERY)`
     Metavariable(String),
 

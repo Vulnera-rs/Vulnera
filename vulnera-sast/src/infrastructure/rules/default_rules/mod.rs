@@ -9,7 +9,7 @@
 //! 2. Follow the `[[rules]]` table-array format — see existing entries.
 //! 3. Run `cargo test -p vulnera-sast` to validate deserialization.
 
-use crate::domain::Rule;
+use crate::domain::pattern_types::PatternRule;
 use serde::Deserialize;
 use std::sync::LazyLock;
 use tracing::{debug, warn};
@@ -29,14 +29,18 @@ const COMMON_RULES_TOML: &str = include_str!("../../../../rules/common.toml");
 /// Intermediate deserialization target matching the TOML structure.
 #[derive(Debug, Deserialize)]
 struct RulesFile {
-    rules: Vec<Rule>,
+    rules: Vec<PatternRule>,
 }
 
 /// Parse a TOML rule file, returning an empty vec on error (with warning).
-fn load_rules_from_toml(toml_str: &str, label: &str) -> Vec<Rule> {
+fn load_rules_from_toml(toml_str: &str, label: &str) -> Vec<PatternRule> {
     match toml::from_str::<RulesFile>(toml_str) {
         Ok(file) => {
-            debug!(count = file.rules.len(), language = label, "Loaded rules from embedded TOML");
+            debug!(
+                count = file.rules.len(),
+                language = label,
+                "Loaded rules from embedded TOML"
+            );
             file.rules
         }
         Err(e) => {
@@ -50,7 +54,7 @@ fn load_rules_from_toml(toml_str: &str, label: &str) -> Vec<Rule> {
 // Lazy-initialized rule sets (parsed once, reused across calls)
 // =============================================================================
 
-static ALL_DEFAULT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
+static ALL_DEFAULT_RULES: LazyLock<Vec<PatternRule>> = LazyLock::new(|| {
     let mut rules = Vec::with_capacity(200);
     rules.extend(load_rules_from_toml(COMMON_RULES_TOML, "common"));
     rules.extend(load_rules_from_toml(JAVASCRIPT_RULES_TOML, "javascript"));
@@ -71,7 +75,7 @@ static ALL_DEFAULT_RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
 ///
 /// Rules are parsed from embedded TOML once on first call and cached for the
 /// process lifetime.
-pub fn get_default_rules() -> Vec<Rule> {
+pub fn get_default_rules() -> Vec<PatternRule> {
     ALL_DEFAULT_RULES.clone()
 }
 

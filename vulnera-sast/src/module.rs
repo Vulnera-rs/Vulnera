@@ -11,7 +11,7 @@ use vulnera_core::domain::module::{
 };
 
 use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
-use crate::domain::Severity as SastSeverity;
+use crate::domain::finding::Severity as SastSeverity;
 use crate::infrastructure::ast_cache::AstCacheService;
 
 /// SAST analysis module.

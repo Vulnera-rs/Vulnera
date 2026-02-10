@@ -8,7 +8,8 @@
 //! - Multi-language support via grammar selection
 //! - Efficient batch query execution
 
-use crate::domain::{Finding, Location, Pattern, Rule, Severity};
+use crate::domain::finding::{Finding, Location, Severity};
+use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -290,7 +291,7 @@ pub fn batch_query_with_tree(
 /// Convert a query match to a Finding
 pub fn match_to_finding(
     match_result: &QueryMatchResult,
-    rule: &Rule,
+    rule: &PatternRule,
     file_path: &str,
     source: &str,
 ) -> Finding {
@@ -355,7 +356,7 @@ pub fn match_to_finding(
 }
 
 /// Calculate confidence based on rule and match quality
-pub fn calculate_confidence(rule: &Rule, match_result: &QueryMatchResult) -> Confidence {
+pub fn calculate_confidence(rule: &PatternRule, match_result: &QueryMatchResult) -> Confidence {
     // More captures = higher confidence (more specific match)
     let capture_score = match match_result.captures.len() {
         0..=1 => 0,
@@ -378,7 +379,7 @@ pub fn calculate_confidence(rule: &Rule, match_result: &QueryMatchResult) -> Con
 
 /// Format finding description with captured context
 pub fn format_description(
-    rule: &Rule,
+    rule: &PatternRule,
     match_result: &QueryMatchResult,
     snippet: &str,
 ) -> String {
@@ -526,10 +527,10 @@ pub fn match_rules(
     source: &str,
     language: &Language,
     file_path: &str,
-    rules: &[Rule],
+    rules: &[PatternRule],
 ) -> Result<Vec<Finding>, QueryEngineError> {
     // Filter rules for this language
-    let applicable_rules: Vec<&Rule> = rules
+    let applicable_rules: Vec<&PatternRule> = rules
         .iter()
         .filter(|r| r.languages.contains(language))
         .collect();

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use vulnera_core::config::SastConfig;
 use vulnera_core::domain::module::{AnalysisModule, ModuleConfig};
 use vulnera_sast::SastModule;
-use vulnera_sast::domain::FileSuppressions;
+use vulnera_sast::domain::suppression::FileSuppressions;
 
 async fn create_source_file(dir: &TempDir, filename: &str, content: &str) -> std::path::PathBuf {
     let path = dir.path().join(filename);
