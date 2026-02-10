@@ -11,6 +11,7 @@
 use crate::domain::finding::{Finding, Location, Severity};
 use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
+use crate::infrastructure::regex_cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use streaming_iterator::StreamingIterator;
@@ -41,6 +42,10 @@ pub struct QueryMatchResult {
     pub pattern_index: usize,
     /// Named captures with their byte ranges and text
     pub captures: HashMap<String, CaptureInfo>,
+    /// All captures grouped by name (supports repeated metavariables)
+    pub captures_by_name: HashMap<String, Vec<CaptureInfo>>,
+    /// Metavariable bindings (e.g., "$X" -> "value")
+    pub bindings: HashMap<String, String>,
     /// Start byte of the entire match
     pub start_byte: usize,
     /// End byte of the entire match
@@ -66,6 +71,34 @@ pub struct CaptureInfo {
     pub end_position: (usize, usize),
     /// Node kind/type
     pub kind: String,
+}
+
+const METAVAR_CAPTURE_PREFIX: &str = "mv_";
+
+pub fn extract_metavariable_bindings(
+    captures_by_name: &HashMap<String, Vec<CaptureInfo>>,
+) -> Option<HashMap<String, String>> {
+    let mut bindings = HashMap::new();
+
+    for (name, infos) in captures_by_name {
+        if !name.starts_with(METAVAR_CAPTURE_PREFIX) {
+            continue;
+        }
+
+        let key = format!("${}", &name[METAVAR_CAPTURE_PREFIX.len()..]);
+        let mut iter = infos.iter();
+        let Some(first) = iter.next() else {
+            continue;
+        };
+
+        if iter.any(|info| info.text != first.text) {
+            return None;
+        }
+
+        bindings.insert(key, first.text.clone());
+    }
+
+    Some(bindings)
 }
 
 /// Get the tree-sitter language for a given Language enum
@@ -180,6 +213,7 @@ fn process_match(
         }
 
         let mut captures = HashMap::new();
+        let mut captures_by_name: HashMap<String, Vec<CaptureInfo>> = HashMap::new();
         let mut min_start_byte = usize::MAX;
         let mut max_end_byte = 0;
         let mut min_start_pos = (usize::MAX, usize::MAX);
@@ -205,22 +239,29 @@ fn process_match(
                 max_end_pos = (end_pos.row, end_pos.column);
             }
 
-            captures.insert(
-                capture_name.to_string(),
-                CaptureInfo {
-                    text,
-                    start_byte,
-                    end_byte,
-                    start_position: (start_pos.row, start_pos.column),
-                    end_position: (end_pos.row, end_pos.column),
-                    kind: node.kind().to_string(),
-                },
-            );
+            let info = CaptureInfo {
+                text,
+                start_byte,
+                end_byte,
+                start_position: (start_pos.row, start_pos.column),
+                end_position: (end_pos.row, end_pos.column),
+                kind: node.kind().to_string(),
+            };
+
+            captures.entry(capture_name.to_string()).or_insert_with(|| info.clone());
+            captures_by_name
+                .entry(capture_name.to_string())
+                .or_default()
+                .push(info);
         }
+
+        let bindings = extract_metavariable_bindings(&captures_by_name)?;
 
         Some(QueryMatchResult {
             pattern_index: m.pattern_index,
             captures,
+            captures_by_name,
+            bindings,
             start_byte: min_start_byte,
             end_byte: max_end_byte,
             start_position: min_start_pos,
@@ -333,6 +374,23 @@ pub fn match_to_finding(
         line
     );
 
+    let bindings = if match_result.bindings.is_empty() {
+        None
+    } else {
+        Some(match_result.bindings.clone())
+    };
+
+    let recommendation = rule
+        .fix
+        .as_ref()
+        .map(|fix| interpolate_template(fix, &match_result.bindings))
+        .or_else(|| {
+            Some(format!(
+                "Review the code at line {} and consider the security implications.",
+                line
+            ))
+        });
+
     Finding {
         id: finding_id,
         rule_id: rule.id.clone(),
@@ -346,12 +404,10 @@ pub fn match_to_finding(
         severity: rule.severity.clone(),
         confidence: calculate_confidence(rule, match_result),
         description: format_description(rule, match_result, &snippet),
-        recommendation: Some(format!(
-            "Review the code at line {} and consider the security implications.",
-            line
-        )),
+        recommendation,
         data_flow_path: None,
         snippet: Some(snippet),
+        bindings,
     }
 }
 
@@ -383,7 +439,11 @@ pub fn format_description(
     match_result: &QueryMatchResult,
     snippet: &str,
 ) -> String {
-    let mut desc = rule.description.clone();
+    let base = rule
+        .message
+        .as_deref()
+        .unwrap_or(&rule.description);
+    let mut desc = interpolate_template(base, &match_result.bindings);
 
     // Append captured values for context
     if !match_result.captures.is_empty() {
@@ -403,6 +463,21 @@ pub fn format_description(
     }
 
     desc
+}
+
+fn interpolate_template(template: &str, bindings: &HashMap<String, String>) -> String {
+    if bindings.is_empty() {
+        return template.to_string();
+    }
+
+    let re = regex_cache::metavar_template_regex();
+    re.replace_all(template, |caps: &regex::Captures<'_>| {
+        bindings
+            .get(caps.get(0).map(|m| m.as_str()).unwrap_or(""))
+            .cloned()
+            .unwrap_or_else(|| caps[0].to_string())
+    })
+    .to_string()
 }
 
 /// Match a pattern (including composite patterns) against source code
@@ -521,6 +596,64 @@ pub fn match_pattern(
     }
 }
 
+fn constraints_pass(
+    rule: &PatternRule,
+    match_result: &QueryMatchResult,
+    language: &Language,
+) -> Result<bool, QueryEngineError> {
+    if rule.metavariable_constraints.is_empty() {
+        return Ok(true);
+    }
+
+    let mut parsed_cache: HashMap<String, Tree> = HashMap::new();
+
+    for constraint in &rule.metavariable_constraints {
+        let Some(bound_text) = match_result.bindings.get(&constraint.metavariable) else {
+            return Ok(false);
+        };
+
+        match &constraint.condition {
+            crate::domain::pattern_types::MetavariableCondition::Regex { regex } => {
+                let Ok(re) = regex_cache::get_regex(regex) else {
+                    warn!(pattern = %regex, "Invalid metavariable constraint regex");
+                    return Ok(false);
+                };
+                if !re.is_match(bound_text) {
+                    return Ok(false);
+                }
+            }
+            crate::domain::pattern_types::MetavariableCondition::Pattern {
+                patterns,
+                patterns_not,
+            } => {
+                let tree = if let Some(tree) = parsed_cache.get(bound_text) {
+                    tree.clone()
+                } else {
+                    let (tree, _) = parse(bound_text, language)?;
+                    parsed_cache.insert(bound_text.clone(), tree.clone());
+                    tree
+                };
+
+                for pattern in patterns {
+                    let matches = match_pattern(pattern, bound_text, language, &tree)?;
+                    if matches.is_empty() {
+                        return Ok(false);
+                    }
+                }
+
+                for pattern in patterns_not {
+                    let matches = match_pattern(pattern, bound_text, language, &tree)?;
+                    if !matches.is_empty() {
+                        return Ok(false);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(true)
+}
+
 /// Match rules against source code and return findings
 #[instrument(skip(source, rules), fields(source_len = source.len(), rule_count = rules.len()))]
 pub fn match_rules(
@@ -550,6 +683,9 @@ pub fn match_rules(
                 for m in matches {
                     // Skip synthetic matches from Not patterns
                     if m.start_byte == 0 && m.end_byte == 0 && m.captures.is_empty() {
+                        continue;
+                    }
+                    if !constraints_pass(rule, &m, language)? {
                         continue;
                     }
                     findings.push(match_to_finding(&m, rule, file_path, source));
@@ -845,6 +981,18 @@ os.system("rm -rf /")
             .unwrap();
 
         assert_eq!(matches.len(), 0);
+    }
+
+    #[test]
+    fn test_metavariable_binding_equality() {
+        let source = "a + a\na + b";
+        let (tree, _) = parse(source, &Language::JavaScript).unwrap();
+
+        let pattern = Pattern::Metavariable("$X + $X".to_string());
+        let matches = match_pattern(&pattern, source, &Language::JavaScript, &tree).unwrap();
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].bindings.get("$X").unwrap(), "a");
     }
 
     #[test]

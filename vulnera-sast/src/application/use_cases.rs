@@ -19,13 +19,14 @@ use vulnera_core::config::{AnalysisDepth, SastConfig};
 use crate::domain::finding::{
     DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding, Location, Severity,
 };
-use crate::domain::pattern_types::{Pattern, PatternRule};
+use crate::domain::pattern_types::PatternRule;
 use crate::domain::suppression::FileSuppressions;
 use crate::domain::value_objects::Language;
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
 use crate::infrastructure::incremental::IncrementalTracker;
+use crate::infrastructure::regex_cache;
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
@@ -655,26 +656,22 @@ impl ScanProjectUseCase {
         _tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
-        // Filter to tree-sitter query rules
-        let ts_rules: Vec<&PatternRule> = rules
-            .iter()
-            .filter(|r| matches!(&r.pattern, Pattern::TreeSitterQuery(_)))
-            .copied()
-            .collect();
+        // Filter to pattern rules (tree-sitter, metavariables, and composites)
+        let pattern_rules: Vec<&PatternRule> = rules.iter().copied().collect();
 
-        if ts_rules.is_empty() {
+        if pattern_rules.is_empty() {
             return Ok(());
         }
 
         debug!(
-            rule_count = ts_rules.len(),
+            rule_count = pattern_rules.len(),
             file = %file_path.display(),
-            "Executing tree-sitter rules"
+            "Executing pattern rules"
         );
 
         let results = {
             self.sast_engine
-                .query_batch(content, *language, &ts_rules)
+                .query_batch(content, *language, &pattern_rules)
                 .await
         };
 
@@ -682,7 +679,7 @@ impl ScanProjectUseCase {
         let sast_engine = Arc::clone(&self.sast_engine);
 
         for (rule_id, matches) in results {
-            let rule = ts_rules.iter().find(|r| r.id == rule_id);
+            let rule = pattern_rules.iter().find(|r| r.id == rule_id);
             if let Some(rule) = rule {
                 for match_result in matches {
                     let line = match_result.start_position.0 as u32 + 1;
@@ -694,6 +691,15 @@ impl ScanProjectUseCase {
 
                     if is_test_context && rule.options.suppress_in_tests {
                         debug!(rule_id = %rule.id, line, "Finding suppressed in test context");
+                        continue;
+                    }
+
+                    if !self
+                        .sast_engine
+                        .metavariable_constraints_pass(rule, &match_result, *language)
+                        .await
+                    {
+                        debug!(rule_id = %rule.id, line, "Metavariable constraints rejected");
                         continue;
                     }
 
@@ -995,8 +1001,9 @@ impl ScanProjectUseCase {
                 // Use regex to check for whole word match to avoid false positives with short var names
                 // e.g. "r" matching in "u.String()"
                 let pattern = format!(r"\b{}\b", regex::escape(tainted_var));
-                let re = regex::Regex::new(&pattern)
-                    .unwrap_or_else(|_| regex::Regex::new(tainted_var).unwrap());
+                let re = regex_cache::get_regex(&pattern)
+                    .or_else(|_| regex_cache::get_regex(tainted_var))
+                    .unwrap();
 
                 if re.is_match(&sink.matched_text) {
                     if let Some(data_flow_finding) = analyzer.check_sink(
@@ -1099,6 +1106,7 @@ impl ScanProjectUseCase {
                 steps,
             }),
             snippet: Some(sink.matched_text.clone()),
+            bindings: None,
         };
         findings.push(finding);
     }

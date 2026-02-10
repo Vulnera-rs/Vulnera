@@ -7690,6 +7690,7 @@ dependencies = [
  "hex",
  "insta",
  "moka",
+ "once_cell",
  "proc-macro2",
  "proptest",
  "quote",

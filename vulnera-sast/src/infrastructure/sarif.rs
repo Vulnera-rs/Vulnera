@@ -345,6 +345,7 @@ mod tests {
             recommendation: Some("Use parameterized queries".to_string()),
             data_flow_path: None,
             snippet: None,
+            bindings: None,
         }
     }
 

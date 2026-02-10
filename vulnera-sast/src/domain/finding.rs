@@ -22,6 +22,9 @@ pub struct Finding {
     /// Code snippet at the finding location
     #[serde(default)]
     pub snippet: Option<String>,
+    /// Metavariable bindings for this finding
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bindings: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Location of a finding in source code

@@ -16,6 +16,7 @@ pub mod incremental;
 pub mod metavar_patterns;
 pub mod parsers;
 pub mod query_engine;
+pub mod regex_cache;
 pub mod rules;
 pub mod sarif;
 pub mod sast_engine;
