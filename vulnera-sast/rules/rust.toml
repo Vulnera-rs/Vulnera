@@ -128,9 +128,18 @@ value = '''
   ; Match any unsafe block
   (unsafe_block) @unsafe
 
-  ; Match unsafe function declarations (robust text match)
+  ; Match unsafe function declarations
   (function_item) @unsafe_fn
-  (#match? @unsafe_fn "\bunsafe\b")
+  (#match? @unsafe_fn "^unsafe\\s+fn")
+
+  ; Match unsafe trait implementations
+  (unsafe_impl) @unsafe_impl
+
+  ; Match raw pointer dereference
+  (unary_expression
+    operator: "*"
+    argument: (identifier) @ptr
+  ) @deref
 ]
 '''
 

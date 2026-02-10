@@ -45,6 +45,23 @@ query = '''
 '''
 
 [[sources]]
+name = "Django request GET/POST get()"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(call
+  function: (attribute
+    object: (attribute
+      object: (identifier) @obj
+      attribute: (identifier) @container)
+    attribute: (identifier) @method)
+  (#eq? @obj "request")
+  (#match? @container "^(GET|POST|FILES|COOKIES|META)$")
+  (#eq? @method "get")
+) @source
+'''
+
+[[sources]]
 name = "Command line argument"
 category = "cli_input"
 labels = ["user_input", "cli"]
@@ -122,6 +139,19 @@ query = '''
     attribute: (identifier) @method)
   arguments: (argument_list
     (binary_operator) @query)
+  (#match? @method "^(execute|executemany|executescript)$")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL execution with variable"
+category = "sql_injection"
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @query)
   (#match? @method "^(execute|executemany|executescript)$")
 ) @sink
 '''
@@ -331,13 +361,38 @@ query = '''
 
 [[sanitizers]]
 name = "Type coercion"
-category = "type_coercion"
+category = "generic"
 is_known = true
 clears_labels = []
 query = '''
 (call
   function: (identifier) @fn
   (#match? @fn "^(int|float|bool)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "YAML SafeLoader"
+category = "deserialization"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @arg
+    (keyword_argument
+      name: (identifier) @kw
+      value: (attribute
+        object: (identifier) @yaml
+        attribute: (identifier) @loader)))
+  (#eq? @mod "yaml")
+  (#eq? @method "load")
+  (#eq? @kw "Loader")
+  (#eq? @yaml "yaml")
+  (#eq? @loader "SafeLoader")
 ) @sanitizer
 '''
 

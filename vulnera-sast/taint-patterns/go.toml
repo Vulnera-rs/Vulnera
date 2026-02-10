@@ -105,6 +105,19 @@ query = '''
 '''
 
 [[sources]]
+name = "Function parameter (URL-like)"
+category = "user_input"
+labels = ["user_input"]
+query = '''
+(parameter_declaration
+  name: (identifier) @name
+  type: (type_identifier) @type
+  (#eq? @type "string")
+  (#match? @name "(?i)(url|uri|endpoint|target|addr|path)")
+) @source
+'''
+
+[[sources]]
 name = "Environment variable"
 category = "environment"
 labels = ["environment"]
@@ -518,6 +531,18 @@ query = '''
     (#eq? @field "CheckRedirect")
   )
 ] @sanitizer
+'''
+
+[[sanitizers]]
+name = "CheckRedirect field"
+category = "ssrf"
+is_known = true
+clears_labels = []
+query = '''
+(keyed_element
+  field: (field_identifier) @field
+  (#eq? @field "CheckRedirect")
+) @sanitizer
 '''
 
 [[sanitizers]]

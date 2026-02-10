@@ -86,31 +86,6 @@ query = '''
 ) @source
 '''
 
-[[sources]]
-name = "URL search params"
-category = "user_input"
-labels = ["user_input", "url"]
-query = '''
-(call_expression
-  function: (member_expression
-    property: (property_identifier) @method)
-  (#match? @method "^(get|getAll)$")
-) @source
-'''
-
-[[sources]]
-name = "File read"
-category = "file_input"
-labels = ["user_input", "file"]
-query = '''
-(call_expression
-  function: (member_expression
-    object: (identifier) @lib
-    property: (property_identifier) @method)
-  (#eq? @lib "fs")
-  (#match? @method "^(readFile|readFileSync)$")
-) @source
-'''
 
 [[sources]]
 name = "Archive entry path"
@@ -280,7 +255,7 @@ query = '''
     object: (identifier) @lib
     property: (property_identifier) @method)
   arguments: (arguments
-    [
+    . [
       (identifier) @arg
       (member_expression) @arg
       (subscript_expression) @arg
@@ -303,7 +278,7 @@ query = '''
         (string) @mod))
     property: (property_identifier) @method)
   arguments: (arguments
-    [
+    . [
       (identifier) @arg
       (member_expression) @arg
     ])
@@ -321,11 +296,12 @@ query = '''
     object: (identifier) @lib
     property: (property_identifier) @method)
   arguments: (arguments
-    [
+    . [
       (identifier) @arg
       (member_expression) @arg
       (subscript_expression) @arg
       (call_expression) @arg
+      (template_string) @arg
     ])
   (#eq? @lib "ejs")
   (#match? @method "^(render|renderFile|compile)$")
@@ -341,7 +317,7 @@ query = '''
     object: (identifier) @lib
     property: (property_identifier) @method)
   arguments: (arguments
-    [
+    . [
       (identifier) @arg
       (member_expression) @arg
       (subscript_expression) @arg
@@ -360,7 +336,7 @@ query = '''
     object: (identifier) @lib
     property: (property_identifier) @method)
   arguments: (arguments
-    [
+    . [
       (identifier) @arg
       (member_expression) @arg
       (subscript_expression) @arg
@@ -831,5 +807,37 @@ query = '''
   arguments: (arguments
     (identifier) @arg)
   (#eq? @end "end")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.startsWith validation"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @var
+    property: (property_identifier) @method)
+  (#eq? @method "startsWith")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "indexOf validation"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @var
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (string) @pattern
+    (_)*)
+  (#eq? @method "indexOf")
+  (#match? @pattern "\\.\\.")
 ) @sanitizer
 '''

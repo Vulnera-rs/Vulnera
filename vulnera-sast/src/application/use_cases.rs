@@ -31,7 +31,7 @@ use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::taint_queries::{TaintConfig, get_propagation_queries};
+use crate::infrastructure::taint_queries::{TaintConfig, get_propagation_queries, get_sanitizer_queries};
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -761,20 +761,26 @@ impl ScanProjectUseCase {
                 .detect_taint(&tree, source_bytes, *language, &TaintConfig::default())
                 .await;
 
+            let sanitizer_names: std::collections::HashSet<String> =
+                get_sanitizer_queries(language, &TaintConfig::default())
+                    .into_iter()
+                    .map(|p| p.name)
+                    .collect();
+
             // Split matches into sources, sinks, and sanitizers based on their properties
             let sources: Vec<_> = matches
                 .iter()
                 .filter(|m| !m.labels.is_empty())
                 .cloned()
                 .collect();
-            let sinks: Vec<_> = matches
-                .iter()
-                .filter(|m| m.labels.is_empty() && m.clears_labels.is_none())
-                .cloned()
-                .collect();
             let sanitizers: Vec<_> = matches
                 .iter()
-                .filter(|m| m.clears_labels.is_some())
+                .filter(|m| sanitizer_names.contains(&m.pattern_name))
+                .cloned()
+                .collect();
+            let sinks: Vec<_> = matches
+                .iter()
+                .filter(|m| m.labels.is_empty() && !sanitizer_names.contains(&m.pattern_name))
                 .cloned()
                 .collect();
 
@@ -795,7 +801,9 @@ impl ScanProjectUseCase {
             )
         };
 
-        let ssrf_sanitized = sanitizers.iter().any(|s| s.category == "ssrf");
+        let ssrf_sanitized = sanitizers
+            .iter()
+            .any(|s| matches!(s.category.as_str(), "ssrf" | "url" | "path" | "ssti"));
 
         debug!(
             file = %file_str,
@@ -868,20 +876,23 @@ impl ScanProjectUseCase {
 
             let mut newly_tainted = false;
 
-            // Check if the source expression contains any tainted source
-            for source in &sources {
-                let source_var = source
-                    .variable_name
-                    .as_deref()
-                    .unwrap_or(&source.matched_text);
+            let tainted_vars: Vec<String> = analyzer
+                .symbol_table()
+                .get_all_tainted_in_all_scopes()
+                .into_iter()
+                .map(|(name, _)| name.to_string())
+                .collect();
 
-                let source_in_expr =
-                    source_expr.contains(source_var) || source_expr.contains(&source.matched_text);
+            for tainted_var in &tainted_vars {
+                let pattern = format!(r"\b{}\b", regex::escape(tainted_var));
+                let re = regex_cache::get_regex(&pattern)
+                    .or_else(|_| regex_cache::get_regex(tainted_var))
+                    .unwrap();
 
-                if source_in_expr {
+                if re.is_match(source_expr) {
                     analyzer.mark_tainted(
                         target,
-                        &format!("propagated from {}", source_var),
+                        &format!("propagated from {}", tainted_var),
                         &file_str,
                         *line as u32 + 1,
                         *column as u32,
@@ -891,34 +902,18 @@ impl ScanProjectUseCase {
                 }
             }
 
-            // Also check transitive propagation via already-tainted variables
-            if !newly_tainted {
-                for prev_source in &sources {
-                    let prev_var = prev_source
-                        .variable_name
-                        .as_deref()
-                        .unwrap_or(&prev_source.matched_text);
-                    if source_expr.contains(prev_var) && analyzer.is_tainted(prev_var) {
-                        analyzer.mark_tainted(
-                            target,
-                            &format!("propagated from {}", prev_var),
-                            &file_str,
-                            *line as u32 + 1,
-                            *column as u32,
-                        );
-                        newly_tainted = true;
-                        break;
-                    }
-                }
-            }
-
             // If we tainted a new variable, re-enqueue all assignments that
             // reference it as a source — they may now propagate taint further
             if newly_tainted {
+                let pattern = format!(r"\b{}\b", regex::escape(target));
+                let re = regex_cache::get_regex(&pattern)
+                    .or_else(|_| regex_cache::get_regex(target))
+                    .unwrap();
+
                 for (other_idx, (_, other_source_expr, _, _)) in assignments.iter().enumerate() {
                     if other_idx != idx
                         && !worklist_set.contains(&other_idx)
-                        && other_source_expr.contains(target.as_str())
+                        && re.is_match(other_source_expr)
                     {
                         worklist.push_back(other_idx);
                         worklist_set.insert(other_idx);
@@ -967,15 +962,18 @@ impl ScanProjectUseCase {
 
         // Check sinks for tainted data
         for sink in &sinks {
-            if sink.category == "ssrf" && ssrf_sanitized {
+            if (sink.category == "ssrf" || sink.category == "ssti") && ssrf_sanitized {
                 debug!(
                     sink = %sink.pattern_name,
-                    "Skipping SSRF sink due to explicit SSRF sanitizer presence"
+                    category = %sink.category,
+                    "Skipping sink due to explicit sanitizer presence"
                 );
                 continue;
             }
-            if matches!(sink.category.as_str(), "ssrf" | "path_traversal")
-                && Self::mentions_sanitized_var(&sanitized_vars, &sink.matched_text)
+            if matches!(
+                sink.category.as_str(),
+                "ssrf" | "path_traversal" | "ssti" | "sql_injection"
+            ) && Self::mentions_sanitized_var(&sanitized_vars, &sink.matched_text)
             {
                 debug!(
                     sink = %sink.pattern_name,
@@ -998,7 +996,7 @@ impl ScanProjectUseCase {
                     sink.line as u32 + 1,
                     sink.column as u32,
                 ) {
-                    Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                    Self::add_finding(findings, &data_flow_finding, sink, &file_str, language);
                     continue; // Found a match, move to next sink
                 }
             }
@@ -1034,7 +1032,7 @@ impl ScanProjectUseCase {
                         sink.line as u32 + 1,
                         sink.column as u32,
                     ) {
-                        Self::add_finding(findings, &data_flow_finding, sink, &file_str);
+                        Self::add_finding(findings, &data_flow_finding, sink, &file_str, language);
                         // Don't break here, there might be multiple taints in one sink
                     }
                 }
@@ -1047,7 +1045,9 @@ impl ScanProjectUseCase {
         data_flow_finding: &DataFlowFinding,
         sink: &TaintMatch,
         file_str: &str,
+        language: &Language,
     ) {
+        let language_tag = language.to_string().to_lowercase();
         let severity = Self::data_flow_severity_for_category(&sink.category);
         // Build the finding with data flow path
         let source_node = DataFlowNode {
@@ -1101,9 +1101,10 @@ impl ScanProjectUseCase {
             })
             .collect();
 
+        let category_display = sink.category.replace('_', " ");
         let finding = SastFinding {
             id: uuid::Uuid::new_v4().to_string(),
-            rule_id: format!("data-flow-{}", sink.category),
+            rule_id: format!("data-flow-{}-{}", language_tag, sink.category),
             location: Location {
                 file_path: file_str.to_string(),
                 line: sink.line as u32 + 1,
@@ -1115,7 +1116,7 @@ impl ScanProjectUseCase {
             confidence: crate::domain::value_objects::Confidence::High,
             description: format!(
                 "Tainted data from {} flows to {}: {}",
-                data_flow_finding.source.expression, sink.category, sink.pattern_name
+                data_flow_finding.source.expression, category_display, sink.pattern_name
             ),
             recommendation: Some(format!(
                 "Sanitize or validate the data before passing to {}. \

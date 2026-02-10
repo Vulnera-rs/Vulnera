@@ -499,25 +499,3 @@ value = '''
   (#eq? @fn "realpath")
 ) @call
 '''
-
-[[rules]]
-id = "c-uninitialized-var"
-name = "Potentially Uninitialized Variable"
-description = "Stack variables without initialization contain garbage values"
-severity = "Low"
-languages = ["C", "Cpp"]
-cwe_ids = ["CWE-457"]
-owasp_categories = []
-tags = ["memory", "uninitialized", "c"]
-message = "Initialize variables at declaration to prevent use of garbage values."
-
-[rules.pattern]
-type = "TreeSitterQuery"
-value = '''
-(declaration
-  declarator: (init_declarator
-    declarator: (identifier) @var
-  )
-) @decl
-(#not-match? @decl "=")
-'''

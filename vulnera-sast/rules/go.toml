@@ -114,74 +114,6 @@ value = '''
 ) @call
 '''
 
-[[rules]]
-id = "go-ssrf"
-name = "Server-Side Request Forgery"
-description = "Potential SSRF using net/http or other HTTP clients"
-severity = "High"
-languages = ["Go"]
-cwe_ids = ["CWE-918"]
-owasp_categories = ["A10:2021 - Server-Side Request Forgery"]
-tags = ["ssrf", "network", "go"]
-message = "Validate and sanitize user-controlled URLs before making HTTP requests. Use allowlists for permitted domains."
-
-[rules.pattern]
-type = "TreeSitterQuery"
-value = '''
-[
-  ; Direct http.Get/Post with any argument (identifier, selector expression, call result)
-  (call_expression
-    function: (selector_expression
-      operand: (identifier) @pkg
-      field: (field_identifier) @fn
-    )
-    arguments: (argument_list
-      [
-        (identifier)
-        (selector_expression)
-        (call_expression)
-        (index_expression)
-      ] @url
-    )
-    (#eq? @pkg "http")
-    (#match? @fn "^(Get|Post|Head|PostForm|Do)$")
-  ) @call
-  
-  ; http.NewRequest with any arguments
-  (call_expression
-    function: (selector_expression
-      operand: (identifier) @pkg
-      field: (field_identifier) @fn
-    )
-    arguments: (argument_list
-      [
-        (identifier)
-        (selector_expression)
-        (call_expression)
-        (index_expression)
-      ] @url
-    )
-    (#eq? @pkg "http")
-    (#eq? @fn "NewRequest")
-  ) @call
-  
-  ; Client methods like client.Get, client.Post
-  (call_expression
-    function: (selector_expression
-      field: (field_identifier) @fn
-    )
-    arguments: (argument_list
-      [
-        (identifier)
-        (selector_expression)
-        (call_expression)
-        (index_expression)
-      ] @url
-    )
-    (#match? @fn "^(Get|Post|Do|Head|PostForm)$")
-  ) @call
-]
-'''
 
 [[rules]]
 id = "go-insecure-rand"
@@ -295,20 +227,18 @@ type = "TreeSitterQuery"
 value = '''
 [
   (for_statement
-    body: (block
-      (_)*
-      (defer_statement) @defer
-      (_)*
-    )
-  ) @loop
+    body: (block (defer_statement) @defer)
+  )
   (for_range_statement
-    body: (block
-      (_)*
-      (defer_statement) @defer
-      (_)*
-    )
-  ) @loop
-]
+    body: (block (defer_statement) @defer)
+  )
+  (for_statement
+    body: (block (_ (defer_statement) @defer))
+  )
+  (for_range_statement
+    body: (block (_ (defer_statement) @defer))
+  )
+] @loop
 '''
 
 [[rules]]
@@ -392,19 +322,18 @@ message = "Never set InsecureSkipVerify: true in production. Use proper certific
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-[
-  (keyed_element
+(keyed_element
+  field: [
     (field_identifier) @field
-    (true)
-    (#eq? @field "InsecureSkipVerify")
-  )
-  (keyed_element
-    (field_identifier) @field
-    (identifier) @value
-    (#eq? @field "InsecureSkipVerify")
-    (#eq? @value "true")
-  )
-] @config
+    (identifier) @field
+  ]
+  value: [
+    (identifier) @val
+    (true) @val
+  ]
+  (#eq? @field "InsecureSkipVerify")
+  (#match? @val "^(true|1)$")
+) @config
 '''
 
 [[rules]]
@@ -474,24 +403,11 @@ value = '''
   (function_declaration
     name: (identifier) @fn_name
     body: (block
-      [
-        (return_statement
-          (binary_expression
-            left: (identifier) @left
-            operator: "=="
-            right: (identifier) @right
-          )
-        )
-        (expression_statement
-          (binary_expression
-            left: (identifier) @left
-            operator: "=="
-            right: (identifier) @right
-          )
-        )
-      ]
+      (binary_expression
+        operator: "=="
+      ) @cmp
     )
-    (#match? @fn_name "(?i)(token|secret|key|password|signature|auth|verify)")
+    (#match? @fn_name "(?i)(token|secret|key|password|signature|auth|verify|check|equal)")
   ) @call
 ]
 '''

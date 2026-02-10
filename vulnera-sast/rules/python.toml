@@ -163,8 +163,10 @@ value = '''
     object: (identifier) @mod
     attribute: (identifier) @fn
   )
+  arguments: (argument_list) @args
   (#eq? @mod "yaml")
   (#match? @fn "^(load|unsafe_load|full_load)$")
+  (#not-match? @args "SafeLoader")
 ) @call
 '''
 
