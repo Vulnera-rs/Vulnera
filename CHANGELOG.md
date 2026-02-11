@@ -3,6 +3,111 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.5.0] - 2026-02-11
+
+### Added
+
+- **SAST Engine Maturation (V4 Refactor):**
+  - Migrated security rules from hand-coded Rust modules to declarative TOML format (embedded via `include_str!`).
+  - Implemented unified `SastEngine` with consolidated parsing, pattern querying, and taint detection under a single async-friendly locking strategy (tokio::RwLock).
+  - Added `SymbolTable` infrastructure for lexical scope-aware variable tracking, shadowing detection, and reassignment analysis.
+  - Implemented interprocedural taint analysis with `FunctionTaintSummary`, `InterProceduralContext`, and cross-function data-flow propagation.
+  - Integrated taint patterns into separate TOML files (vulnera-sast/taint-patterns/\*.toml) for maintainability.
+  - Added `RulePackConfig` and Git-based rule pack loading via `RulePackLoader` and `CompositeRuleLoader`.
+  - Introduced `SemanticRuleOptions` for type-aware rule constraints with lightweight `SemanticContext` inference.
+  - Expanded Tree-sitter language support and improved query predicate evaluation (regex, text matching).
+  - Added data-driven CVE fixtures and `datatest` harness for rule accuracy validation with CI gate assertions.
+  - Implemented regex compilation caching and metavariable bindings extraction for improved performance.
+  - Organized domain entities into focused modules (finding, pattern_types, rule, suppression, taint_types, call_graph).
+  - Added comprehensive symbol table tests covering scope management, variable resolution, taint tracking, and shadowing.
+
+- **JobWorkflow & Orchestration Enhancements:**
+  - Formalized `JobStatus` state machine with transitions (`Pending` → `Queued` → `Running` → `Completed`/`Failed`/`Cancelled`).
+  - Centralized job lifecycle management via `JobWorkflow` application service with transition validation and audit trails (`JobTransition`).
+  - Introduced `IJobQueue` domain service trait for decoupled job orchestration.
+  - Enhanced telemetry with cache hit tracking in orchestrator controllers.
+
+- **LLM Code Fix Endpoint:**
+  - Added automated code fix generation with language detection and contextual awareness.
+  - Enhanced binary analysis with MIME type detection and file signature verification.
+  - Integrated dynamic resilience wrapping in LLM provider registry.
+
+- **Enterprise Licensing & Module Tiering:**
+  - Introduced `ModuleTier` (Community/Enterprise) support for open-source vs. commercial feature gating.
+  - Implemented `EnterpriseConfig` and entitlement-based module selection in `RuleBasedModuleSelector`.
+
+- **Database Baseline Migration:**
+  - Consolidated incremental migrations into a single `migrations/20260209000001_baseline.sql` file.
+  - Baseline creates core schema, indexes, triggers, views, and default subscription limits.
+
+### Changed
+
+- **SAST Module Structure:** Reorganized domain surface into focused modules (domain/finding, domain/pattern_types, domain/rule, etc.). Updated internal imports to use explicit paths.
+- **SAST Cache:** Replaced `std::sync::RwLock` with `tokio::sync::RwLock` in `InMemoryAstCache` for async-safe locking.
+- **Rule Repository:** Removed PostgreSQL-backed SAST rule storage; now uses file/default loaders and in-memory/Dragonfly caches.
+- **SAST Composition:** Updated composition root to no longer pass `PgPool` into `AnalysisModules::init`; decoupled database from SAST module.
+- **Severity Default:** Derived `Default` for `Severity` with `Medium` as the default variant.
+- **License:** Changed from AGPL-3.0-or-later to Proprietary in Cargo.toml.
+- **MSRV:** Set Clippy MSRV to 1.85.0; increased too-many-arguments threshold to 8.
+
+### Fixed
+
+- **SAST Lock Ordering:** Documented and enforced lock ordering in `SastEngine` to prevent deadlocks and nested-lock issues.
+- **Cache Management:** Fixed borrow checker issues in orchestrator controllers during analytics aggregation; standardized snapshot persistence.
+- **Taint Analysis Precision:** Improved variable extraction in taint engine; prefer named captures over first capture text.
+- **Symbol Table Package Extraction:** Fixed package extraction using `split('/').next_back()` for reliable last path segment resolution.
+- **Rule Matching:** Tightened SAST rules across languages (Go HTTP client methods, Python YAML safe_load exclusion, Rust unsafe detection).
+
+### Removed
+
+- **Legacy Modules:** Removed per-language Rust rule modules and duplicated rule builders; deleted obsolete docs/assets.
+- **SAST Exports:** Removed legacy `RuleEngine` wrapper; removed top-level domain re-exports (consumers must import from concrete modules).
+- **Database:** Removed older incremental migrations; new deployments must use the baseline migration.
+- **License File:** Removed AGPL LICENSE file.
+- **Obsolete Rules & Fixtures:** Removed noisy SAST rules (go-ssrf, c-uninitialized-var) and corresponding CVE fixtures to reduce false positives.
+
+### Breaking Changes
+
+- **SAST Imports:**
+  - `vulnera_sast::domain::entities::<Type>` paths were removed. Update to `vulnera_sast::domain::<Type>` or specific submodules.
+  - `crate::domain::Rule` → `crate::domain::pattern_types::PatternRule`
+  - `crate::domain::Pattern` → `crate::domain::pattern_types::Pattern`
+  - `crate::domain::FileSuppressions` → `crate::domain::suppression::FileSuppressions`
+  - `crate::domain::{Finding, Severity, Location}` → `crate::domain::finding::{Finding, Severity, Location}`
+
+- **SAST Constructor:** Removed direct `SastModule::with_use_case` constructor. Migrate to `SastModule::builder().use_case(<Arc<ScanProjectUseCase>>)`.
+
+- **Database Migration:** Older incremental migrations and the DB-backed SAST rule storage were removed. Existing databases created from the previous migration history are **not compatible** with this baseline. Initialize empty DBs with `sqlx migrate run` using the new baseline migration.
+
+- **License Change:** License changed from AGPL-3.0-or-later to Proprietary. Review licensing and compliance with legal counsel before using or redistributing this codebase.
+
+- **CLI Separation:** `vulnera-cli` is now a separate workspace and repository. CLI commands and integration points differ from the main server binary.
+
+### Migration Guide
+
+1. **SAST Rule Consumption:** If you depend on `vulnera-sast` as a library:
+   - Update all imports to use `vulnera_sast::domain::<Type>` instead of `domain::entities::<Type>`.
+   - If you used `Rule` directly, migrate to `PatternRule`.
+   - Use `SastModule::builder()` for construction instead of `with_use_case()`.
+
+2. **Database Setup:** If migrating from 0.4.x:
+   - Backup your existing database.
+   - Drop and recreate the database, then run `sqlx migrate run` against the new baseline.
+
+3. **Enterprise Features:** If leveraging enterprise licensing:
+   - not complete yet
+
+### Dependencies Added
+
+- `moka` (0.12, with "future" feature) for lock-free query caching in SAST engine.
+- `git2` (0.20.3) for Git-based rule pack loading.
+- `datatest-stable` (0.3.3) for CVE fixture harness and data-driven tests.
+- `walkdir` (2.5) for filesystem traversal in rule and taint loading.
+
+### Contributors
+
+Special thanks to the authors of the book "Principles of Program Analysis" because it helped alot in the process of the SAST V4 maturation.
+
 ## [0.4.1] - 2026-02-08
 
 ### Added
