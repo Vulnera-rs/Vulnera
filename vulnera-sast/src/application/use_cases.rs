@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use streaming_iterator::StreamingIterator;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, instrument, warn};
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
 
+use crate::domain::call_graph::ParameterInfo;
 use crate::domain::finding::{
     DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding, Location, Severity,
 };
@@ -24,8 +26,9 @@ use crate::domain::suppression::FileSuppressions;
 use crate::domain::value_objects::Language;
 use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
-use crate::infrastructure::data_flow::{InterProceduralContext, TaintMatch};
+use crate::infrastructure::data_flow::{DataFlowAnalyzer, InterProceduralContext, TaintMatch};
 use crate::infrastructure::incremental::IncrementalTracker;
+use crate::infrastructure::parsers::convert_tree_sitter_node;
 use crate::infrastructure::regex_cache;
 use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
@@ -205,6 +208,29 @@ struct AstCacheStats {
     l2_misses: u64,
 }
 
+#[derive(Debug, Clone)]
+struct LineRange {
+    start_line: u32,
+    end_line: u32,
+}
+
+#[derive(Debug, Clone)]
+struct FunctionRange {
+    id: String,
+    start_line: u32,
+    end_line: u32,
+    parameters: Vec<ParameterInfo>,
+}
+
+#[derive(Debug, Clone)]
+struct CallAssignment {
+    target: String,
+    callee: String,
+    args: Vec<String>,
+    line: usize,
+    column: usize,
+}
+
 /// Production-ready use case for scanning a project
 pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
@@ -212,6 +238,8 @@ pub struct ScanProjectUseCase {
     sast_engine: SastEngineHandle,
     /// AST cache for parsed file caching (Dragonfly-backed)
     ast_cache: Option<Arc<dyn AstCacheService>>,
+    /// Taint configuration (built-in + custom)
+    taint_config: TaintConfig,
     /// Inter-procedural data flow context
     data_flow_context: Arc<RwLock<InterProceduralContext>>,
     /// Call graph builder
@@ -248,11 +276,14 @@ impl ScanProjectUseCase {
                 })
             });
 
+        let taint_config = Self::load_taint_config(sast_config);
+
         Self {
             scanner,
             rule_repository: Arc::new(RwLock::new(rule_repository)),
             sast_engine: Arc::new(SastEngine::new()),
             ast_cache: None,
+            taint_config,
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
             incremental_tracker: Mutex::new(incremental_tracker),
@@ -279,6 +310,24 @@ impl ScanProjectUseCase {
 
     fn compute_content_hash(content: &str) -> String {
         IncrementalTracker::hash_content(content)
+    }
+
+    fn load_taint_config(sast_config: &SastConfig) -> TaintConfig {
+        let mut config = TaintConfig::default();
+
+        if let Some(ref path) = sast_config.taint_config_path {
+            match TaintConfig::from_file(path) {
+                Ok(file_config) => {
+                    config.merge(file_config);
+                    info!(path = %path.display(), "Loaded custom taint configuration");
+                }
+                Err(e) => {
+                    warn!(path = %path.display(), error = %e, "Failed to load taint configuration");
+                }
+            }
+        }
+
+        config
     }
 
     fn resolve_analysis_depth(&self, file_count: usize, total_bytes: u64) -> AnalysisDepth {
@@ -338,6 +387,8 @@ impl ScanProjectUseCase {
         let mut files_failed = 0;
         let mut errors: Vec<String> = Vec::new();
         let mut ast_cache_stats = AstCacheStats::default();
+        let ast_cache_ttl =
+            Duration::from_secs(self.config.ast_cache_ttl_hours.saturating_mul(3600));
 
         let rules = self.rule_repository.read().await;
         let all_rules = rules.get_all_rules();
@@ -363,6 +414,19 @@ impl ScanProjectUseCase {
                         Ok(tree) => tree,
                         Err(_) => continue,
                     };
+
+                    if self.config.enable_ast_cache {
+                        if let Some(cache) = self.ast_cache.as_ref() {
+                            let content_hash = Self::compute_content_hash(&content);
+                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                            if let Err(e) = cache
+                                .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
+                                .await
+                            {
+                                warn!(error = %e, "Failed to write L2 AST cache");
+                            }
+                        }
+                    }
 
                     // Build call graph nodes and edges
                     call_graph.analyze_ast(&file_path_str, &tree, &file.language, &content);
@@ -475,6 +539,7 @@ impl ScanProjectUseCase {
             let mut cached_tree = parsed_files
                 .get(&file_path_str)
                 .map(|(tree, _)| tree.clone());
+            let mut l2_hit = false;
 
             if cached_tree.is_some() {
                 ast_cache_stats.l1_hits = ast_cache_stats.l1_hits.saturating_add(1);
@@ -485,7 +550,10 @@ impl ScanProjectUseCase {
             if cached_tree.is_none() {
                 if let Some(cache) = self.ast_cache.as_ref() {
                     match cache.get(&content_hash, &file.language).await {
-                        Ok(Some(_)) => Self::update_l2_cache_stats(&mut ast_cache_stats, true),
+                        Ok(Some(_)) => {
+                            l2_hit = true;
+                            Self::update_l2_cache_stats(&mut ast_cache_stats, true)
+                        }
                         Ok(None) => Self::update_l2_cache_stats(&mut ast_cache_stats, false),
                         Err(e) => {
                             warn!(error = %e, "Failed to read L2 AST cache");
@@ -495,6 +563,17 @@ impl ScanProjectUseCase {
 
                 let query_engine = &self.sast_engine;
                 if let Ok(tree) = query_engine.parse(&content, file.language).await {
+                    if self.config.enable_ast_cache && !l2_hit {
+                        if let Some(cache) = self.ast_cache.as_ref() {
+                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                            if let Err(e) = cache
+                                .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
+                                .await
+                            {
+                                warn!(error = %e, "Failed to write L2 AST cache");
+                            }
+                        }
+                    }
                     cached_tree = Some(tree);
                 }
             }
@@ -543,6 +622,7 @@ impl ScanProjectUseCase {
                     &file.language,
                     &content,
                     cached_tree.as_ref(),
+                    effective_depth,
                     &mut all_findings,
                 )
                 .await;
@@ -727,6 +807,7 @@ impl ScanProjectUseCase {
         language: &Language,
         content: &str,
         tree: Option<&tree_sitter::Tree>,
+        effective_depth: AnalysisDepth,
         findings: &mut Vec<SastFinding>,
     ) {
         // Skip if data flow is disabled
@@ -755,57 +836,49 @@ impl ScanProjectUseCase {
 
         let source_bytes = content.as_bytes();
         let file_str = file_path.display().to_string();
+        let taint_config = &self.taint_config;
+        let enable_interproc =
+            self.config.enable_call_graph && effective_depth == AnalysisDepth::Deep;
 
         // Detect sources, sinks, and sanitizers using tree-sitter queries
-        let (sources, sinks, sanitizers, sanitizer_confidence, assignments) = {
-            let matches = self
-                .sast_engine
-                .detect_taint(&tree, source_bytes, *language, &TaintConfig::default())
-                .await;
+        let matches = self
+            .sast_engine
+            .detect_taint(&tree, source_bytes, *language, taint_config)
+            .await;
 
-            let sanitizer_names: std::collections::HashSet<String> =
-                get_sanitizer_queries(language, &TaintConfig::default())
-                    .into_iter()
-                    .map(|p| p.name)
-                    .collect();
-
-            // Split matches into sources, sinks, and sanitizers based on their properties
-            let sources: Vec<_> = matches
-                .iter()
-                .filter(|m| !m.labels.is_empty())
-                .cloned()
-                .collect();
-            let sanitizers: Vec<_> = matches
-                .iter()
-                .filter(|m| sanitizer_names.contains(&m.pattern_name))
-                .cloned()
-                .collect();
-            let sinks: Vec<_> = matches
-                .iter()
-                .filter(|m| m.labels.is_empty() && !sanitizer_names.contains(&m.pattern_name))
-                .cloned()
+        let sanitizer_names: std::collections::HashSet<String> =
+            get_sanitizer_queries(language, taint_config)
+                .into_iter()
+                .map(|p| p.name)
                 .collect();
 
-            let assignments = Self::extract_assignments(&tree, source_bytes, language);
-
-            // Collect confidence values for sanitizers
-            let sanitizer_confidence: Vec<Option<f32>> = sanitizers
-                .iter()
-                .map(|s| if s.is_known { None } else { Some(0.5) })
-                .collect();
-
-            (
-                sources,
-                sinks,
-                sanitizers,
-                sanitizer_confidence,
-                assignments,
-            )
-        };
-
-        let ssrf_sanitized = sanitizers
+        let sources: Vec<_> = matches
             .iter()
-            .any(|s| matches!(s.category.as_str(), "ssrf" | "url" | "path" | "ssti"));
+            .filter(|m| !m.labels.is_empty())
+            .cloned()
+            .collect();
+        let sanitizers: Vec<_> = matches
+            .iter()
+            .filter(|m| sanitizer_names.contains(&m.pattern_name))
+            .cloned()
+            .collect();
+        let sinks: Vec<_> = matches
+            .iter()
+            .filter(|m| m.labels.is_empty() && !sanitizer_names.contains(&m.pattern_name))
+            .cloned()
+            .collect();
+
+        let assignments = Self::extract_assignments(&tree, source_bytes, language);
+        let call_assignments = if enable_interproc {
+            Self::extract_call_assignments(&tree, source_bytes, language)
+        } else {
+            Vec::new()
+        };
+        let return_expressions = if enable_interproc {
+            Self::extract_return_expressions(&tree, source_bytes, language)
+        } else {
+            Vec::new()
+        };
 
         debug!(
             file = %file_str,
@@ -815,14 +888,247 @@ impl ScanProjectUseCase {
             "Taint analysis results"
         );
 
-        // Setup data flow context
+        if enable_interproc {
+            let function_ranges: Vec<FunctionRange> = {
+                let call_graph = self.call_graph_builder.read().await;
+                call_graph
+                    .graph()
+                    .functions()
+                    .filter(|f| f.file_path == file_str)
+                    .map(|f| FunctionRange {
+                        id: f.id.clone(),
+                        start_line: f.start_line,
+                        end_line: f.end_line,
+                        parameters: f.signature.parameters.clone(),
+                    })
+                    .collect()
+            };
+
+            if !function_ranges.is_empty() {
+                let mut range_map: HashMap<String, FunctionRange> = HashMap::new();
+                let mut exclusion_ranges = Vec::new();
+                for range in function_ranges {
+                    exclusion_ranges.push(LineRange {
+                        start_line: range.start_line,
+                        end_line: range.end_line,
+                    });
+                    range_map.insert(range.id.clone(), range);
+                }
+
+                let topo_order = {
+                    let ctx = self.data_flow_context.read().await;
+                    ctx.topo_order().to_vec()
+                };
+
+                let mut ctx = self.data_flow_context.write().await;
+                for function_id in topo_order {
+                    let Some(range) = range_map.get(&function_id) else {
+                        continue;
+                    };
+
+                    let line_range = LineRange {
+                        start_line: range.start_line,
+                        end_line: range.end_line,
+                    };
+
+                    let scoped_sources =
+                        Self::filter_matches_by_range(&sources, Some(&line_range), None);
+                    let scoped_sanitizers =
+                        Self::filter_matches_by_range(&sanitizers, Some(&line_range), None);
+                    let scoped_sinks =
+                        Self::filter_matches_by_range(&sinks, Some(&line_range), None);
+                    let scoped_assignments =
+                        Self::filter_assignments_by_range(&assignments, Some(&line_range), None);
+                    let scoped_calls = Self::filter_call_assignments_by_range(
+                        &call_assignments,
+                        Some(&line_range),
+                        None,
+                    );
+                    let scoped_returns = Self::filter_return_expressions_by_range(
+                        &return_expressions,
+                        Some(&line_range),
+                        None,
+                    );
+
+                    ctx.enter_function(&function_id);
+
+                    let call_edges = ctx.get_call_edges(&function_id).to_vec();
+                    let mut param_states: Vec<(usize, crate::domain::finding::TaintState)> =
+                        Vec::new();
+                    let mut call_updates: Vec<(
+                        String,
+                        u32,
+                        u32,
+                        String,
+                        Vec<Option<crate::domain::finding::TaintState>>,
+                    )> = Vec::new();
+                    let mut return_state: Option<crate::domain::finding::TaintState> = None;
+
+                    {
+                        let analyzer = ctx.get_analyzer(&function_id);
+                        *analyzer = DataFlowAnalyzer::new();
+                        analyzer.build_symbols(&tree, content, *language, &file_str);
+
+                        for (idx, param) in range.parameters.iter().enumerate() {
+                            let param_name = if param.name.is_empty() {
+                                format!("param_{}", idx)
+                            } else {
+                                param.name.clone()
+                            };
+                            analyzer.mark_tainted(
+                                &param_name,
+                                &format!("param:{}", idx),
+                                &file_str,
+                                range.start_line,
+                                0,
+                            );
+
+                            if let Some(state) = analyzer.get_taint_state(&param_name).cloned() {
+                                param_states.push((idx, state));
+                            }
+                        }
+
+                        Self::analyze_scope(
+                            analyzer,
+                            &scoped_sources,
+                            &scoped_sinks,
+                            &scoped_sanitizers,
+                            &scoped_assignments,
+                            findings,
+                            &file_str,
+                            language,
+                            taint_config.generic_validation_confidence,
+                        );
+
+                        for call in scoped_calls {
+                            let target_id = call_edges
+                                .iter()
+                                .find(|edge| {
+                                    edge.line == call.line as u32 + 1
+                                        && edge.target_name == call.callee
+                                })
+                                .map(|edge| edge.target_id.clone());
+
+                            if let Some(target_id) = target_id {
+                                let argument_taints: Vec<
+                                    Option<crate::domain::finding::TaintState>,
+                                > = call
+                                    .args
+                                    .iter()
+                                    .map(|arg| Self::resolve_taint_for_expr(analyzer, arg))
+                                    .collect();
+                                call_updates.push((
+                                    call.target.clone(),
+                                    call.line as u32 + 1,
+                                    call.column as u32,
+                                    target_id,
+                                    argument_taints,
+                                ));
+                            }
+                        }
+
+                        for (expr, line, _column) in scoped_returns {
+                            if let Some(state) = Self::resolve_taint_for_expr(analyzer, &expr) {
+                                return_state = Some(state);
+                                debug!(
+                                    function_id = %function_id,
+                                    line = line + 1,
+                                    "Return value marked as tainted"
+                                );
+                                break;
+                            }
+                        }
+                    }
+
+                    for (idx, state) in param_states {
+                        ctx.mark_param_tainted(&function_id, idx, state);
+                    }
+
+                    for (target, line, column, target_id, argument_taints) in call_updates {
+                        if let Some(state) = ctx.propagate_through_call(
+                            &target_id,
+                            &argument_taints,
+                            &file_str,
+                            line,
+                            column,
+                        ) {
+                            let analyzer = ctx.get_analyzer(&function_id);
+                            analyzer.set_taint_state(&target, state, &file_str, line, column);
+                        }
+                    }
+
+                    if let Some(state) = return_state {
+                        ctx.mark_return_tainted(&function_id, state);
+                    }
+
+                    ctx.compute_function_summary(&function_id);
+                }
+
+                // Analyze global scope (outside of functions)
+                let global_sources =
+                    Self::filter_matches_by_range(&sources, None, Some(&exclusion_ranges));
+                let global_sanitizers =
+                    Self::filter_matches_by_range(&sanitizers, None, Some(&exclusion_ranges));
+                let global_sinks =
+                    Self::filter_matches_by_range(&sinks, None, Some(&exclusion_ranges));
+                let global_assignments =
+                    Self::filter_assignments_by_range(&assignments, None, Some(&exclusion_ranges));
+
+                if !global_sources.is_empty()
+                    || !global_sanitizers.is_empty()
+                    || !global_sinks.is_empty()
+                {
+                    let mut analyzer = DataFlowAnalyzer::new();
+                    analyzer.build_symbols(&tree, content, *language, &file_str);
+                    Self::analyze_scope(
+                        &mut analyzer,
+                        &global_sources,
+                        &global_sinks,
+                        &global_sanitizers,
+                        &global_assignments,
+                        findings,
+                        &file_str,
+                        language,
+                        taint_config.generic_validation_confidence,
+                    );
+                }
+
+                return;
+            }
+        }
+
+        // Non-interprocedural or no function ranges: analyze file as a single scope
         let mut ctx = self.data_flow_context.write().await;
         ctx.enter_function(&file_str);
         let analyzer = ctx.get_analyzer(&file_str);
+        *analyzer = DataFlowAnalyzer::new();
         analyzer.build_symbols(&tree, content, *language, &file_str);
+        Self::analyze_scope(
+            analyzer,
+            &sources,
+            &sinks,
+            &sanitizers,
+            &assignments,
+            findings,
+            &file_str,
+            language,
+            taint_config.generic_validation_confidence,
+        );
+    }
 
-        // Mark all detected sources as tainted
-        for source in &sources {
+    #[allow(clippy::too_many_arguments)]
+    fn analyze_scope(
+        analyzer: &mut DataFlowAnalyzer,
+        sources: &[TaintMatch],
+        sinks: &[TaintMatch],
+        sanitizers: &[TaintMatch],
+        assignments: &[(String, String, usize, usize)],
+        findings: &mut Vec<SastFinding>,
+        file_str: &str,
+        language: &Language,
+        generic_confidence: f32,
+    ) {
+        for source in sources {
             let var_name = source
                 .variable_name
                 .as_deref()
@@ -831,8 +1137,8 @@ impl ScanProjectUseCase {
             analyzer.mark_tainted(
                 var_name,
                 &source.pattern_name,
-                &file_str,
-                source.line as u32 + 1, // Convert to 1-indexed
+                file_str,
+                source.line as u32 + 1,
                 source.column as u32,
             );
 
@@ -845,8 +1151,6 @@ impl ScanProjectUseCase {
             );
         }
 
-        // Propagate taint through assignments using work-list convergence
-        // Create a set of sanitized variables to block propagation
         let sanitized_vars: std::collections::HashSet<&str> = sanitizers
             .iter()
             .filter_map(|s| s.variable_name.as_deref().or(Some(&s.matched_text)))
@@ -857,7 +1161,6 @@ impl ScanProjectUseCase {
             "Sanitized variables blocking taint propagation"
         );
 
-        // Build a worklist: initially all assignments where the source might be tainted
         let mut worklist: std::collections::VecDeque<usize> = (0..assignments.len()).collect();
         let mut worklist_set: std::collections::HashSet<usize> = (0..assignments.len()).collect();
 
@@ -866,12 +1169,10 @@ impl ScanProjectUseCase {
 
             let (target, source_expr, line, column) = &assignments[idx];
 
-            // Skip if target is already tainted
             if analyzer.is_tainted(target) {
                 continue;
             }
 
-            // Skip if target is a sanitized variable (prevent re-tainting)
             if sanitized_vars.contains(target.as_str()) {
                 continue;
             }
@@ -895,7 +1196,7 @@ impl ScanProjectUseCase {
                     analyzer.mark_tainted(
                         target,
                         &format!("propagated from {}", tainted_var),
-                        &file_str,
+                        file_str,
                         *line as u32 + 1,
                         *column as u32,
                     );
@@ -904,8 +1205,6 @@ impl ScanProjectUseCase {
                 }
             }
 
-            // If we tainted a new variable, re-enqueue all assignments that
-            // reference it as a source — they may now propagate taint further
             if newly_tainted {
                 let pattern = format!(r"\b{}\b", regex::escape(target));
                 let re = regex_cache::get_regex(&pattern)
@@ -924,19 +1223,17 @@ impl ScanProjectUseCase {
             }
         }
 
-        // Apply sanitizers - either clear taint or reduce confidence
-        for (idx, sanitizer) in sanitizers.iter().enumerate() {
+        for sanitizer in sanitizers {
             let var_name = sanitizer
                 .variable_name
                 .as_deref()
                 .unwrap_or(&sanitizer.matched_text);
 
             if sanitizer.is_known {
-                // Known sanitizer - clear taint completely
                 analyzer.sanitize(
                     var_name,
                     &sanitizer.pattern_name,
-                    &file_str,
+                    file_str,
                     sanitizer.line as u32 + 1,
                     sanitizer.column as u32,
                 );
@@ -946,24 +1243,20 @@ impl ScanProjectUseCase {
                     "Cleared taint (known sanitizer)"
                 );
             } else {
-                // Generic validation - we still track but note the confidence reduction
-                let confidence = sanitizer_confidence
-                    .get(idx)
-                    .copied()
-                    .flatten()
-                    .unwrap_or(1.0);
                 debug!(
                     var = %var_name,
                     sanitizer = %sanitizer.pattern_name,
-                    confidence = confidence,
+                    confidence = generic_confidence,
                     "Generic validation detected (confidence reduced)"
                 );
-                // Note: For full implementation, we'd store reduced confidence in TaintState
             }
         }
 
-        // Check sinks for tainted data
-        for sink in &sinks {
+        let ssrf_sanitized = sanitizers
+            .iter()
+            .any(|s| matches!(s.category.as_str(), "ssrf" | "url" | "path" | "ssti"));
+
+        for sink in sinks {
             if (sink.category == "ssrf" || sink.category == "ssti") && ssrf_sanitized {
                 debug!(
                     sink = %sink.pattern_name,
@@ -985,27 +1278,21 @@ impl ScanProjectUseCase {
                 continue;
             }
 
-            // Try to find a tainted variable in the sink expression
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
-            // Strategy 1: Check if the sink variable itself is tainted (Direct Propagation)
-            // This handles cases like: x = source; y = x; sink(y)
             if analyzer.is_tainted(sink_var) {
                 if let Some(data_flow_finding) = analyzer.check_sink(
                     sink_var,
                     &sink.pattern_name,
-                    &file_str,
+                    file_str,
                     sink.line as u32 + 1,
                     sink.column as u32,
                 ) {
-                    Self::add_finding(findings, &data_flow_finding, sink, &file_str, language);
-                    continue; // Found a match, move to next sink
+                    Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
+                    continue;
                 }
             }
 
-            // Strategy 2: Check if any active tainted variable is part of the sink expression
-            // This handles cases like: sink("prefix" + source)
-            // CRITICAL: Only consider variables that are STILL tainted (not sanitized)
             let active_taints: Vec<String> = analyzer
                 .symbol_table()
                 .get_all_tainted_in_all_scopes()
@@ -1014,13 +1301,10 @@ impl ScanProjectUseCase {
                 .collect();
 
             for tainted_var in &active_taints {
-                // Skip if we already checked this var as sink_var
                 if tainted_var == sink_var {
                     continue;
                 }
 
-                // Use regex to check for whole word match to avoid false positives with short var names
-                // e.g. "r" matching in "u.String()"
                 let pattern = format!(r"\b{}\b", regex::escape(tainted_var));
                 let re = regex_cache::get_regex(&pattern)
                     .or_else(|_| regex_cache::get_regex(tainted_var))
@@ -1030,12 +1314,11 @@ impl ScanProjectUseCase {
                     if let Some(data_flow_finding) = analyzer.check_sink(
                         tainted_var,
                         &sink.pattern_name,
-                        &file_str,
+                        file_str,
                         sink.line as u32 + 1,
                         sink.column as u32,
                     ) {
-                        Self::add_finding(findings, &data_flow_finding, sink, &file_str, language);
-                        // Don't break here, there might be multiple taints in one sink
+                        Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
                     }
                 }
             }
@@ -1257,6 +1540,330 @@ impl ScanProjectUseCase {
         }
 
         assignments
+    }
+
+    fn line_in_range(line_zero: usize, range: &LineRange) -> bool {
+        let line = line_zero as u32 + 1;
+        line >= range.start_line && line <= range.end_line
+    }
+
+    fn line_in_any_range(line_zero: usize, ranges: &[LineRange]) -> bool {
+        ranges
+            .iter()
+            .any(|range| Self::line_in_range(line_zero, range))
+    }
+
+    fn filter_matches_by_range(
+        matches: &[TaintMatch],
+        range: Option<&LineRange>,
+        exclude_ranges: Option<&[LineRange]>,
+    ) -> Vec<TaintMatch> {
+        matches
+            .iter()
+            .filter(|m| {
+                let in_range = range.map_or(true, |r| Self::line_in_range(m.line, r));
+                let excluded = exclude_ranges
+                    .map(|ranges| Self::line_in_any_range(m.line, ranges))
+                    .unwrap_or(false);
+                in_range && !excluded
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn filter_assignments_by_range(
+        assignments: &[(String, String, usize, usize)],
+        range: Option<&LineRange>,
+        exclude_ranges: Option<&[LineRange]>,
+    ) -> Vec<(String, String, usize, usize)> {
+        assignments
+            .iter()
+            .filter(|(_, _, line, _)| {
+                let in_range = range.map_or(true, |r| Self::line_in_range(*line, r));
+                let excluded = exclude_ranges
+                    .map(|ranges| Self::line_in_any_range(*line, ranges))
+                    .unwrap_or(false);
+                in_range && !excluded
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn filter_call_assignments_by_range(
+        assignments: &[CallAssignment],
+        range: Option<&LineRange>,
+        exclude_ranges: Option<&[LineRange]>,
+    ) -> Vec<CallAssignment> {
+        assignments
+            .iter()
+            .filter(|assignment| {
+                let in_range = range.map_or(true, |r| Self::line_in_range(assignment.line, r));
+                let excluded = exclude_ranges
+                    .map(|ranges| Self::line_in_any_range(assignment.line, ranges))
+                    .unwrap_or(false);
+                in_range && !excluded
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn filter_return_expressions_by_range(
+        returns: &[(String, usize, usize)],
+        range: Option<&LineRange>,
+        exclude_ranges: Option<&[LineRange]>,
+    ) -> Vec<(String, usize, usize)> {
+        returns
+            .iter()
+            .filter(|(_, line, _)| {
+                let in_range = range.map_or(true, |r| Self::line_in_range(*line, r));
+                let excluded = exclude_ranges
+                    .map(|ranges| Self::line_in_any_range(*line, ranges))
+                    .unwrap_or(false);
+                in_range && !excluded
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn resolve_taint_for_expr(
+        analyzer: &DataFlowAnalyzer,
+        expr: &str,
+    ) -> Option<crate::domain::finding::TaintState> {
+        if let Some(state) = analyzer.get_taint_state(expr) {
+            return Some(state.clone());
+        }
+
+        let tainted_vars = analyzer.symbol_table().get_all_tainted_in_all_scopes();
+        for (name, state) in tainted_vars {
+            let pattern = format!(r"\b{}\b", regex::escape(name));
+            let re = regex_cache::get_regex(&pattern)
+                .or_else(|_| regex_cache::get_regex(name))
+                .unwrap();
+            if re.is_match(expr) {
+                return Some(state.clone());
+            }
+        }
+
+        None
+    }
+
+    fn extract_call_assignments(
+        tree: &tree_sitter::Tree,
+        source_code: &[u8],
+        language: &Language,
+    ) -> Vec<CallAssignment> {
+        let mut assignments = Vec::new();
+
+        let queries: Vec<&'static str> = match language {
+            Language::Python => vec![
+                r#"(assignment
+                  left: (identifier) @target
+                  right: (call
+                    function: (identifier) @callee
+                    arguments: (argument_list (_) @arg)*)
+                )"#,
+                r#"(assignment
+                  left: (identifier) @target
+                  right: (call
+                    function: (attribute attribute: (identifier) @callee)
+                    arguments: (argument_list (_) @arg)*)
+                )"#,
+            ],
+            Language::JavaScript | Language::TypeScript => vec![
+                r#"(variable_declarator
+                  name: (identifier) @target
+                  value: (call_expression
+                    function: (identifier) @callee
+                    arguments: (arguments (_) @arg)*)
+                )"#,
+                r#"(assignment_expression
+                  left: (identifier) @target
+                  right: (call_expression
+                    function: (identifier) @callee
+                    arguments: (arguments (_) @arg)*)
+                )"#,
+                r#"(variable_declarator
+                  name: (identifier) @target
+                  value: (call_expression
+                    function: (member_expression property: (property_identifier) @callee)
+                    arguments: (arguments (_) @arg)*)
+                )"#,
+            ],
+            Language::Go => vec![
+                r#"(short_var_declaration
+                  left: (expression_list (identifier) @target)
+                  right: (expression_list (call_expression
+                    function: (identifier) @callee
+                    arguments: (argument_list (_) @arg)*))
+                )"#,
+                r#"(assignment_statement
+                  left: (expression_list (identifier) @target)
+                  right: (expression_list (call_expression
+                    function: (identifier) @callee
+                    arguments: (argument_list (_) @arg)*))
+                )"#,
+            ],
+            Language::Rust => vec![
+                r#"(let_declaration
+                  pattern: (identifier) @target
+                  value: (call_expression
+                    function: (identifier) @callee
+                    arguments: (arguments (_) @arg)*)
+                )"#,
+            ],
+            Language::C | Language::Cpp => vec![
+                r#"(init_declarator
+                  declarator: (identifier) @target
+                  value: (call_expression
+                    function: (identifier) @callee
+                    arguments: (argument_list (_) @arg)*)
+                )"#,
+                r#"(assignment_expression
+                  left: (identifier) @target
+                  right: (call_expression
+                    function: (identifier) @callee
+                    arguments: (argument_list (_) @arg)*)
+                )"#,
+            ],
+        };
+
+        let ts_language = match language {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript | Language::TypeScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        };
+
+        for query_str in queries {
+            let query = match tree_sitter::Query::new(&ts_language, query_str) {
+                Ok(q) => q,
+                Err(e) => {
+                    debug!(
+                        language = %language,
+                        error = %e,
+                        "Failed to compile call assignment query"
+                    );
+                    continue;
+                }
+            };
+
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), source_code);
+
+            while let Some(m) = {
+                matches.advance();
+                matches.get()
+            } {
+                let mut target: Option<String> = None;
+                let mut callee: Option<String> = None;
+                let mut args: Vec<String> = Vec::new();
+                let mut line: Option<usize> = None;
+                let mut column: Option<usize> = None;
+
+                for capture in m.captures {
+                    let capture_name = query.capture_names()[capture.index as usize];
+                    let text = capture
+                        .node
+                        .utf8_text(source_code)
+                        .unwrap_or_default()
+                        .to_string();
+
+                    match capture_name {
+                        "target" => {
+                            target = Some(text);
+                            if line.is_none() {
+                                line = Some(capture.node.start_position().row);
+                                column = Some(capture.node.start_position().column);
+                            }
+                        }
+                        "callee" => {
+                            callee = Some(text);
+                            line = Some(capture.node.start_position().row);
+                            column = Some(capture.node.start_position().column);
+                        }
+                        "arg" => {
+                            args.push(text);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let (Some(target), Some(callee)) = (target, callee) {
+                    assignments.push(CallAssignment {
+                        target,
+                        callee,
+                        args,
+                        line: line.unwrap_or(0),
+                        column: column.unwrap_or(0),
+                    });
+                }
+            }
+        }
+
+        assignments
+    }
+
+    fn extract_return_expressions(
+        tree: &tree_sitter::Tree,
+        source_code: &[u8],
+        language: &Language,
+    ) -> Vec<(String, usize, usize)> {
+        let queries: Vec<&'static str> = match language {
+            Language::Rust => vec![r#"(return_expression (_) @expr)"#],
+            _ => vec![r#"(return_statement (_) @expr)"#],
+        };
+
+        let ts_language = match language {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript | Language::TypeScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        };
+
+        let mut returns = Vec::new();
+        for query_str in queries {
+            let query = match tree_sitter::Query::new(&ts_language, query_str) {
+                Ok(q) => q,
+                Err(e) => {
+                    debug!(
+                        language = %language,
+                        error = %e,
+                        "Failed to compile return expression query"
+                    );
+                    continue;
+                }
+            };
+
+            let mut cursor = tree_sitter::QueryCursor::new();
+            let mut matches = cursor.matches(&query, tree.root_node(), source_code);
+
+            while let Some(m) = {
+                matches.advance();
+                matches.get()
+            } {
+                for capture in m.captures {
+                    let capture_name = query.capture_names()[capture.index as usize];
+                    if capture_name == "expr" {
+                        let text = capture
+                            .node
+                            .utf8_text(source_code)
+                            .unwrap_or_default()
+                            .to_string();
+                        returns.push((
+                            text,
+                            capture.node.start_position().row,
+                            capture.node.start_position().column,
+                        ));
+                    }
+                }
+            }
+        }
+
+        returns
     }
 
     fn is_test_file(path: &Path, content: &str) -> bool {

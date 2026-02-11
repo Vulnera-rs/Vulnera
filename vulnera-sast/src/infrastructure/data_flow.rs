@@ -83,6 +83,27 @@ impl DataFlowAnalyzer {
         let _ = self.symbol_table.update_taint_any_scope(var_name, state);
     }
 
+    /// Set a custom taint state for a variable
+    pub fn set_taint_state(
+        &mut self,
+        var_name: &str,
+        mut state: TaintState,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) {
+        state.flow_path.push(FlowStep {
+            kind: FlowStepKind::Propagation,
+            expression: var_name.to_string(),
+            file: file.to_string(),
+            line,
+            column,
+            note: Some("Propagated from function return".to_string()),
+        });
+        self.ensure_symbol(var_name, file, line, column);
+        let _ = self.symbol_table.update_taint_any_scope(var_name, state);
+    }
+
     /// Propagate taint from one expression to another
     pub fn propagate_taint(
         &mut self,
@@ -664,6 +685,12 @@ impl TaintQueryEngine {
         Self::with_config(config)
     }
 
+    /// Update taint configuration and reset pattern cache
+    pub fn set_config(&mut self, config: TaintConfig) {
+        self.config = config;
+        self.pattern_cache.clear();
+    }
+
     /// Detect taint sources in the parsed AST
     pub async fn detect_sources(
         &mut self,
@@ -803,24 +830,8 @@ impl TaintQueryEngine {
                 // Captures is HashMap<String, CaptureInfo>
                 // We check multiple common capture names used in taint patterns
                 let preferred_names = [
-                    "var",
-                    "target",
-                    "name",
-                    "arg",
-                    "url",
-                    "path",
-                    "query",
-                    "value",
-                    "addr",
-                    "req",
-                    "entry",
-                    "file",
-                    "template",
-                    "buffer",
-                    "data",
-                    "sql",
-                    "payload",
-                    "body",
+                    "var", "target", "name", "arg", "url", "path", "query", "value", "addr", "req",
+                    "entry", "file", "template", "buffer", "data", "sql", "payload", "body",
                     "client",
                 ];
 

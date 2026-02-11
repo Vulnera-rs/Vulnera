@@ -26,13 +26,15 @@ use tokio::sync::RwLock;
 use tracing::{debug, instrument, trace};
 use tree_sitter::{Query, QueryPredicateArg, Tree};
 
-use crate::domain::finding::{DataFlowFinding, DataFlowNode, DataFlowPath, Finding, Location, Severity};
+use crate::domain::finding::{
+    DataFlowFinding, DataFlowNode, DataFlowPath, Finding, Location, Severity,
+};
 use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
 use crate::infrastructure::data_flow::{TaintMatch, TaintQueryEngine};
 use crate::infrastructure::parsers::{ParseError, Parser, TreeSitterParser};
 use crate::infrastructure::query_engine::{
-    extract_metavariable_bindings, CaptureInfo, QueryEngineError, QueryMatchResult,
+    CaptureInfo, QueryEngineError, QueryMatchResult, extract_metavariable_bindings,
 };
 use crate::infrastructure::regex_cache;
 use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
@@ -176,85 +178,89 @@ impl SastEngine {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<QueryMatchResult>>> + Send + 'a>> {
         Box::pin(async move {
             match pattern {
-            Pattern::TreeSitterQuery(query_str) => {
-                let query = self.get_or_compile_query(language, query_str).await?;
-                Ok(self.execute_query_with_tree(&query, tree, source))
-            }
-            Pattern::Metavariable(pattern_str) => {
-                use crate::infrastructure::metavar_patterns::{
-                    parse_metavar_pattern, translate_to_tree_sitter,
-                };
-
-                let parsed = parse_metavar_pattern(pattern_str);
-                if let Some(ts_query_str) = translate_to_tree_sitter(&parsed, &language) {
-                    let query = self.get_or_compile_query(language, &ts_query_str).await?;
+                Pattern::TreeSitterQuery(query_str) => {
+                    let query = self.get_or_compile_query(language, query_str).await?;
                     Ok(self.execute_query_with_tree(&query, tree, source))
-                } else {
-                    debug!(pattern = pattern_str, "Metavariable pattern not supported");
-                    Ok(Vec::new())
                 }
-            }
-            Pattern::AnyOf(patterns) => {
-                let mut all_matches = Vec::new();
-                for sub_pattern in patterns {
-                    let matches = self.match_pattern(sub_pattern, source, language, tree).await?;
-                    all_matches.extend(matches);
-                }
-                all_matches.sort_by_key(|m| (m.start_position, m.end_position));
-                all_matches.dedup_by(|a, b| {
-                    a.start_position == b.start_position && a.end_position == b.end_position
-                });
-                Ok(all_matches)
-            }
-            Pattern::AllOf(patterns) => {
-                if patterns.is_empty() {
-                    return Ok(Vec::new());
-                }
+                Pattern::Metavariable(pattern_str) => {
+                    use crate::infrastructure::metavar_patterns::{
+                        parse_metavar_pattern, translate_to_tree_sitter,
+                    };
 
-                let (positives, negatives): (Vec<&Pattern>, Vec<&Pattern>) =
-                    patterns.iter().partition(|p| !matches!(p, Pattern::Not(_)));
-
-                if positives.is_empty() {
-                    return Ok(Vec::new());
-                }
-
-                let mut result =
-                    self.match_pattern(positives[0], source, language, tree).await?;
-
-                for sub_pattern in positives.iter().skip(1) {
-                    let other_matches =
-                        self.match_pattern(sub_pattern, source, language, tree).await?;
-                    result.retain(|m| {
-                        other_matches.iter().any(|o| {
-                            m.start_byte < o.end_byte && o.start_byte < m.end_byte
-                        })
-                    });
-
-                    if result.is_empty() {
-                        return Ok(result);
+                    let parsed = parse_metavar_pattern(pattern_str);
+                    if let Some(ts_query_str) = translate_to_tree_sitter(&parsed, &language) {
+                        let query = self.get_or_compile_query(language, &ts_query_str).await?;
+                        Ok(self.execute_query_with_tree(&query, tree, source))
+                    } else {
+                        debug!(pattern = pattern_str, "Metavariable pattern not supported");
+                        Ok(Vec::new())
                     }
                 }
+                Pattern::AnyOf(patterns) => {
+                    let mut all_matches = Vec::new();
+                    for sub_pattern in patterns {
+                        let matches = self
+                            .match_pattern(sub_pattern, source, language, tree)
+                            .await?;
+                        all_matches.extend(matches);
+                    }
+                    all_matches.sort_by_key(|m| (m.start_position, m.end_position));
+                    all_matches.dedup_by(|a, b| {
+                        a.start_position == b.start_position && a.end_position == b.end_position
+                    });
+                    Ok(all_matches)
+                }
+                Pattern::AllOf(patterns) => {
+                    if patterns.is_empty() {
+                        return Ok(Vec::new());
+                    }
 
-                for sub_pattern in negatives {
-                    if let Pattern::Not(inner) = sub_pattern {
-                        let negative_matches =
-                            self.match_pattern(inner, source, language, tree).await?;
+                    let (positives, negatives): (Vec<&Pattern>, Vec<&Pattern>) =
+                        patterns.iter().partition(|p| !matches!(p, Pattern::Not(_)));
+
+                    if positives.is_empty() {
+                        return Ok(Vec::new());
+                    }
+
+                    let mut result = self
+                        .match_pattern(positives[0], source, language, tree)
+                        .await?;
+
+                    for sub_pattern in positives.iter().skip(1) {
+                        let other_matches = self
+                            .match_pattern(sub_pattern, source, language, tree)
+                            .await?;
                         result.retain(|m| {
-                            !negative_matches
+                            other_matches
                                 .iter()
                                 .any(|o| m.start_byte < o.end_byte && o.start_byte < m.end_byte)
                         });
 
                         if result.is_empty() {
-                            break;
+                            return Ok(result);
                         }
                     }
-                }
 
-                Ok(result)
+                    for sub_pattern in negatives {
+                        if let Pattern::Not(inner) = sub_pattern {
+                            let negative_matches =
+                                self.match_pattern(inner, source, language, tree).await?;
+                            result.retain(|m| {
+                                !negative_matches
+                                    .iter()
+                                    .any(|o| m.start_byte < o.end_byte && o.start_byte < m.end_byte)
+                            });
+
+                            if result.is_empty() {
+                                break;
+                            }
+                        }
+                    }
+
+                    Ok(result)
+                }
+                Pattern::Not(_inner) => Ok(Vec::new()),
             }
-            Pattern::Not(_inner) => Ok(Vec::new()),
-        }
         })
     }
 
@@ -277,7 +283,10 @@ impl SastEngine {
         };
 
         for rule in rules {
-            match self.match_pattern(&rule.pattern, source, language, &tree).await {
+            match self
+                .match_pattern(&rule.pattern, source, language, &tree)
+                .await
+            {
                 Ok(matches) if !matches.is_empty() => {
                     results.push((rule.id.clone(), matches));
                 }
@@ -375,6 +384,7 @@ impl SastEngine {
         config: &TaintConfig,
     ) -> Vec<TaintMatch> {
         let mut engine = self.taint_engine.write().await;
+        engine.set_config(config.clone());
 
         // Combine sources, sinks, and sanitizers into one list
         let mut matches = Vec::new();
@@ -600,10 +610,7 @@ impl SastEngine {
             Some(match_result.bindings.clone())
         };
 
-        let description_template = rule
-            .message
-            .as_deref()
-            .unwrap_or(&rule.description);
+        let description_template = rule.message.as_deref().unwrap_or(&rule.description);
         let description = interpolate_template(description_template, &match_result.bindings);
         let recommendation = rule
             .fix
