@@ -28,7 +28,10 @@ struct InMemoryJobStore {
 #[async_trait]
 impl JobStore for InMemoryJobStore {
     async fn save_snapshot(&self, snapshot: JobSnapshot) -> Result<(), JobStoreError> {
-        self.snapshots.lock().await.insert(snapshot.job_id, snapshot);
+        self.snapshots
+            .lock()
+            .await
+            .insert(snapshot.job_id, snapshot);
         Ok(())
     }
 
@@ -149,8 +152,14 @@ async fn test_failure_path() {
     let project = test_project();
 
     // Pending → Queued → Running → Failed
-    workflow.enqueue_job(&mut job, &project, None, None).await.unwrap();
-    workflow.start_job(&mut job, &project, None, None).await.unwrap();
+    workflow
+        .enqueue_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
+    workflow
+        .start_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
     workflow
         .fail_job(&mut job, &project, "module panicked", None, None)
         .await
@@ -188,7 +197,10 @@ async fn test_cancel_from_queued() {
     let mut job = test_job();
     let project = test_project();
 
-    workflow.enqueue_job(&mut job, &project, None, None).await.unwrap();
+    workflow
+        .enqueue_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
     workflow
         .cancel_job(&mut job, &project, "timeout")
         .await
@@ -213,7 +225,11 @@ async fn test_invalid_pending_to_running() {
         .expect_err("Pending→Running should be invalid");
 
     assert!(matches!(err, WorkflowError::InvalidTransition(_)));
-    assert_eq!(job.status, JobStatus::Pending, "status should not change on error");
+    assert_eq!(
+        job.status,
+        JobStatus::Pending,
+        "status should not change on error"
+    );
 }
 
 #[tokio::test]
@@ -239,8 +255,14 @@ async fn test_invalid_completed_to_running() {
     let project = test_project();
 
     // Drive to Completed
-    workflow.enqueue_job(&mut job, &project, None, None).await.unwrap();
-    workflow.start_job(&mut job, &project, None, None).await.unwrap();
+    workflow
+        .enqueue_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
+    workflow
+        .start_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
     let report = empty_report(&job);
     workflow
         .complete_job(&mut job, &project, &[], &report, None, None)
@@ -262,8 +284,14 @@ async fn test_invalid_running_to_cancelled() {
     let mut job = test_job();
     let project = test_project();
 
-    workflow.enqueue_job(&mut job, &project, None, None).await.unwrap();
-    workflow.start_job(&mut job, &project, None, None).await.unwrap();
+    workflow
+        .enqueue_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
+    workflow
+        .start_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
 
     // Running → Cancelled should fail per state machine
     let err = workflow
@@ -279,15 +307,25 @@ async fn test_invalid_running_to_cancelled() {
 
 #[tokio::test]
 async fn test_get_job_returns_latest_snapshot() {
-    let (store, workflow) = make_workflow();
+    let (_store, workflow) = make_workflow();
     let mut job = test_job();
     let project = test_project();
     let job_id = job.job_id;
 
-    workflow.enqueue_job(&mut job, &project, None, None).await.unwrap();
-    workflow.start_job(&mut job, &project, None, None).await.unwrap();
+    workflow
+        .enqueue_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
+    workflow
+        .start_job(&mut job, &project, None, None)
+        .await
+        .unwrap();
 
-    let snap = workflow.get_job(job_id).await.unwrap().expect("snapshot should exist");
+    let snap = workflow
+        .get_job(job_id)
+        .await
+        .unwrap()
+        .expect("snapshot should exist");
     assert_eq!(snap.status, JobStatus::Running);
     assert!(snap.started_at.is_some());
 

@@ -1,0 +1,487 @@
+# Go security rules — 20 rules
+
+[[rules]]
+id = "go-command-injection"
+name = "Command Injection"
+description = "exec.Command may be vulnerable to command injection"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "go"]
+message = "Validate and sanitize command arguments."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  arguments: (argument_list
+    [
+      (identifier)
+      (selector_expression)
+      (call_expression)
+      (index_expression)
+    ] @arg
+  )
+  (#eq? @pkg "exec")
+  (#eq? @fn "Command")
+) @call
+'''
+
+[[rules]]
+id = "go-command-context"
+name = "CommandContext Injection"
+description = "exec.CommandContext may be vulnerable to command injection"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "go"]
+message = "Validate and sanitize command arguments."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  arguments: (argument_list
+    (_)
+    [
+      (identifier)
+      (selector_expression)
+      (call_expression)
+      (index_expression)
+    ] @arg
+  )
+  (#eq? @pkg "exec")
+  (#eq? @fn "CommandContext")
+) @call
+'''
+
+[[rules]]
+id = "go-sql-injection"
+name = "SQL Injection"
+description = "SQL query may be vulnerable to injection"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "sql", "go"]
+message = "Use parameterized queries with placeholders."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @fn
+  )
+  arguments: (argument_list
+    . (identifier) @query_var
+  )
+  (#match? @fn "^(Query|QueryRow|Exec|QueryContext|ExecContext|Prepare)$")
+) @call
+'''
+
+[[rules]]
+id = "go-unsafe"
+name = "Unsafe Pointer"
+description = "unsafe.Pointer bypasses Go's type safety"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-119"]
+owasp_categories = []
+tags = ["unsafe", "pointer", "go"]
+message = "Avoid unsafe.Pointer unless absolutely necessary."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "unsafe")
+  (#eq? @fn "Pointer")
+) @call
+'''
+
+
+[[rules]]
+id = "go-insecure-rand"
+name = "Insecure Randomness"
+description = "math/rand is not cryptographically secure"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-330"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "randomness", "go"]
+message = "Use crypto/rand for security-sensitive random values."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "rand")
+  (#match? @fn "^(Int|Intn|Float64|Uint32|Int31|Int63|Float32|Uint64)$")
+) @call
+'''
+
+[[rules]]
+id = "go-weak-crypto"
+name = "Weak Cryptographic Algorithm"
+description = "MD5, SHA1, DES, RC4 are cryptographically weak"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-327", "CWE-328"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "weak-algorithm", "go"]
+message = "Use SHA-256 or stronger algorithms."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#match? @pkg "^(md5|sha1|des|rc4)$")
+  (#eq? @fn "New")
+) @call
+'''
+
+[[rules]]
+id = "go-path-traversal"
+name = "Path Traversal"
+description = "Potential path traversal via file operations"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-22"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["path-traversal", "go"]
+message = "Validate that file paths don't contain .. or absolute paths."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "filepath")
+  (#eq? @fn "Join")
+) @call
+'''
+
+[[rules]]
+id = "go-template-html"
+name = "Unescaped HTML Template"
+description = "template.HTML bypasses auto-escaping and can lead to XSS"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["xss", "template", "go"]
+message = "Avoid template.HTML with user input. Let templates auto-escape."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "template")
+  (#eq? @fn "HTML")
+) @call
+'''
+
+[[rules]]
+id = "go-defer-loop"
+name = "Defer in Loop"
+description = "defer in loop may cause resource exhaustion"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-404"]
+owasp_categories = []
+tags = ["resource", "defer", "go"]
+message = "Move cleanup logic to a separate function to avoid deferred resource accumulation."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+[
+  (for_statement
+    body: (block (defer_statement) @defer)
+  )
+  (for_range_statement
+    body: (block (defer_statement) @defer)
+  )
+  (for_statement
+    body: (block (_ (defer_statement) @defer))
+  )
+  (for_range_statement
+    body: (block (_ (defer_statement) @defer))
+  )
+] @loop
+'''
+
+[[rules]]
+id = "go-goroutine-leak"
+name = "Potential Goroutine Leak"
+description = "Anonymous goroutine may leak without proper synchronization"
+severity = "Low"
+languages = ["Go"]
+cwe_ids = ["CWE-404"]
+owasp_categories = []
+tags = ["concurrency", "goroutine", "go"]
+message = "Ensure goroutines have proper exit conditions and use WaitGroups or channels."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(go_statement
+  (call_expression
+    function: (func_literal)
+  )
+) @goroutine
+'''
+
+[[rules]]
+id = "go-ignored-error"
+name = "Ignored Error"
+description = "Error return value ignored"
+severity = "Low"
+languages = ["Go"]
+cwe_ids = ["CWE-252"]
+owasp_categories = []
+tags = ["error-handling", "go"]
+message = "Handle errors explicitly instead of ignoring with _."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment_statement
+  left: (expression_list
+    (identifier) @var
+  )
+  (#eq? @var "_")
+) @assign
+'''
+
+[[rules]]
+id = "go-xxe"
+name = "XML External Entity (XXE)"
+description = "XML parsing may be vulnerable to XXE attacks"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-611"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["xxe", "xml", "go"]
+message = "Use encoding/xml with caution. Disable entity expansion if possible."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "xml")
+  (#match? @fn "^(Unmarshal|NewDecoder)$")
+) @call
+'''
+
+[[rules]]
+id = "go-tls-insecure-skip-verify"
+name = "TLS Certificate Verification Disabled"
+description = "InsecureSkipVerify disables TLS certificate validation"
+severity = "Critical"
+languages = ["Go"]
+cwe_ids = ["CWE-295"]
+owasp_categories = ["A07:2021 - Identification and Authentication Failures"]
+tags = ["tls", "certificate", "go"]
+message = "Never set InsecureSkipVerify: true in production. Use proper certificate validation."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(keyed_element
+  field: [
+    (field_identifier) @field
+    (identifier) @field
+  ]
+  value: [
+    (identifier) @val
+    (true) @val
+  ]
+  (#eq? @field "InsecureSkipVerify")
+  (#match? @val "^(true|1)$")
+) @config
+'''
+
+[[rules]]
+id = "go-text-template"
+name = "Text Template Injection"
+description = "text/template does not escape HTML - use html/template instead"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-79", "CWE-94"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["ssti", "template", "go"]
+message = "Use html/template for HTML output to auto-escape content."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(import_spec
+  path: (interpreted_string_literal) @path
+  (#eq? @path "\"text/template\"")
+) @import
+'''
+
+[[rules]]
+id = "go-pprof-enabled"
+name = "pprof Debug Endpoint Enabled"
+description = "pprof endpoints expose sensitive profiling data"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-200"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["pprof", "debug", "go"]
+message = "Disable pprof in production or restrict access to authenticated users."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(import_spec
+  path: (interpreted_string_literal) @path
+  (#eq? @path "\"net/http/pprof\"")
+) @import
+'''
+
+[[rules]]
+id = "go-timing-attack"
+name = "Timing Attack Vulnerability"
+description = "Using bytes.Equal or == for secret comparison is vulnerable to timing attacks"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-208"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["timing", "crypto", "go"]
+message = "Use subtle.ConstantTimeCompare() for secret comparison."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+[
+  (call_expression
+    function: (selector_expression
+      operand: (identifier) @pkg
+      field: (field_identifier) @fn
+    )
+    (#eq? @pkg "bytes")
+    (#eq? @fn "Equal")
+  ) @call
+
+  (function_declaration
+    name: (identifier) @fn_name
+    body: (block
+      (binary_expression
+        operator: "=="
+      ) @cmp
+    )
+    (#match? @fn_name "(?i)(token|secret|key|password|signature|auth|verify|check|equal)")
+  ) @call
+]
+'''
+
+[[rules]]
+id = "go-nosql-injection"
+name = "NoSQL Injection"
+description = "MongoDB query with user input may be vulnerable"
+severity = "High"
+languages = ["Go"]
+cwe_ids = ["CWE-943"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["nosql", "mongodb", "go"]
+message = "Validate and sanitize user input before using in MongoDB queries."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    field: (field_identifier) @fn
+  )
+  (#match? @fn "^(Find|FindOne|UpdateOne|DeleteOne|Aggregate)$")
+) @call
+'''
+
+[[rules]]
+id = "go-open-redirect"
+name = "Open Redirect"
+description = "http.Redirect with user-controlled URL can lead to phishing"
+severity = "Medium"
+languages = ["Go"]
+cwe_ids = ["CWE-601"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["redirect", "phishing", "go"]
+message = "Validate redirect URLs against an allowlist of trusted domains."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  (#eq? @pkg "http")
+  (#eq? @fn "Redirect")
+) @call
+'''
+
+[[rules]]
+id = "go-hardcoded-bind"
+name = "Hardcoded IP Binding"
+description = "Binding to 0.0.0.0 exposes the service to all interfaces"
+severity = "Low"
+languages = ["Go"]
+cwe_ids = ["CWE-668"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["network", "binding", "go"]
+message = "Bind to specific interfaces or use environment configuration."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call_expression
+  function: (selector_expression
+    operand: (identifier) @pkg
+    field: (field_identifier) @fn
+  )
+  arguments: (argument_list
+    (interpreted_string_literal) @addr
+  )
+  (#eq? @pkg "http")
+  (#match? @fn "^(ListenAndServe|ListenAndServeTLS)$")
+  (#match? @addr "0\\.0\\.0\\.0")
+) @call
+'''

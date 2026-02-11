@@ -6,10 +6,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use tree_sitter::Tree;
 
-use crate::domain::entities::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
+use crate::domain::call_graph::{CallGraphNode, CallSite, FunctionSignature, ParameterInfo};
+use crate::domain::taint_types::FunctionTaintSummary;
 use crate::domain::value_objects::Language;
 use crate::infrastructure::call_graph_queries::*;
-use crate::infrastructure::query_engine::TreeSitterQueryEngine;
 
 /// Call graph for inter-procedural analysis
 #[derive(Debug, Default)]
@@ -42,25 +42,6 @@ pub struct UnresolvedCall {
     /// Call location
     pub line: u32,
     pub column: u32,
-}
-
-/// Summary of a function's taint behavior for inter-procedural analysis
-#[derive(Debug, Clone, Default)]
-pub struct FunctionTaintSummary {
-    /// Function ID
-    pub function_id: String,
-    /// Which parameters get propagated to return value (param indices)
-    pub params_to_return: HashSet<usize>,
-    /// Which parameters flow to sinks (param_idx -> sink categories)
-    pub params_to_sinks: HashMap<usize, Vec<String>>,
-    /// Whether return value is inherently tainted (e.g., reads user input)
-    pub return_tainted: bool,
-    /// Source categories introduced by this function
-    pub introduces_taint: Vec<String>,
-    /// Whether this function acts as a sanitizer
-    pub is_sanitizer: bool,
-    /// Which labels this sanitizer clears
-    pub clears_labels: Vec<String>,
 }
 
 impl CallGraph {
@@ -210,6 +191,7 @@ impl CallGraph {
             .collect()
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn strongconnect(
         &self,
         v: &str,
@@ -433,6 +415,38 @@ impl CallGraph {
             .unwrap_or(false)
     }
 
+    /// Extract file-level dependency map from cross-file call edges.
+    ///
+    /// Returns a map where each key is a file path and the value is the set of
+    /// other files it depends on (files containing functions it calls).
+    /// Only cross-file edges are included (self-dependencies are excluded).
+    pub fn file_dependencies(&self) -> HashMap<String, HashSet<String>> {
+        let mut deps: HashMap<String, HashSet<String>> = HashMap::new();
+
+        for (caller_id, call_sites) in &self.edges {
+            let caller_file = match self.nodes.get(caller_id) {
+                Some(node) => &node.file_path,
+                None => continue,
+            };
+
+            for call_site in call_sites {
+                let callee_file = match self.nodes.get(&call_site.target_id) {
+                    Some(node) => &node.file_path,
+                    None => continue,
+                };
+
+                // Only track cross-file dependencies
+                if caller_file != callee_file {
+                    deps.entry(caller_file.clone())
+                        .or_default()
+                        .insert(callee_file.clone());
+                }
+            }
+        }
+
+        deps
+    }
+
     /// Get statistics about the call graph
     pub fn stats(&self) -> CallGraphStats {
         let total_edges: usize = self.edges.values().map(|v| v.len()).sum();
@@ -470,14 +484,7 @@ impl CallGraphBuilder {
     }
 
     /// Analyze a source file using Tree-sitter AST
-    pub fn analyze_ast(
-        &mut self,
-        file_path: &str,
-        tree: &Tree,
-        language: &Language,
-        source: &str,
-        query_engine: &mut TreeSitterQueryEngine,
-    ) {
+    pub fn analyze_ast(&mut self, file_path: &str, tree: &Tree, language: &Language, source: &str) {
         let source_bytes = source.as_bytes();
 
         // Get query strings for this language
@@ -541,8 +548,11 @@ impl CallGraphBuilder {
         // 1. Extract class/struct contexts first
         let mut class_contexts: Vec<ClassContext> = Vec::new();
         if let Some(class_query) = class_query_str {
-            if let Ok(query) = query_engine.compile_query(class_query, language) {
-                let matches = query_engine.execute_query(&query, tree, source_bytes);
+            if let Ok(query) =
+                crate::infrastructure::query_engine::compile_query(class_query, language)
+            {
+                let matches =
+                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
                 for m in matches {
                     // Look for class.name, type.name, or struct.name depending on language
                     let class_name = m
@@ -566,8 +576,11 @@ impl CallGraphBuilder {
         // 2. Extract parameters for functions (build a map: func_name -> params)
         let mut function_params: HashMap<String, Vec<ParameterInfo>> = HashMap::new();
         if let Some(param_query) = param_query_str {
-            if let Ok(query) = query_engine.compile_query(param_query, language) {
-                let matches = query_engine.execute_query(&query, tree, source_bytes);
+            if let Ok(query) =
+                crate::infrastructure::query_engine::compile_query(param_query, language)
+            {
+                let matches =
+                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
                 for m in matches {
                     let name_node = m.captures.get("name");
                     let param_node = m.captures.get("param.name");
@@ -606,8 +619,11 @@ impl CallGraphBuilder {
         let mut functions: Vec<DefinedFunction> = Vec::new();
 
         // 3. Find Definitions and build qualified IDs
-        if let Ok(query) = query_engine.compile_query(def_query_str, language) {
-            let matches = query_engine.execute_query(&query, tree, source_bytes);
+        if let Ok(query) =
+            crate::infrastructure::query_engine::compile_query(def_query_str, language)
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
             for m in matches {
                 let name_node = m.captures.get("name");
                 if let Some(name_n) = name_node {
@@ -666,8 +682,11 @@ impl CallGraphBuilder {
             })
             .collect();
 
-        if let Ok(query) = query_engine.compile_query(call_query_str, language) {
-            let matches = query_engine.execute_query(&query, tree, source_bytes);
+        if let Ok(query) =
+            crate::infrastructure::query_engine::compile_query(call_query_str, language)
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
             for m in matches {
                 let name_node = m.captures.get("name");
                 if let Some(name_n) = name_node {

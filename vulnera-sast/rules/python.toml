@@ -1,0 +1,771 @@
+# Python security rules — 31 rules
+
+[[rules]]
+id = "unsafe-function-call"
+name = "Unsafe Function Call"
+description = "Potentially unsafe function call"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-94", "CWE-95"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "code-execution", "python"]
+message = "Avoid using eval() with user input. Use ast.literal_eval() for safe data parsing."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "eval")
+) @call
+'''
+
+[[rules]]
+id = "python-exec"
+name = "Exec Function"
+description = "exec() allows arbitrary code execution"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-94"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "code-execution", "python"]
+message = "Avoid using exec() with user input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "exec")
+) @call
+'''
+
+[[rules]]
+id = "python-compile"
+name = "Compile Function"
+description = "compile() can be used for code injection"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-94"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "python"]
+message = "Avoid using compile() with user input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "compile")
+) @call
+'''
+
+[[rules]]
+id = "python-subprocess"
+name = "Subprocess Shell"
+description = "subprocess with shell=True is vulnerable to command injection"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "python"]
+message = "Avoid shell=True. Pass arguments as a list instead."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (_)*
+    (keyword_argument
+      name: (identifier) @kw
+      value: (true) @val
+    )
+    (_)*
+  )
+  (#eq? @mod "subprocess")
+  (#match? @fn "^(call|run|Popen|check_call|check_output)$")
+  (#eq? @kw "shell")
+) @call
+'''
+
+[[rules]]
+id = "python-os-system"
+name = "os.system Command"
+description = "os.system is vulnerable to command injection"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command", "python"]
+message = "Use subprocess with list arguments instead of os.system."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "os")
+  (#match? @fn "^(system|popen)$")
+) @call
+'''
+
+[[rules]]
+id = "unsafe-deserialization"
+name = "Unsafe Deserialization"
+description = "Potential unsafe deserialization vulnerability (pickle and similar serializers)"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-502"]
+owasp_categories = ["A08:2021 - Software and Data Integrity Failures"]
+tags = ["deserialization", "python"]
+message = "Never unpickle untrusted data. Use JSON or other safe formats."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+[
+  (call
+    function: (attribute
+      object: (identifier) @obj
+      attribute: (identifier) @fn
+    )
+    (#match? @obj "^(pickle|shelve|marshal|dill|cloudpickle|joblib)$")
+    (#match? @fn "^(loads?|dump|Unpickler|open)$")
+  ) @call
+]
+'''
+
+[[rules]]
+id = "python-yaml-load"
+name = "Unsafe YAML Load"
+description = "yaml.load without safe Loader is vulnerable to code execution"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-502"]
+owasp_categories = ["A08:2021 - Software and Data Integrity Failures"]
+tags = ["deserialization", "yaml", "python"]
+message = "Use yaml.safe_load() instead of yaml.load()."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+; Match yaml.load() and yaml.unsafe_load() calls
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list) @args
+  (#eq? @mod "yaml")
+  (#match? @fn "^(load|unsafe_load|full_load)$")
+  (#not-match? @args "SafeLoader")
+) @call
+'''
+
+# Exclusions to prevent false positives
+[[rules.exclusions]]
+pattern = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "yaml")
+  (#eq? @fn "safe_load")
+) @safe
+'''
+
+type = "TreeSitterQuery"
+
+[[rules.exclusions]]
+pattern = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (_)
+    (keyword_argument
+      name: (identifier) @kw
+      value: (attribute
+        object: (identifier) @yaml
+        attribute: (identifier) @loader
+      )
+    )
+  )
+  (#eq? @mod "yaml")
+  (#eq? @fn "load")
+  (#eq? @kw "Loader")
+  (#eq? @yaml "yaml")
+  (#eq? @loader "SafeLoader")
+) @safe
+'''
+
+type = "TreeSitterQuery"
+
+[[rules]]
+id = "python-marshal"
+name = "Marshal Deserialization"
+description = "marshal.loads can execute arbitrary code"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-502"]
+owasp_categories = ["A08:2021 - Software and Data Integrity Failures"]
+tags = ["deserialization", "python"]
+message = "Avoid unmarshalling untrusted data."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @fn
+  )
+  (#eq? @obj "marshal")
+  (#match? @fn "^loads?$")
+) @call
+'''
+
+[[rules]]
+id = "python-ssti"
+name = "Server-Side Template Injection"
+description = "render_template_string with user input is vulnerable to SSTI"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-94", "CWE-1336"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["ssti", "flask", "python"]
+message = "Use render_template with a file instead of render_template_string."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "render_template_string")
+) @call
+'''
+
+[[rules]]
+id = "python-jinja-ssti"
+name = "Jinja2 Template from String"
+description = "Creating Jinja2 templates from user input is vulnerable to SSTI"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-94", "CWE-1336"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["ssti", "jinja2", "python"]
+message = "Avoid using Environment.from_string with user input."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#eq? @fn "from_string")
+) @call
+'''
+
+[[rules]]
+id = "python-weak-crypto"
+name = "Weak Cryptographic Hash"
+description = "MD5 and SHA1 are cryptographically weak"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-327", "CWE-328"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "weak-algorithm", "python"]
+message = "Use SHA-256 or stronger hash algorithms."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "hashlib")
+  (#match? @fn "^(md5|sha1)$")
+) @call
+'''
+
+[[rules]]
+id = "python-insecure-random"
+name = "Insecure Randomness"
+description = "random module is not cryptographically secure"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-330"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["crypto", "randomness", "python"]
+message = "Use secrets module for security-sensitive random values."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "random")
+  (#match? @fn "^(random|randint|choice|sample)$")
+) @call
+'''
+
+[[rules]]
+id = "python-path-traversal"
+name = "Path Traversal"
+description = "Potential path traversal via file operations"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-22"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["path-traversal", "python"]
+message = "Validate file paths to prevent directory traversal attacks."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "open")
+) @call
+'''
+
+[[rules]]
+id = "python-ssrf"
+name = "Server-Side Request Forgery"
+description = "Potential SSRF via HTTP requests with user-controlled URL"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-918"]
+owasp_categories = ["A10:2021 - Server-Side Request Forgery"]
+tags = ["ssrf", "python"]
+message = "Validate URLs against an allowlist of permitted domains."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "requests")
+  (#match? @fn "^(get|post|put|delete|patch|head|options)$")
+) @call
+'''
+
+[[rules]]
+id = "python-urllib-ssrf"
+name = "urllib SSRF"
+description = "Potential SSRF via urllib"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-918"]
+owasp_categories = ["A10:2021 - Server-Side Request Forgery"]
+tags = ["ssrf", "python"]
+message = "Validate URLs before making requests."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#match? @fn "^(urlopen|urlretrieve)$")
+) @call
+'''
+
+[[rules]]
+id = "python-django-raw-sql"
+name = "Django Raw SQL"
+description = "Raw SQL in Django can lead to SQL injection"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "sql", "django", "python"]
+message = "Use parameterized queries instead of raw SQL."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#eq? @fn "raw")
+) @call
+'''
+
+[[rules]]
+id = "python-debug-enabled"
+name = "Debug Mode Enabled"
+description = "Debug mode should be disabled in production"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-489"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["debug", "configuration", "python"]
+message = "Disable debug mode in production."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assignment
+  left: (identifier) @name
+  right: (true) @value
+  (#match? @name "(?i)debug")
+) @assign
+'''
+
+[[rules]]
+id = "python-assert"
+name = "Assert in Production"
+description = "Assert statements are disabled with -O flag"
+severity = "Low"
+languages = ["Python"]
+cwe_ids = ["CWE-617"]
+owasp_categories = []
+tags = ["assert", "python"]
+message = "Don't rely on assert for security checks; they're disabled with -O."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(assert_statement) @assert
+'''
+
+[[rules]]
+id = "python-jwt-no-verify"
+name = "JWT Without Verification"
+description = "JWT decoded without signature verification"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-347"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["jwt", "authentication", "python"]
+message = "Always verify JWT signatures. Don't use verify=False."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "jwt")
+  (#eq? @fn "decode")
+) @call
+'''
+
+[[rules]]
+id = "python-xxe"
+name = "XML External Entity (XXE)"
+description = "XML parsing without disabling external entities is vulnerable to XXE"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-611"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["xxe", "xml", "python"]
+message = "Use defusedxml library or disable external entities."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "etree")
+  (#eq? @fn "parse")
+) @call
+'''
+
+[[rules]]
+id = "python-ldap-injection"
+name = "LDAP Injection"
+description = "LDAP query with unvalidated user input can lead to authentication bypass"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-90"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["ldap", "injection", "python"]
+message = "Escape special LDAP characters using ldap.filter.escape_filter_chars()."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#match? @fn "^(search|search_s|search_ext|search_ext_s)$")
+) @call
+'''
+
+[[rules]]
+id = "python-timing-attack"
+name = "Timing Attack Vulnerability"
+description = "Using == for secret comparison is vulnerable to timing attacks"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-208"]
+owasp_categories = ["A02:2021 - Cryptographic Failures"]
+tags = ["timing", "crypto", "python"]
+message = "Use hmac.compare_digest() or secrets.compare_digest() for constant-time comparison."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(comparison_operator
+  (identifier) @left
+  (identifier) @right
+  (#match? @left "(?i)(password|token|secret|key|hash|signature)")
+) @compare
+'''
+
+[[rules]]
+id = "python-nosql-injection"
+name = "NoSQL Injection"
+description = "MongoDB query with user input can lead to NoSQL injection"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-943"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["nosql", "mongodb", "injection", "python"]
+message = "Validate and sanitize user input. Avoid passing $where or user-controlled operators."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#match? @fn "^(find|find_one|update|update_one|update_many|delete|delete_one|delete_many|aggregate)$")
+) @call
+'''
+
+[[rules]]
+id = "python-zipfile-path-traversal"
+name = "Zip Slip Vulnerability"
+description = "Extracting zip files without path validation allows arbitrary file write"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-22"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["zip-slip", "path-traversal", "python"]
+message = "Validate extracted file paths start with the target directory using os.path.realpath()."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#match? @fn "^(extractall|extract)$")
+) @extract
+'''
+
+[[rules]]
+id = "python-jinja-autoescape-off"
+name = "Jinja2 Autoescape Disabled"
+description = "Disabling Jinja2 autoescape allows XSS vulnerabilities"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-79"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["jinja2", "xss", "python"]
+message = "Enable autoescape: Environment(autoescape=True) or use select_autoescape()."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  arguments: (argument_list
+    (keyword_argument
+      name: (identifier) @key
+      value: (false)
+    )
+  )
+  (#eq? @fn "Environment")
+  (#eq? @key "autoescape")
+) @env
+'''
+
+[[rules]]
+id = "python-cors-wildcard"
+name = "CORS Wildcard Origin"
+description = "CORS with wildcard origin exposes API to all domains"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-942"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["cors", "misconfiguration", "python"]
+message = "Specify allowed origins explicitly instead of using '*'."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  arguments: (argument_list
+    (keyword_argument
+      name: (identifier) @key
+      value: (string) @val
+    )
+  )
+  (#match? @fn "^(CORS|cors)$")
+  (#eq? @key "origins")
+  (#eq? @val "\"*\"")
+) @cors
+'''
+
+[[rules]]
+id = "python-shell-true"
+name = "Subprocess shell=True"
+description = "subprocess with shell=True allows command injection"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["command-injection", "subprocess", "python"]
+message = "Use shell=False and pass command as a list: subprocess.run(['cmd', 'arg'])."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (keyword_argument
+      name: (identifier) @key
+      value: (true)
+    )
+  )
+  (#eq? @mod "subprocess")
+  (#match? @fn "^(call|run|Popen|check_call|check_output)$")
+  (#eq? @key "shell")
+) @call
+'''
+
+[[rules]]
+id = "python-logging-sensitive"
+name = "Sensitive Data in Logs"
+description = "Logging potentially sensitive data"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-532"]
+owasp_categories = ["A09:2021 - Security Logging and Monitoring Failures"]
+tags = ["logging", "sensitive-data", "python"]
+message = "Mask or redact sensitive data before logging."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @log
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (identifier) @arg
+  )
+  (#match? @log "^(logging|logger|log)$")
+  (#match? @fn "^(debug|info|warning|error|critical)$")
+  (#match? @arg "(?i)(password|secret|token|key|credential)")
+) @log
+'''
+
+[[rules]]
+id = "python-regex-redos"
+name = "ReDoS Vulnerability"
+description = "User-controlled regex pattern can lead to ReDoS"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-1333", "CWE-400"]
+owasp_categories = ["A05:2021 - Security Misconfiguration"]
+tags = ["redos", "regex", "dos", "python"]
+message = "Avoid user-controlled regex patterns. Consider using regex2 or google-re2."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn
+  )
+  (#eq? @mod "re")
+  (#match? @fn "^(compile|match|search|findall|sub)$")
+) @regex
+'''
+
+[[rules]]
+id = "python-mass-assignment"
+name = "Mass Assignment Vulnerability"
+description = "Directly passing request data to model update allows privilege escalation"
+severity = "High"
+languages = ["Python"]
+cwe_ids = ["CWE-915"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["mass-assignment", "authorization", "python"]
+message = "Explicitly whitelist allowed fields instead of passing **kwargs."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  arguments: (argument_list
+    (dictionary_splat) @splat
+  )
+  (#match? @fn "^(update|create|filter|get_or_create)$")
+) @call
+'''
+
+[[rules]]
+id = "python-open-redirect"
+name = "Open Redirect"
+description = "Redirect without URL validation can lead to phishing"
+severity = "Medium"
+languages = ["Python"]
+cwe_ids = ["CWE-601"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["redirect", "phishing", "python"]
+message = "Validate redirect URL against an allowlist of trusted domains."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (identifier) @fn
+  (#match? @fn "^(redirect|HttpResponseRedirect)$")
+) @redirect
+'''

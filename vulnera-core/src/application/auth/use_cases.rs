@@ -391,7 +391,7 @@ impl RefreshTokenUseCase {
 
         // Generate new tokens
         let access_token = self.jwt_service.generate_access_token(
-            user.user_id.clone(),
+            user.user_id,
             user.email.clone(),
             user.roles.clone(),
         )?;

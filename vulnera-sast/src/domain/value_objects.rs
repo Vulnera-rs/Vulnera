@@ -33,8 +33,8 @@ impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
             "py" => Some(Language::Python),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
-            "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
+            "js" | "mjs" | "cjs" => Some(Language::JavaScript),
+            "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
             "c" | "h" => Some(Language::C),
@@ -63,9 +63,17 @@ impl Language {
         }
     }
 
-    /// Whether this language uses JSX/TSX syntax
-    pub fn supports_jsx(&self) -> bool {
-        matches!(self, Language::JavaScript | Language::TypeScript)
+    /// Get the tree-sitter grammar for this language
+    pub fn grammar(&self) -> tree_sitter::Language {
+        match self {
+            Language::Python => tree_sitter_python::LANGUAGE.into(),
+            Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+            Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Language::Rust => tree_sitter_rust::LANGUAGE.into(),
+            Language::Go => tree_sitter_go::LANGUAGE.into(),
+            Language::C => tree_sitter_c::LANGUAGE.into(),
+            Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        }
     }
 }
 
@@ -75,14 +83,6 @@ pub enum Confidence {
     High,
     Medium,
     Low,
-}
-
-/// Analysis engine selection - tree-sitter is the only engine
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum AnalysisEngine {
-    /// Tree-sitter native query engine with data flow analysis
-    #[default]
-    TreeSitter,
 }
 
 /// Rule source indicating where rules are loaded from

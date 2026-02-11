@@ -1,0 +1,420 @@
+# Python taint patterns
+
+# =============================================================================
+# Sources
+# =============================================================================
+
+[[sources]]
+name = "Flask request data"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(attribute
+  object: (identifier) @obj
+  attribute: (identifier) @attr
+  (#eq? @obj "request")
+  (#match? @attr "^(form|args|values|data|json|files|cookies|headers|get_json)$")
+) @source
+'''
+
+[[sources]]
+name = "FastAPI parameter"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(default_parameter
+  name: (identifier) @param
+  value: (call
+    function: (identifier) @fn
+    (#match? @fn "^(Query|Path|Body|Cookie|Header|Form|File)$"))
+) @source
+'''
+
+[[sources]]
+name = "Django request data"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(subscript
+  value: (attribute
+    object: (identifier) @obj
+    attribute: (identifier) @attr)
+  (#eq? @obj "request")
+  (#match? @attr "^(GET|POST|FILES|COOKIES|META|body|data)$")
+) @source
+'''
+
+[[sources]]
+name = "Django request GET/POST get()"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(call
+  function: (attribute
+    object: (attribute
+      object: (identifier) @obj
+      attribute: (identifier) @container)
+    attribute: (identifier) @method)
+  (#eq? @obj "request")
+  (#match? @container "^(GET|POST|FILES|COOKIES|META)$")
+  (#eq? @method "get")
+) @source
+'''
+
+[[sources]]
+name = "Command line argument"
+category = "cli_input"
+labels = ["user_input", "cli"]
+query = '''
+(subscript
+  value: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @attr)
+  (#eq? @mod "sys")
+  (#eq? @attr "argv")
+) @source
+'''
+
+[[sources]]
+name = "Environment variable"
+category = "environment"
+labels = ["environment"]
+query = '''
+(subscript
+  value: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @attr)
+  (#eq? @mod "os")
+  (#eq? @attr "environ")
+) @source
+'''
+
+[[sources]]
+name = "os.getenv"
+category = "environment"
+labels = ["environment"]
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @fn)
+  (#eq? @mod "os")
+  (#eq? @fn "getenv")
+) @source
+'''
+
+[[sources]]
+name = "input() builtin"
+category = "user_input"
+labels = ["user_input"]
+query = '''
+(call
+  function: (identifier) @fn
+  (#eq? @fn "input")
+) @source
+'''
+
+[[sources]]
+name = "File read"
+category = "file_io"
+labels = ["file_input"]
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  (#match? @method "^(read|readline|readlines)$")
+) @source
+'''
+
+# =============================================================================
+# Sinks
+# =============================================================================
+
+[[sinks]]
+name = "SQL execution with concatenation"
+category = "sql_injection"
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (binary_operator) @query)
+  (#match? @method "^(execute|executemany|executescript)$")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL execution with variable"
+category = "sql_injection"
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @query)
+  (#match? @method "^(execute|executemany|executescript)$")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL execution with f-string"
+category = "sql_injection"
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (string
+      (interpolation)))
+  (#match? @method "^(execute|executemany)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Code execution"
+category = "code_injection"
+query = '''
+(call
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @arg)
+  (#match? @fn "^(eval|exec|compile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Subprocess with shell=True"
+category = "command_injection"
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (keyword_argument
+      name: (identifier) @kw
+      value: (true)))
+  (#eq? @mod "subprocess")
+  (#match? @method "^(run|call|Popen|check_output|check_call)$")
+  (#eq? @kw "shell")
+) @sink
+'''
+
+[[sinks]]
+name = "os.system"
+category = "command_injection"
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @arg)
+  (#eq? @mod "os")
+  (#eq? @method "system")
+) @sink
+'''
+
+[[sinks]]
+name = "Template rendering"
+category = "ssti"
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @arg)
+  (#match? @method "^(render|render_template_string)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Unsafe YAML load"
+category = "deserialization"
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  (#eq? @mod "yaml")
+  (#match? @method "^(load|unsafe_load)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Pickle deserialization"
+category = "deserialization"
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  (#eq? @mod "pickle")
+  (#match? @method "^(load|loads)$")
+) @sink
+'''
+
+[[sinks]]
+name = "File open with variable path"
+category = "path_traversal"
+query = '''
+(call
+  function: (identifier) @fn
+  arguments: (argument_list
+    (identifier) @path)
+  (#eq? @fn "open")
+) @sink
+'''
+
+[[sinks]]
+name = "HTTP request with variable URL"
+category = "ssrf"
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @url)
+  (#eq? @mod "requests")
+  (#match? @method "^(get|post|put|delete|patch|head|options)$")
+) @sink
+'''
+
+# =============================================================================
+# Sanitizers
+# =============================================================================
+
+[[sanitizers]]
+name = "html.escape"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  (#eq? @mod "html")
+  (#eq? @method "escape")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "bleach.clean"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  (#eq? @mod "bleach")
+  (#eq? @method "clean")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "URL encoding"
+category = "url"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  (#match? @method "^(quote|quote_plus|urlencode)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Parameterized SQL query"
+category = "sql"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (string) @query
+    [(tuple) (list)] @params)
+  (#match? @method "^(execute|executemany)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "shlex.quote"
+category = "command"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  (#eq? @mod "shlex")
+  (#eq? @method "quote")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Type coercion"
+category = "generic"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (identifier) @fn
+  (#match? @fn "^(int|float|bool)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "YAML SafeLoader"
+category = "deserialization"
+is_known = true
+clears_labels = []
+query = '''
+(call
+  function: (attribute
+    object: (identifier) @mod
+    attribute: (identifier) @method)
+  arguments: (argument_list
+    (identifier) @arg
+    (keyword_argument
+      name: (identifier) @kw
+      value: (attribute
+        object: (identifier) @yaml
+        attribute: (identifier) @loader)))
+  (#eq? @mod "yaml")
+  (#eq? @method "load")
+  (#eq? @kw "Loader")
+  (#eq? @yaml "yaml")
+  (#eq? @loader "SafeLoader")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Generic validation function"
+category = "generic"
+is_known = false
+query = '''
+(call
+  function: (identifier) @fn
+  (#match? @fn "^(validate|sanitize|clean|escape|encode|filter)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Generic validation method"
+category = "generic"
+is_known = false
+query = '''
+(call
+  function: (attribute
+    attribute: (identifier) @method)
+  (#match? @method "^(validate|sanitize|clean|escape|encode|filter|strip)$")
+) @sanitizer
+'''

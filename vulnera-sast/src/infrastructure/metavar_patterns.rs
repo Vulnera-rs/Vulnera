@@ -1,7 +1,7 @@
 //! Metavariable Pattern Support
 //!
-//! This module provides parsing and translation of Semgrep-style metavariable
-//! patterns into tree-sitter queries.
+//! This module provides parsing and translation of metavariable-style patterns
+//! into tree-sitter queries.
 //!
 //! # Supported Syntax
 //! - `$VAR` - matches any single expression
@@ -289,7 +289,7 @@ pub fn translate_to_tree_sitter(
             translate_function_call(name, *is_metavar, &pattern.tokens, language)
         }
         PatternStructure::BinaryExpression { operator } => {
-            translate_binary_expression(operator, language)
+            translate_binary_expression(&pattern.tokens, operator, language)
         }
         PatternStructure::MemberAccess => translate_member_access(&pattern.tokens, language),
         PatternStructure::SimpleExpression => {
@@ -317,6 +317,12 @@ fn translate_function_call(
     // Extract argument patterns from tokens
     let arg_patterns = extract_argument_patterns(tokens);
 
+    let func_capture = if is_metavar {
+        capture_name_for_metavar(name)
+    } else {
+        "func".to_string()
+    };
+
     // Build argument matching based on extracted patterns
     let args_query = if arg_patterns.is_empty() {
         // No specific arguments, match any
@@ -327,7 +333,9 @@ fn translate_function_call(
             .iter()
             .enumerate()
             .map(|(i, pattern)| match pattern {
-                ArgumentPattern::Metavar(_name) => format!("(_) @arg{i}"),
+                ArgumentPattern::Metavar(name) => {
+                    format!("(_) @{}", capture_name_for_metavar(name))
+                }
                 ArgumentPattern::Identifier(_) | ArgumentPattern::StringLiteral(_) => {
                     format!("(_) @arg{i}")
                 }
@@ -357,15 +365,15 @@ fn translate_function_call(
         // Match any function call, capture the function name
         Some(format!(
             r#"({call_node}
-  {func_field}: (identifier) @func
+  {func_field}: (identifier) @{func_capture}
   {args_query}{constraint_str}) @call"#
         ))
     } else {
         // Match specific function name
         Some(format!(
             r#"({call_node}
-  {func_field}: (identifier) @func
-  (#eq? @func "{name}")
+  {func_field}: (identifier) @{func_capture}
+  (#eq? @{func_capture} "{name}")
   {args_query}{constraint_str}) @call"#
         ))
     }
@@ -406,7 +414,11 @@ fn extract_argument_patterns(tokens: &[MetavarToken]) -> Vec<ArgumentPattern> {
 }
 
 /// Translate binary expression pattern
-fn translate_binary_expression(operator: &str, language: &Language) -> Option<String> {
+fn translate_binary_expression(
+    tokens: &[MetavarToken],
+    operator: &str,
+    language: &Language,
+) -> Option<String> {
     let node_type = match language {
         Language::Python => "binary_operator",
         Language::JavaScript | Language::TypeScript => "binary_expression",
@@ -414,6 +426,26 @@ fn translate_binary_expression(operator: &str, language: &Language) -> Option<St
         Language::Go => "binary_expression",
         Language::C | Language::Cpp => "binary_expression",
     };
+
+    let filtered: Vec<&MetavarToken> = tokens
+        .iter()
+        .filter(|t| !matches!(t, MetavarToken::Whitespace))
+        .collect();
+
+    let op_index = filtered
+        .iter()
+        .position(|t| matches!(t, MetavarToken::Operator(_)));
+
+    let (left_token, right_token) = if let Some(idx) = op_index {
+        let left = if idx > 0 { Some(filtered[idx - 1]) } else { None };
+        let right = filtered.get(idx + 1).copied();
+        (left, right)
+    } else {
+        (None, None)
+    };
+
+    let (left_pattern, left_constraint) = operand_pattern(left_token, "left");
+    let (right_pattern, right_constraint) = operand_pattern(right_token, "right");
 
     // Map operators to tree-sitter operator names if needed
     let op_match = match operator {
@@ -432,6 +464,20 @@ fn translate_binary_expression(operator: &str, language: &Language) -> Option<St
         _ => None,
     };
 
+    let mut constraints: Vec<String> = Vec::new();
+    if let Some(constraint) = left_constraint {
+        constraints.push(constraint);
+    }
+    if let Some(constraint) = right_constraint {
+        constraints.push(constraint);
+    }
+
+    let constraint_str = if constraints.is_empty() {
+        String::new()
+    } else {
+        format!("\n  {}", constraints.join("\n  "))
+    };
+
     if let Some(op) = op_match {
         // Generate operator-specific query with operator field
         // Python uses a child node for operator, others use an operator field
@@ -447,16 +493,16 @@ fn translate_binary_expression(operator: &str, language: &Language) -> Option<St
         };
         Some(format!(
             r#"({node_type}
-  left: (_) @left
+  left: {left_pattern}
   {op_clause}
-  right: (_) @right) @expr"#
+  right: {right_pattern}{constraint_str}) @expr"#
         ))
     } else {
         // Generic binary expression - match any operator
         Some(format!(
             r#"({node_type}
-  left: (_) @left
-  right: (_) @right) @expr"#
+  left: {left_pattern}
+  right: {right_pattern}{constraint_str}) @expr"#
         ))
     }
 }
@@ -478,33 +524,37 @@ fn translate_member_access(tokens: &[MetavarToken], language: &Language) -> Opti
         // Get object token (first non-whitespace before dot)
         let object_token = tokens[..dot_idx]
             .iter()
-            .filter(|t| !matches!(t, MetavarToken::Whitespace))
-            .next();
+            .find(|t| !matches!(t, MetavarToken::Whitespace));
 
         // Get attribute token (first non-whitespace after dot)
         let attr_token = tokens[dot_idx + 1..]
             .iter()
-            .filter(|t| !matches!(t, MetavarToken::Whitespace))
-            .next();
+            .find(|t| !matches!(t, MetavarToken::Whitespace));
 
         // Build object pattern and constraint
         let (obj_pattern, obj_constraint) = match object_token {
             Some(MetavarToken::Identifier(name)) => (
-                "(identifier) @object",
-                Some(format!(r#"(#eq? @object "{name}")"#)),
+                "(identifier) @object".to_string(),
+                Some(format!(r#"(#eq? @object \"{name}\")"#)),
             ),
-            Some(MetavarToken::Metavar(_)) => ("(_) @object", None),
-            _ => ("(_) @object", None),
+            Some(MetavarToken::Metavar(name)) => (
+                format!("(_) @{}", capture_name_for_metavar(name)),
+                None,
+            ),
+            _ => ("(_) @object".to_string(), None),
         };
 
         // Build attribute pattern and constraint
         let (attr_pattern, attr_constraint) = match attr_token {
             Some(MetavarToken::Identifier(name)) => (
-                "(property_identifier) @attribute",
-                Some(format!(r#"(#eq? @attribute "{name}")"#)),
+                "(property_identifier) @attribute".to_string(),
+                Some(format!(r#"(#eq? @attribute \"{name}\")"#)),
             ),
-            Some(MetavarToken::Metavar(_)) => ("(_) @attribute", None),
-            _ => ("(_) @attribute", None),
+            Some(MetavarToken::Metavar(name)) => (
+                format!("(_) @{}", capture_name_for_metavar(name)),
+                None,
+            ),
+            _ => ("(_) @attribute".to_string(), None),
         };
 
         // Combine constraints
@@ -550,9 +600,9 @@ fn translate_simple_expression(tokens: &[MetavarToken], language: &Language) -> 
     };
 
     match &tokens[0] {
-        MetavarToken::Metavar(_) => {
+        MetavarToken::Metavar(name) => {
             // Match any identifier
-            Some(format!("({id_node}) @expr"))
+            Some(format!("({id_node}) @{}", capture_name_for_metavar(name)))
         }
         MetavarToken::Identifier(name) => {
             // Match specific identifier
@@ -573,6 +623,50 @@ fn translate_simple_expression(tokens: &[MetavarToken], language: &Language) -> 
             }
         }
         _ => None,
+    }
+}
+
+fn capture_name_for_metavar(name: &str) -> String {
+    let raw = name.trim_start_matches('$');
+    let mut normalized: String = raw
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+
+    if normalized.is_empty() {
+        normalized = "VAR".to_string();
+    }
+
+    if normalized
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit())
+        .unwrap_or(false)
+    {
+        normalized = format!("_{normalized}");
+    }
+
+    format!("mv_{normalized}")
+}
+
+fn operand_pattern(
+    token: Option<&MetavarToken>,
+    fallback: &str,
+) -> (String, Option<String>) {
+    match token {
+        Some(MetavarToken::Metavar(name)) => (
+            format!("(_) @{}", capture_name_for_metavar(name)),
+            None,
+        ),
+        Some(MetavarToken::Identifier(name)) => (
+            format!("(_) @{fallback}"),
+            Some(format!(r#"(#eq? @{fallback} "{name}")"#)),
+        ),
+        Some(MetavarToken::StringLiteral(content)) => (
+            format!("(_) @{fallback}"),
+            Some(format!(r#"(#match? @{fallback} "{content}")"#)),
+        ),
+        _ => (format!("(_) @{fallback}"), None),
     }
 }
 
@@ -706,7 +800,7 @@ mod tests {
         assert!(query.is_some());
         let q = query.unwrap();
         // Should contain argument captures
-        assert!(q.contains("@arg0"));
+        assert!(q.contains("@mv_X"));
         assert!(q.contains("@arg1"));
         // Should contain constraint for literal argument
         assert!(q.contains("literal"));
@@ -724,8 +818,8 @@ mod tests {
         let q = query.unwrap();
         assert!(q.contains("binary_operator"));
         assert!(q.contains(r#"operator: "+""#));
-        assert!(q.contains("@left"));
-        assert!(q.contains("@right"));
+        assert!(q.contains("@mv_X"));
+        assert!(q.contains("@mv_Y"));
     }
 
     #[test]
@@ -747,8 +841,8 @@ mod tests {
         let q = query.unwrap();
         // Unmapped operator should still generate query but without operator constraint
         assert!(q.contains("binary_expression"));
-        assert!(q.contains("@left"));
-        assert!(q.contains("@right"));
+        assert!(q.contains("@mv_X"));
+        assert!(q.contains("@mv_Y"));
         // Should NOT contain operator field for unmapped operators
         assert!(!q.contains(r#"operator: "%""#));
     }
@@ -776,7 +870,7 @@ mod tests {
         assert!(query.is_some());
         let q = query.unwrap();
         assert!(q.contains("attribute"));
-        assert!(q.contains("@object"));
+        assert!(q.contains("@mv_OBJ"));
         assert!(q.contains("@attribute"));
         // Should have constraint for literal "method"
         assert!(q.contains("method"));
@@ -791,6 +885,7 @@ mod tests {
         // Should have constraint for literal "request"
         assert!(q.contains("request"));
         assert!(q.contains("@object"));
+        assert!(q.contains("@mv_ATTR"));
     }
 
     #[test]
@@ -800,8 +895,8 @@ mod tests {
         assert!(query.is_some());
         let q = query.unwrap();
         // No constraints for metavars, just wildcards
-        assert!(q.contains("(_) @object"));
-        assert!(q.contains("(_) @attribute"));
+        assert!(q.contains("@mv_OBJ"));
+        assert!(q.contains("@mv_ATTR"));
     }
 
     #[test]
@@ -942,8 +1037,8 @@ mod tests {
         assert!(query.is_some());
         let q = query.unwrap();
         assert!(q.contains("call"));
-        assert!(q.contains("@func"));
+        assert!(q.contains("@mv_FUNC"));
         // Should NOT have #eq? constraint for metavar function name
-        assert!(!q.contains("#eq? @func"));
+        assert!(!q.contains("#eq? @mv_FUNC"));
     }
 }

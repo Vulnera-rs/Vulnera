@@ -1,0 +1,45 @@
+# Common cross-language security rules — 2 rules
+
+[[rules]]
+id = "sql-injection"
+name = "SQL Injection"
+description = "Potential SQL injection vulnerability"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-89"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "sql"]
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: [
+    (identifier) @fn
+    (attribute attribute: (identifier) @fn)
+  ]
+  (#match? @fn "^execute$")
+) @call
+'''
+
+[[rules]]
+id = "command-injection"
+name = "Command Injection"
+description = "Potential command injection vulnerability"
+severity = "High"
+languages = ["Python", "JavaScript"]
+cwe_ids = ["CWE-78"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["injection", "command"]
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: [
+    (identifier) @fn
+    (attribute attribute: (identifier) @fn)
+  ]
+  (#match? @fn "^exec$")
+) @call
+'''

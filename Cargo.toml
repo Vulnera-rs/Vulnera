@@ -102,7 +102,7 @@ tempfile.workspace = true
 version = "0.4.1"
 edition = "2024"
 authors = ["Vulnera-Team"]
-license = "AGPL-3.0-or-later"
+license = "Proprietary"
 repository = "https://github.com/k5602/vulnera"
 keywords = ["security", "vulnerability", "analysis", "dependencies"]
 categories = ["web-programming", "development-tools"]
@@ -241,7 +241,7 @@ testcontainers = { version = "0.26.3" }
 wiremock = "0.6"
 rstest = "0.26.1"
 axum-test = "18.5.0"
-tempfile = "3.24.0"
+tempfile = "3.25.0"
 mockito = "1.7.1"
 tokio-test = "0.4.5"
 serial_test = "3.2.0"
