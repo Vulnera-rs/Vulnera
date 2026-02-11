@@ -31,7 +31,9 @@ use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::scanner::DirectoryScanner;
-use crate::infrastructure::taint_queries::{TaintConfig, get_propagation_queries, get_sanitizer_queries};
+use crate::infrastructure::taint_queries::{
+    TaintConfig, get_propagation_queries, get_sanitizer_queries,
+};
 
 /// Result of a SAST scan
 #[derive(Debug)]
@@ -1329,7 +1331,6 @@ pub enum ScanError {
     /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
-
 }
 
 impl ScanError {

@@ -33,8 +33,8 @@ impl Language {
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
             "py" => Some(Language::Python),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),
-            "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
+            "js" | "mjs" | "cjs" => Some(Language::JavaScript),
+            "ts" | "mts" | "cts" => Some(Language::TypeScript),
             "rs" => Some(Language::Rust),
             "go" => Some(Language::Go),
             "c" | "h" => Some(Language::C),
@@ -63,11 +63,6 @@ impl Language {
         }
     }
 
-    /// Whether this language uses JSX/TSX syntax
-    pub fn supports_jsx(&self) -> bool {
-        matches!(self, Language::JavaScript | Language::TypeScript)
-    }
-
     /// Get the tree-sitter grammar for this language
     pub fn grammar(&self) -> tree_sitter::Language {
         match self {
@@ -79,11 +74,6 @@ impl Language {
             Language::C => tree_sitter_c::LANGUAGE.into(),
             Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
         }
-    }
-
-    /// Get the TSX grammar (TypeScript with JSX support)
-    pub fn tsx_grammar() -> tree_sitter::Language {
-        tree_sitter_typescript::LANGUAGE_TSX.into()
     }
 }
 

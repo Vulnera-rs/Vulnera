@@ -103,85 +103,70 @@ pub fn extract_metavariable_bindings(
 
 /// Get the tree-sitter language for a given Language enum
 pub fn get_ts_language(language: &Language) -> Result<TsLanguage, QueryEngineError> {
-        match language {
-            Language::Python => Ok(tree_sitter_python::LANGUAGE.into()),
-            Language::JavaScript => Ok(tree_sitter_javascript::LANGUAGE.into()),
-            Language::TypeScript => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-            Language::Rust => Ok(tree_sitter_rust::LANGUAGE.into()),
-            Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
-            Language::C => Ok(tree_sitter_c::LANGUAGE.into()),
-            Language::Cpp => Ok(tree_sitter_cpp::LANGUAGE.into()),
-        }
+    match language {
+        Language::Python => Ok(tree_sitter_python::LANGUAGE.into()),
+        Language::JavaScript => Ok(tree_sitter_javascript::LANGUAGE.into()),
+        Language::TypeScript => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
+        Language::Rust => Ok(tree_sitter_rust::LANGUAGE.into()),
+        Language::Go => Ok(tree_sitter_go::LANGUAGE.into()),
+        Language::C => Ok(tree_sitter_c::LANGUAGE.into()),
+        Language::Cpp => Ok(tree_sitter_cpp::LANGUAGE.into()),
     }
-
-    /// Get the TSX language for React files
-    pub fn get_tsx_language() -> TsLanguage {
-        tree_sitter_typescript::LANGUAGE_TSX.into()
-    }
+}
 
 /// Parse source code and return the tree
 #[instrument(skip(source), fields(source_len = source.len()))]
-pub fn parse(
-    source: &str,
-    language: &Language,
-) -> Result<(Tree, TsLanguage), QueryEngineError> {
+pub fn parse(source: &str, language: &Language) -> Result<(Tree, TsLanguage), QueryEngineError> {
     let ts_lang = get_ts_language(language)?;
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&ts_lang)
-            .map_err(|e| QueryEngineError::QueryParseFailed(e.to_string()))?;
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&ts_lang)
+        .map_err(|e| QueryEngineError::QueryParseFailed(e.to_string()))?;
 
-        let tree = parser
-            .parse(source, None)
-            .ok_or(QueryEngineError::ParseFailed)?;
-        debug!(
-            node_count = tree.root_node().child_count(),
-            "Parsed source code"
-        );
-        Ok((tree, ts_lang))
-    }
+    let tree = parser
+        .parse(source, None)
+        .ok_or(QueryEngineError::ParseFailed)?;
+    debug!(
+        node_count = tree.root_node().child_count(),
+        "Parsed source code"
+    );
+    Ok((tree, ts_lang))
+}
 
 /// Compile a query for a given language and return an Arc for shared access
 ///
 /// This is a pure compilation step with no internal caching.
 /// Callers should cache the result if repeated compilation is expected.
 #[instrument(skip(query_str), fields(query_len = query_str.len()))]
-pub fn compile_query(
-    query_str: &str,
-    language: &Language,
-) -> Result<Arc<Query>, QueryEngineError> {
+pub fn compile_query(query_str: &str, language: &Language) -> Result<Arc<Query>, QueryEngineError> {
     // Compile new query
     let ts_lang = get_ts_language(language)?;
-        let query = Query::new(&ts_lang, query_str).map_err(|e| {
-            QueryEngineError::QueryParseFailed(format!(
-                "Query parse error at offset {}: {}",
-                e.offset,
-                match e.kind {
-                    tree_sitter::QueryErrorKind::Syntax => "syntax error",
-                    tree_sitter::QueryErrorKind::NodeType => "unknown node type",
-                    tree_sitter::QueryErrorKind::Field => "unknown field name",
-                    tree_sitter::QueryErrorKind::Capture => "unknown capture name",
-                    tree_sitter::QueryErrorKind::Structure => "invalid query structure",
-                    tree_sitter::QueryErrorKind::Predicate => "invalid predicate",
-                    tree_sitter::QueryErrorKind::Language => "language error",
-                }
-            ))
-        })?;
-        debug!(
-            pattern_count = query.pattern_count(),
-            capture_count = query.capture_names().len(),
-            "Compiled query"
-        );
-        Ok(Arc::new(query))
-    }
+    let query = Query::new(&ts_lang, query_str).map_err(|e| {
+        QueryEngineError::QueryParseFailed(format!(
+            "Query parse error at offset {}: {}",
+            e.offset,
+            match e.kind {
+                tree_sitter::QueryErrorKind::Syntax => "syntax error",
+                tree_sitter::QueryErrorKind::NodeType => "unknown node type",
+                tree_sitter::QueryErrorKind::Field => "unknown field name",
+                tree_sitter::QueryErrorKind::Capture => "unknown capture name",
+                tree_sitter::QueryErrorKind::Structure => "invalid query structure",
+                tree_sitter::QueryErrorKind::Predicate => "invalid predicate",
+                tree_sitter::QueryErrorKind::Language => "language error",
+            }
+        ))
+    })?;
+    debug!(
+        pattern_count = query.pattern_count(),
+        capture_count = query.capture_names().len(),
+        "Compiled query"
+    );
+    Ok(Arc::new(query))
+}
 
 /// Execute a query against parsed source code
 #[instrument(skip(tree, source, query), fields(query_patterns = query.pattern_count()))]
-pub fn execute_query(
-    query: &Query,
-    tree: &Tree,
-    source: &[u8],
-) -> Vec<QueryMatchResult> {
+pub fn execute_query(query: &Query, tree: &Tree, source: &[u8]) -> Vec<QueryMatchResult> {
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, tree.root_node(), source);
 
@@ -208,66 +193,68 @@ fn process_match(
     capture_names: &[&str],
     source: &[u8],
 ) -> Option<QueryMatchResult> {
-        if m.captures.is_empty() {
-            return None;
-        }
-
-        let mut captures = HashMap::new();
-        let mut captures_by_name: HashMap<String, Vec<CaptureInfo>> = HashMap::new();
-        let mut min_start_byte = usize::MAX;
-        let mut max_end_byte = 0;
-        let mut min_start_pos = (usize::MAX, usize::MAX);
-        let mut max_end_pos = (0, 0);
-
-        for capture in m.captures {
-            let node = capture.node;
-            let capture_name = capture_names.get(capture.index as usize)?;
-
-            let text = node.utf8_text(source).ok()?.to_string();
-            let start_byte = node.start_byte();
-            let end_byte = node.end_byte();
-            let start_pos = node.start_position();
-            let end_pos = node.end_position();
-
-            // Track overall match bounds
-            if start_byte < min_start_byte {
-                min_start_byte = start_byte;
-                min_start_pos = (start_pos.row, start_pos.column);
-            }
-            if end_byte > max_end_byte {
-                max_end_byte = end_byte;
-                max_end_pos = (end_pos.row, end_pos.column);
-            }
-
-            let info = CaptureInfo {
-                text,
-                start_byte,
-                end_byte,
-                start_position: (start_pos.row, start_pos.column),
-                end_position: (end_pos.row, end_pos.column),
-                kind: node.kind().to_string(),
-            };
-
-            captures.entry(capture_name.to_string()).or_insert_with(|| info.clone());
-            captures_by_name
-                .entry(capture_name.to_string())
-                .or_default()
-                .push(info);
-        }
-
-        let bindings = extract_metavariable_bindings(&captures_by_name)?;
-
-        Some(QueryMatchResult {
-            pattern_index: m.pattern_index,
-            captures,
-            captures_by_name,
-            bindings,
-            start_byte: min_start_byte,
-            end_byte: max_end_byte,
-            start_position: min_start_pos,
-            end_position: max_end_pos,
-        })
+    if m.captures.is_empty() {
+        return None;
     }
+
+    let mut captures = HashMap::new();
+    let mut captures_by_name: HashMap<String, Vec<CaptureInfo>> = HashMap::new();
+    let mut min_start_byte = usize::MAX;
+    let mut max_end_byte = 0;
+    let mut min_start_pos = (usize::MAX, usize::MAX);
+    let mut max_end_pos = (0, 0);
+
+    for capture in m.captures {
+        let node = capture.node;
+        let capture_name = capture_names.get(capture.index as usize)?;
+
+        let text = node.utf8_text(source).ok()?.to_string();
+        let start_byte = node.start_byte();
+        let end_byte = node.end_byte();
+        let start_pos = node.start_position();
+        let end_pos = node.end_position();
+
+        // Track overall match bounds
+        if start_byte < min_start_byte {
+            min_start_byte = start_byte;
+            min_start_pos = (start_pos.row, start_pos.column);
+        }
+        if end_byte > max_end_byte {
+            max_end_byte = end_byte;
+            max_end_pos = (end_pos.row, end_pos.column);
+        }
+
+        let info = CaptureInfo {
+            text,
+            start_byte,
+            end_byte,
+            start_position: (start_pos.row, start_pos.column),
+            end_position: (end_pos.row, end_pos.column),
+            kind: node.kind().to_string(),
+        };
+
+        captures
+            .entry(capture_name.to_string())
+            .or_insert_with(|| info.clone());
+        captures_by_name
+            .entry(capture_name.to_string())
+            .or_default()
+            .push(info);
+    }
+
+    let bindings = extract_metavariable_bindings(&captures_by_name)?;
+
+    Some(QueryMatchResult {
+        pattern_index: m.pattern_index,
+        captures,
+        captures_by_name,
+        bindings,
+        start_byte: min_start_byte,
+        end_byte: max_end_byte,
+        start_position: min_start_pos,
+        end_position: max_end_pos,
+    })
+}
 
 /// Execute a query string directly against source code
 #[instrument(skip(source, query_str), fields(source_len = source.len()))]
@@ -439,10 +426,7 @@ pub fn format_description(
     match_result: &QueryMatchResult,
     snippet: &str,
 ) -> String {
-    let base = rule
-        .message
-        .as_deref()
-        .unwrap_or(&rule.description);
+    let base = rule.message.as_deref().unwrap_or(&rule.description);
     let mut desc = interpolate_template(base, &match_result.bindings);
 
     // Append captured values for context
@@ -855,8 +839,7 @@ result = eval(user_input)
 safe = eval("1 + 2")
 "#;
 
-        let matches = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
-            .unwrap();
+        let matches = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL).unwrap();
 
         assert_eq!(matches.len(), 2);
         for m in &matches {
@@ -872,8 +855,7 @@ element.innerHTML = userInput;
 div.textContent = safe;
 "#;
 
-        let matches = query(source, &Language::JavaScript, common_queries::JS_INNER_HTML)
-            .unwrap();
+        let matches = query(source, &Language::JavaScript, common_queries::JS_INNER_HTML).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert!(matches[0].captures.contains_key("prop"));
@@ -889,8 +871,7 @@ fn main() {
 }
 "#;
 
-        let matches = query(source, &Language::Rust, common_queries::RUST_UNWRAP)
-            .unwrap();
+        let matches = query(source, &Language::Rust, common_queries::RUST_UNWRAP).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert!(matches[0].captures.contains_key("method"));
@@ -908,8 +889,7 @@ fn main() {
 }
 "#;
 
-        let matches = query(source, &Language::Rust, common_queries::RUST_UNSAFE)
-            .unwrap();
+        let matches = query(source, &Language::Rust, common_queries::RUST_UNSAFE).unwrap();
 
         assert_eq!(matches.len(), 1);
     }
@@ -924,8 +904,7 @@ int main() {
 }
 "#;
 
-        let matches = query(source, &Language::C, common_queries::C_STRCPY)
-            .unwrap();
+        let matches = query(source, &Language::C, common_queries::C_STRCPY).unwrap();
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].captures.get("name").unwrap().text, "strcpy");
@@ -943,8 +922,7 @@ os.system("rm -rf /")
             ("exec-call".to_string(), common_queries::PYTHON_EXEC_CALL),
         ];
 
-        let results = batch_query(source, &Language::Python, &queries)
-            .unwrap();
+        let results = batch_query(source, &Language::Python, &queries).unwrap();
 
         assert_eq!(results.get("eval-call").unwrap().len(), 1);
         assert_eq!(results.get("exec-call").unwrap().len(), 0);
@@ -960,8 +938,7 @@ os.system("rm -rf /")
             ("exec-call".to_string(), common_queries::PYTHON_EXEC_CALL),
         ];
 
-        let results = batch_query_with_tree(&tree, source, &Language::Python, &queries)
-            .unwrap();
+        let results = batch_query_with_tree(&tree, source, &Language::Python, &queries).unwrap();
 
         assert_eq!(results.get("eval-call").unwrap().len(), 1);
         assert_eq!(results.get("exec-call").unwrap().len(), 0);
@@ -977,8 +954,7 @@ os.system("rm -rf /")
             Pattern::Not(Box::new(Pattern::Metavariable("bar($X)".to_string()))),
         ]);
 
-        let matches = match_pattern(&pattern, source, &Language::Python, &tree)
-            .unwrap();
+        let matches = match_pattern(&pattern, source, &Language::Python, &tree).unwrap();
 
         assert_eq!(matches.len(), 0);
     }
@@ -1000,18 +976,15 @@ os.system("rm -rf /")
         let source = "eval(x)";
 
         // First query should compile and execute
-        let result1 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
-            .unwrap();
+        let result1 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL).unwrap();
         assert_eq!(result1.len(), 1);
 
         // Second query with same params should also work (stateless)
-        let result2 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL)
-            .unwrap();
+        let result2 = query(source, &Language::Python, common_queries::PYTHON_EVAL_CALL).unwrap();
         assert_eq!(result2.len(), 1);
 
         // Different query should also work
-        let result3 = query(source, &Language::Python, common_queries::PYTHON_EXEC_CALL)
-            .unwrap();
+        let result3 = query(source, &Language::Python, common_queries::PYTHON_EXEC_CALL).unwrap();
         assert_eq!(result3.len(), 0);
     }
 

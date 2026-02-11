@@ -41,8 +41,6 @@ pub enum ParseError {
 pub struct TreeSitterParser {
     parser: tree_sitter::Parser,
     lang: Language,
-    /// Tracks whether this is a TSX parser (TypeScript + JSX)
-    is_tsx: bool,
 }
 
 impl TreeSitterParser {
@@ -56,41 +54,16 @@ impl TreeSitterParser {
         })?;
 
         debug!(language = %lang, "Parser initialized");
-        Ok(Self {
-            parser,
-            lang,
-            is_tsx: false,
-        })
+        Ok(Self { parser, lang })
     }
 
     /// Parse source code and return the raw tree-sitter Tree.
     /// This is useful for executing queries directly against the AST.
     pub fn parse_tree(&mut self, source: &str) -> Result<tree_sitter::Tree, ParseError> {
         self.parser.parse(source, None).ok_or_else(|| {
-            let label = if self.is_tsx {
-                "TSX"
-            } else {
-                self.lang.to_tree_sitter_name()
-            };
+            let label = self.lang.to_tree_sitter_name();
             warn!(language = label, "Failed to parse code");
             ParseError::ParseFailed(format!("Failed to parse {} code", label))
-        })
-    }
-
-    /// Create a TSX parser for React/JSX files.
-    pub fn new_tsx() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let grammar = Language::tsx_grammar();
-        parser.set_language(&grammar).map_err(|e| {
-            error!(error = %e, "Failed to load TSX grammar");
-            ParseError::ParseFailed(format!("Failed to load TSX grammar: {}", e))
-        })?;
-
-        debug!("TSX parser initialized");
-        Ok(Self {
-            parser,
-            lang: Language::TypeScript,
-            is_tsx: true,
         })
     }
 }
@@ -102,11 +75,7 @@ impl Parser for TreeSitterParser {
 
     #[instrument(skip(self, source), fields(language = %self.lang, source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let label = if self.is_tsx {
-            "TSX"
-        } else {
-            self.lang.to_tree_sitter_name()
-        };
+        let label = self.lang.to_tree_sitter_name();
 
         let tree = self.parser.parse(source, None).ok_or_else(|| {
             warn!(language = label, "Failed to parse code");
@@ -128,11 +97,6 @@ pub struct ParserFactory;
 impl ParserFactory {
     pub fn create_parser(&self, language: &Language) -> Result<Box<dyn Parser>, ParseError> {
         Ok(Box::new(TreeSitterParser::new(*language)?))
-    }
-
-    /// Create a TSX parser specifically for React/JSX files
-    pub fn create_tsx_parser(&self) -> Result<Box<dyn Parser>, ParseError> {
-        Ok(Box::new(TreeSitterParser::new_tsx()?))
     }
 }
 

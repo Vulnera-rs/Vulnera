@@ -145,7 +145,7 @@ proptest! {
 
     #[test]
     fn language_detection_from_extension_is_pure(
-        ext in "(py|js|ts|rs|go|c|cpp|h|jsx|tsx|mjs|cjs|mts|cts|hpp|cc|cxx|hxx)"
+        ext in "(py|js|ts|rs|go|c|cpp|h|mjs|cjs|mts|cts|hpp|cc|cxx|hxx)"
     ) {
         let result1 = Language::from_extension(&ext);
         let result2 = Language::from_extension(&ext);

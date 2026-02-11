@@ -296,8 +296,9 @@ impl AstCacheService for DragonflyAstCache {
 
 /// In-memory AST cache for testing and development
 pub struct InMemoryAstCache {
-    cache:
-        tokio::sync::RwLock<std::collections::HashMap<String, (CachedAstEntry, std::time::Instant)>>,
+    cache: tokio::sync::RwLock<
+        std::collections::HashMap<String, (CachedAstEntry, std::time::Instant)>,
+    >,
     default_ttl: Duration,
 }
 
