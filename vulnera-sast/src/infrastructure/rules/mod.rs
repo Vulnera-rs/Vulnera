@@ -4,7 +4,10 @@ mod default_rules;
 mod loader;
 
 pub use default_rules::get_default_rules;
-pub use loader::{BuiltinRuleLoader, FileRuleLoader, RuleLoadError, RuleLoader};
+pub use loader::{
+    BuiltinRuleLoader, CompositeRuleLoader, FileRuleLoader, RuleLoadError, RuleLoader,
+    RulePackLoader,
+};
 
 use crate::domain::pattern_types::PatternRule;
 use crate::domain::value_objects::Language;

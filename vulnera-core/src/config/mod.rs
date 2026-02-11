@@ -623,6 +623,37 @@ pub enum AnalysisDepth {
     Deep,
 }
 
+/// Rule pack configuration (Git-based rule sets)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RulePackConfig {
+    /// Friendly name for the pack
+    pub name: String,
+    /// Git URL for the pack repository
+    pub git_url: String,
+    /// Optional git reference (branch, tag, or commit SHA)
+    pub reference: Option<String>,
+    /// Path to rules file within the repository
+    pub rules_path: PathBuf,
+    /// Optional SHA256 checksum for rules file validation
+    pub checksum_sha256: Option<String>,
+    /// Enable or disable this pack
+    pub enabled: bool,
+}
+
+impl Default for RulePackConfig {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            git_url: String::new(),
+            reference: None,
+            rules_path: PathBuf::from("rules.toml"),
+            checksum_sha256: None,
+            enabled: true,
+        }
+    }
+}
+
 /// SAST (Static Application Security Testing) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -633,6 +664,12 @@ pub struct SastConfig {
     pub exclude_patterns: Vec<String>,
     /// Optional path to rule configuration file (TOML or JSON)
     pub rule_file_path: Option<PathBuf>,
+    /// Git-based rule packs to load and merge
+    #[serde(default)]
+    pub rule_packs: Vec<RulePackConfig>,
+    /// Allowlist of allowed Git URL prefixes for rule packs
+    #[serde(default)]
+    pub rule_pack_allowlist: Vec<String>,
     /// Optional path to taint configuration file (TOML or JSON)
     /// Allows defining custom taint sources, sinks, and sanitizers
     pub taint_config_path: Option<PathBuf>,
@@ -698,6 +735,8 @@ impl Default for SastConfig {
                 "fixtures".to_string(),
             ],
             rule_file_path: None,
+            rule_packs: Vec::new(),
+            rule_pack_allowlist: Vec::new(),
             taint_config_path: None,
             enable_logging: true,
             enable_data_flow: true,

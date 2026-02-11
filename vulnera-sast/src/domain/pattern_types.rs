@@ -3,6 +3,7 @@
 //! Types for defining pattern-based security detection rules.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::value_objects::{Confidence, Language};
 
@@ -47,6 +48,20 @@ pub struct PatternRule {
     ///
     #[serde(default)]
     pub metavariable_constraints: Vec<MetavariableConstraint>,
+    /// Optional semantic constraints (type-aware filtering)
+    #[serde(default)]
+    pub semantic: Option<SemanticRuleOptions>,
+}
+
+/// Semantic constraints for a rule (type-aware filtering)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SemanticRuleOptions {
+    /// Required types for metavariables: "$VAR" -> ["TypeA", "TypeB"]
+    #[serde(default)]
+    pub required_types: HashMap<String, Vec<String>>,
+    /// Allow matches when type inference is unknown
+    #[serde(default)]
+    pub allow_unknown_types: bool,
 }
 
 // =============================================================================

@@ -37,6 +37,7 @@ use crate::infrastructure::query_engine::{
     CaptureInfo, QueryEngineError, QueryMatchResult, extract_metavariable_bindings,
 };
 use crate::infrastructure::regex_cache;
+use crate::infrastructure::semantic::SemanticContext;
 use crate::infrastructure::symbol_table::{SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::TaintConfig;
 
@@ -305,9 +306,10 @@ impl SastEngine {
         rule: &PatternRule,
         match_result: &QueryMatchResult,
         language: Language,
+        semantic_context: Option<&SemanticContext>,
     ) -> bool {
         if rule.metavariable_constraints.is_empty() {
-            return true;
+            return self.semantic_constraints_pass(rule, match_result, semantic_context);
         }
 
         let mut parsed_cache: HashMap<String, Tree> = HashMap::new();
@@ -366,6 +368,48 @@ impl SastEngine {
                         if !matches.is_empty() {
                             return false;
                         }
+                    }
+                }
+            }
+        }
+
+        self.semantic_constraints_pass(rule, match_result, semantic_context)
+    }
+
+    fn semantic_constraints_pass(
+        &self,
+        rule: &PatternRule,
+        match_result: &QueryMatchResult,
+        semantic_context: Option<&SemanticContext>,
+    ) -> bool {
+        let Some(semantic) = rule.semantic.as_ref() else {
+            return true;
+        };
+
+        if semantic.required_types.is_empty() {
+            return true;
+        }
+
+        for (metavar, allowed_types) in &semantic.required_types {
+            let Some(bound_text) = match_result.bindings.get(metavar) else {
+                return false;
+            };
+
+            let identifier = normalize_identifier(bound_text);
+
+            let inferred = semantic_context
+                .and_then(|ctx| ctx.resolve_type(&identifier))
+                .map(|s| s.to_string());
+
+            match inferred {
+                Some(ty) => {
+                    if !allowed_types.iter().any(|allowed| allowed == &ty) {
+                        return false;
+                    }
+                }
+                None => {
+                    if !semantic.allow_unknown_types {
+                        return false;
                     }
                 }
             }
@@ -898,6 +942,17 @@ fn interpolate_template(template: &str, bindings: &HashMap<String, String>) -> S
             .unwrap_or_else(|| caps[0].to_string())
     })
     .to_string()
+}
+
+fn normalize_identifier(text: &str) -> String {
+    let trimmed = text.trim();
+    let without_call = trimmed.strip_suffix("()").unwrap_or(trimmed);
+    without_call
+        .rsplit('.')
+        .next()
+        .unwrap_or(without_call)
+        .trim()
+        .to_string()
 }
 
 #[cfg(test)]

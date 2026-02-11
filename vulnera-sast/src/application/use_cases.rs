@@ -30,10 +30,13 @@ use crate::infrastructure::data_flow::{DataFlowAnalyzer, InterProceduralContext,
 use crate::infrastructure::incremental::IncrementalTracker;
 use crate::infrastructure::parsers::convert_tree_sitter_node;
 use crate::infrastructure::regex_cache;
-use crate::infrastructure::rules::RuleRepository;
+use crate::infrastructure::rules::{
+    BuiltinRuleLoader, CompositeRuleLoader, FileRuleLoader, RulePackLoader, RuleRepository,
+};
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
 use crate::infrastructure::scanner::DirectoryScanner;
+use crate::infrastructure::semantic::SemanticContext;
 use crate::infrastructure::taint_queries::{
     TaintConfig, get_propagation_queries, get_sanitizer_queries,
 };
@@ -259,11 +262,21 @@ impl ScanProjectUseCase {
         let scanner = DirectoryScanner::new(sast_config.max_scan_depth)
             .with_exclude_patterns(sast_config.exclude_patterns.clone());
 
-        let rule_repository = if let Some(ref rule_file_path) = sast_config.rule_file_path {
-            RuleRepository::with_file_and_defaults(rule_file_path)
-        } else {
-            RuleRepository::new()
-        };
+        let mut loaders: Vec<Box<dyn crate::infrastructure::rules::RuleLoader>> =
+            vec![Box::new(BuiltinRuleLoader::new())];
+
+        if let Some(ref rule_file_path) = sast_config.rule_file_path {
+            loaders.push(Box::new(FileRuleLoader::new(rule_file_path)));
+        }
+
+        if !sast_config.rule_packs.is_empty() {
+            loaders.push(Box::new(RulePackLoader::new(
+                sast_config.rule_packs.clone(),
+                sast_config.rule_pack_allowlist.clone(),
+            )));
+        }
+
+        let rule_repository = RuleRepository::from_loader(&CompositeRuleLoader::new(loaders));
 
         // Load incremental state if path is configured
         let incremental_tracker = analysis_config
@@ -735,7 +748,7 @@ impl ScanProjectUseCase {
         rules: &[&PatternRule],
         suppressions: &FileSuppressions,
         is_test_context: bool,
-        _tree: Option<&tree_sitter::Tree>,
+        tree: Option<&tree_sitter::Tree>,
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
         // Filter to pattern rules (tree-sitter, metavariables, and composites)
@@ -750,6 +763,22 @@ impl ScanProjectUseCase {
             file = %file_path.display(),
             "Executing pattern rules"
         );
+
+        let semantic_context = if pattern_rules.iter().any(|r| r.semantic.is_some()) {
+            let tree = if let Some(tree) = tree {
+                tree.clone()
+            } else {
+                self.sast_engine
+                    .parse(content, *language)
+                    .await
+                    .map_err(|e| {
+                        ScanError::parse_failed(file_path, language, e.to_string(), None)
+                    })?
+            };
+            Some(SemanticContext::from_tree(&tree, content, *language))
+        } else {
+            None
+        };
 
         let results = {
             self.sast_engine
@@ -778,7 +807,12 @@ impl ScanProjectUseCase {
 
                     if !self
                         .sast_engine
-                        .metavariable_constraints_pass(rule, &match_result, *language)
+                        .metavariable_constraints_pass(
+                            rule,
+                            &match_result,
+                            *language,
+                            semantic_context.as_ref(),
+                        )
                         .await
                     {
                         debug!(rule_id = %rule.id, line, "Metavariable constraints rejected");

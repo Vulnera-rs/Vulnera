@@ -7686,6 +7686,7 @@ dependencies = [
  "bincode",
  "datatest-stable",
  "futures",
+ "git2",
  "globset",
  "hex",
  "insta",

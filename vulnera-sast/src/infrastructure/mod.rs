@@ -21,6 +21,7 @@ pub mod rules;
 pub mod sarif;
 pub mod sast_engine;
 pub mod scanner;
+pub mod semantic;
 pub mod symbol_table;
 pub mod taint_queries;
 
@@ -32,5 +33,6 @@ pub use query_engine::*;
 pub use rules::RuleRepository;
 pub use sast_engine::*;
 pub use scanner::*;
+pub use semantic::*;
 pub use symbol_table::*;
 pub use taint_queries::*;

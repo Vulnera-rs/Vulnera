@@ -45,6 +45,7 @@ quote = { workspace = true }
 proc-macro2 = { workspace = true }
 walkdir = { workspace = true }
 regex = { workspace = true }
+git2 = { workspace = true }
 
 # Streaming iterator for tree-sitter queries
 streaming-iterator = { workspace = true }

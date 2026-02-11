@@ -6,13 +6,40 @@
 
 use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::infrastructure::rules::default_rules::get_default_rules;
+use git2::Repository;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use tracing::{debug, warn};
+use vulnera_core::config::RulePackConfig;
 
 /// Trait for loading rules from various sources
 pub trait RuleLoader: Send + Sync {
     fn load_rules(&self) -> Result<Vec<PatternRule>, RuleLoadError>;
+}
+
+/// Composite loader that merges rules from multiple loaders
+pub struct CompositeRuleLoader {
+    loaders: Vec<Box<dyn RuleLoader>>,
+}
+
+impl CompositeRuleLoader {
+    pub fn new(loaders: Vec<Box<dyn RuleLoader>>) -> Self {
+        Self { loaders }
+    }
+}
+
+impl RuleLoader for CompositeRuleLoader {
+    fn load_rules(&self) -> Result<Vec<PatternRule>, RuleLoadError> {
+        let mut rules = Vec::new();
+        for loader in &self.loaders {
+            match loader.load_rules() {
+                Ok(mut loaded) => rules.append(&mut loaded),
+                Err(e) => warn!(error = %e, "Rule loader failed; skipping source"),
+            }
+        }
+        Ok(rules)
+    }
 }
 
 /// Loader for compile-time embedded TOML rules.
@@ -90,7 +117,7 @@ impl RuleLoader for FileRuleLoader {
             }
             "yaml" | "yml" => {
                 debug!(file = %self.file_path.display(), "Loading rules from YAML file");
-                load_yaml_rules(&content)?
+                load_yaml_rules(&content)?.rules
             }
             _ => {
                 debug!(file = %self.file_path.display(), "Loading rules from TOML file");
@@ -115,15 +142,104 @@ impl RuleLoader for FileRuleLoader {
     }
 }
 
+/// Git-based rule pack loader
+pub struct RulePackLoader {
+    packs: Vec<RulePackConfig>,
+    allowlist: Vec<String>,
+}
+
+impl RulePackLoader {
+    pub fn new(packs: Vec<RulePackConfig>, allowlist: Vec<String>) -> Self {
+        Self { packs, allowlist }
+    }
+
+    fn is_allowed(&self, url: &str) -> bool {
+        if self.allowlist.is_empty() {
+            return true;
+        }
+        self.allowlist.iter().any(|prefix| url.starts_with(prefix))
+    }
+}
+
+impl RuleLoader for RulePackLoader {
+    fn load_rules(&self) -> Result<Vec<PatternRule>, RuleLoadError> {
+        let mut rules = Vec::new();
+
+        for pack in &self.packs {
+            if !pack.enabled {
+                continue;
+            }
+
+            if !self.is_allowed(&pack.git_url) {
+                warn!(pack = %pack.name, url = %pack.git_url, "Rule pack URL not allowlisted");
+                continue;
+            }
+
+            let temp_dir = tempfile::TempDir::new()?;
+            let repo = Repository::clone(&pack.git_url, temp_dir.path())
+                .map_err(|e| RuleLoadError::InvalidRule(e.to_string()))?;
+
+            if let Some(reference) = pack.reference.as_deref() {
+                let obj = repo
+                    .revparse_single(reference)
+                    .map_err(|e| RuleLoadError::InvalidRule(e.to_string()))?;
+                repo.checkout_tree(&obj, None)
+                    .map_err(|e| RuleLoadError::InvalidRule(e.to_string()))?;
+                repo.set_head_detached(obj.id())
+                    .map_err(|e| RuleLoadError::InvalidRule(e.to_string()))?;
+            }
+
+            let rules_path = temp_dir.path().join(&pack.rules_path);
+            let content = std::fs::read_to_string(&rules_path)?;
+
+            if let Some(expected) = pack.checksum_sha256.as_deref() {
+                let mut hasher = Sha256::new();
+                hasher.update(content.as_bytes());
+                let actual = hex::encode(hasher.finalize());
+                if actual.to_lowercase() != expected.to_lowercase() {
+                    warn!(
+                        pack = %pack.name,
+                        expected = %expected,
+                        actual = %actual,
+                        "Rule pack checksum mismatch"
+                    );
+                    continue;
+                }
+            }
+
+            let extension = rules_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            let rules_file: RulesFile = match extension.as_str() {
+                "json" => serde_json::from_str(&content)?,
+                "yaml" | "yml" => load_yaml_rules(&content)?,
+                _ => toml::from_str(&content)?,
+            };
+
+            for rule in rules_file.rules {
+                match validate_rule(&rule) {
+                    Ok(_) => rules.push(rule),
+                    Err(e) => warn!(rule_id = %rule.id, error = %e, "Skipping invalid pack rule"),
+                }
+            }
+        }
+
+        Ok(rules)
+    }
+}
+
 /// Rules file structure for TOML/JSON/YAML deserialization (native format)
 #[derive(Debug, Deserialize)]
 struct RulesFile {
     rules: Vec<PatternRule>,
 }
 
-fn load_yaml_rules(content: &str) -> Result<Vec<PatternRule>, RuleLoadError> {
+fn load_yaml_rules(content: &str) -> Result<RulesFile, RuleLoadError> {
     let rules_file: RulesFile = serde_yml::from_str(content)?;
-    Ok(rules_file.rules)
+    Ok(rules_file)
 }
 
 /// Validate a rule for correctness
@@ -188,10 +304,10 @@ rules:
       value: "(call function: (identifier) @fn)"
 "#;
 
-        let rules = load_yaml_rules(yaml).expect("Should parse native YAML");
-        assert_eq!(rules.len(), 1);
+        let rules_file = load_yaml_rules(yaml).expect("Should parse native YAML");
+        assert_eq!(rules_file.rules.len(), 1);
 
-        let rule = &rules[0];
+        let rule = &rules_file.rules[0];
         assert_eq!(rule.id, "test-native");
         assert_eq!(rule.severity, Severity::High);
         assert_eq!(rule.languages, vec![Language::Python]);

@@ -165,6 +165,14 @@ exclude_patterns = [
     "third_party", "fixtures"
 ]
 # rule_file_path = "/path/to/custom/rules.toml"  # Optional custom rule file
+# rule_pack_allowlist = ["https://github.com/your-org/"]
+# [[sast.rule_packs]]
+# name = "community-pack"
+# git_url = "https://github.com/your-org/vulnera-rules.git"
+# reference = "v1.2.3" # branch/tag/commit
+# rules_path = "rules.toml"
+# checksum_sha256 = ""
+# enabled = true
 enable_logging = true
 enable_data_flow = true          # Enable data flow / taint analysis
 enable_call_graph = true         # Enable call graph for inter-procedural analysis
