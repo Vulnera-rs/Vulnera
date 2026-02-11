@@ -4,7 +4,6 @@
 
 - **GitHub Discussions:** [Vulnera-rs/Vulnera/discussions](https://github.com/Vulnera-rs/Vulnera/discussions) — Ask questions, share ideas, get help from the community.
 - **GitHub Issues:** [Vulnera-rs/Vulnera/issues](https://github.com/Vulnera-rs/Vulnera/issues) — Report bugs and request features.
-- **Documentation:** [k5602.github.io/Vulnera](https://k5602.github.io/Vulnera/) — Guides, tutorials, and API reference.
 
 ## Enterprise Support (Paid)
 

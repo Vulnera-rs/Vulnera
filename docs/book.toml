@@ -1,6 +1,6 @@
 [book]
 title = "Vulnera Documentation"
-authors = ["Khaled Mahmoud", "Abd El-Rahman Mossad", "Amr Medhat", "Gasser Mohammed"]
+authors = ["Khaled Mahmoud", "Abd El-Rahman Mossad", "Amr Medhat"]
 description = "Documentation for Vulnera - High-Performance Vulnerability Analysis Platform"
 src = "src"
 language = "en"

@@ -4,15 +4,18 @@
 //! where user input flows to sensitive sinks without proper sanitization.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
-use tree_sitter::Tree;
+use tree_sitter::{Query, Tree};
 
-use crate::domain::entities::{
-    DataFlowFinding, DataFlowRule, FlowStep, FlowStepKind, TaintLabel, TaintState,
+use crate::domain::call_graph::CallSite;
+use crate::domain::finding::{
+    DataFlowFinding, FlowStep, FlowStepKind, Location, TaintLabel, TaintState,
 };
+use crate::domain::taint_types::{DataFlowRule, FunctionTaintSummary};
 use crate::domain::value_objects::Language;
-use crate::infrastructure::query_engine::TreeSitterQueryEngine;
+use crate::infrastructure::query_engine;
+use crate::infrastructure::symbol_table::{Symbol, SymbolKind, SymbolTable, SymbolTableBuilder};
 use crate::infrastructure::taint_queries::{
     TaintConfig, TaintPattern, get_sanitizer_queries, get_sink_queries, get_source_queries,
 };
@@ -20,8 +23,9 @@ use crate::infrastructure::taint_queries::{
 /// Data flow analyzer for taint tracking
 #[derive(Debug)]
 pub struct DataFlowAnalyzer {
-    /// Active taint states indexed by variable/expression
-    taint_states: HashMap<String, TaintState>,
+    /// Symbol table for scope-aware variable tracking
+    symbol_table: SymbolTable,
+
     /// Detected data flow paths (source -> sink)
     detected_paths: Vec<DataFlowFinding>,
     /// Rules for source/sink/sanitizer detection
@@ -31,7 +35,7 @@ pub struct DataFlowAnalyzer {
 impl DataFlowAnalyzer {
     pub fn new() -> Self {
         Self {
-            taint_states: HashMap::new(),
+            symbol_table: SymbolTable::new(),
             detected_paths: Vec::new(),
             rules: Vec::new(),
         }
@@ -75,7 +79,29 @@ impl DataFlowAnalyzer {
             }],
         };
 
-        self.taint_states.insert(var_name.to_string(), state);
+        self.ensure_symbol(var_name, file, line, column);
+        let _ = self.symbol_table.update_taint_any_scope(var_name, state);
+    }
+
+    /// Set a custom taint state for a variable
+    pub fn set_taint_state(
+        &mut self,
+        var_name: &str,
+        mut state: TaintState,
+        file: &str,
+        line: u32,
+        column: u32,
+    ) {
+        state.flow_path.push(FlowStep {
+            kind: FlowStepKind::Propagation,
+            expression: var_name.to_string(),
+            file: file.to_string(),
+            line,
+            column,
+            note: Some("Propagated from function return".to_string()),
+        });
+        self.ensure_symbol(var_name, file, line, column);
+        let _ = self.symbol_table.update_taint_any_scope(var_name, state);
     }
 
     /// Propagate taint from one expression to another
@@ -87,7 +113,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) {
-        if let Some(source_state) = self.taint_states.get(from_expr).cloned() {
+        if let Some(source_state) = self.symbol_table.get_taint_any_scope(from_expr).cloned() {
             let mut new_state = source_state;
             new_state.flow_path.push(FlowStep {
                 kind: FlowStepKind::Propagation,
@@ -97,18 +123,19 @@ impl DataFlowAnalyzer {
                 column,
                 note: Some(format!("Propagated from {}", from_expr)),
             });
-            self.taint_states.insert(to_expr.to_string(), new_state);
+            self.ensure_symbol(to_expr, file, line, column);
+            let _ = self.symbol_table.update_taint_any_scope(to_expr, new_state);
         }
     }
 
     /// Check if expression is tainted
     pub fn is_tainted(&self, expr: &str) -> bool {
-        self.taint_states.contains_key(expr)
+        self.symbol_table.is_tainted_any_scope(expr)
     }
 
     /// Get taint state for an expression
     pub fn get_taint_state(&self, expr: &str) -> Option<&TaintState> {
-        self.taint_states.get(expr)
+        self.symbol_table.get_taint_any_scope(expr)
     }
 
     /// Remove taint (sanitization)
@@ -120,7 +147,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) {
-        if let Some(state) = self.taint_states.get_mut(expr) {
+        if let Some(mut state) = self.symbol_table.get_taint_any_scope(expr).cloned() {
             state.flow_path.push(FlowStep {
                 kind: FlowStepKind::Sanitizer,
                 expression: expr.to_string(),
@@ -129,9 +156,35 @@ impl DataFlowAnalyzer {
                 column,
                 note: Some(format!("Sanitized by {}", sanitizer_name)),
             });
-            // Remove from taint tracking
-            self.taint_states.remove(expr);
         }
+
+        self.symbol_table.clear_taint_any_scope(expr);
+    }
+
+    // ====================================================================
+    // Symbol Table Integration - Scope-aware taint tracking
+    // ====================================================================
+
+    /// Build symbol table from AST before analysis
+    pub fn build_symbols(
+        &mut self,
+        tree: &Tree,
+        source: &str,
+        language: Language,
+        file_path: &str,
+    ) {
+        let builder = SymbolTableBuilder::new(source, language, file_path);
+        self.symbol_table = builder.build_from_ast(tree.root_node());
+    }
+
+    /// Get reference to the symbol table
+    pub fn symbol_table(&self) -> &SymbolTable {
+        &self.symbol_table
+    }
+
+    /// Get mutable reference to the symbol table
+    pub fn symbol_table_mut(&mut self) -> &mut SymbolTable {
+        &mut self.symbol_table
     }
 
     /// Check if tainted data reaches a sink
@@ -143,7 +196,7 @@ impl DataFlowAnalyzer {
         line: u32,
         column: u32,
     ) -> Option<DataFlowFinding> {
-        if let Some(state) = self.taint_states.get(expr) {
+        if let Some(state) = self.symbol_table.get_taint_any_scope(expr) {
             let path = DataFlowFinding {
                 rule_id: String::new(), // Will be set by caller
                 source: state
@@ -183,7 +236,29 @@ impl DataFlowAnalyzer {
 
     /// Clear all taint states (e.g., between function analyses)
     pub fn clear(&mut self) {
-        self.taint_states.clear();
+        self.symbol_table.clear_all_taints();
+    }
+
+    fn ensure_symbol(&mut self, name: &str, file: &str, line: u32, column: u32) {
+        if self.symbol_table.resolve(name).is_some() {
+            return;
+        }
+
+        let location = Location {
+            file_path: file.to_string(),
+            line,
+            column: Some(column),
+            end_line: Some(line),
+            end_column: Some(column),
+        };
+
+        let symbol = Symbol::new(
+            name,
+            SymbolKind::Variable,
+            self.symbol_table.current_scope_id(),
+            location,
+        );
+        let _ = self.symbol_table.declare(symbol);
     }
 
     /// Categorize a source by its name
@@ -219,26 +294,56 @@ pub struct InterProceduralContext {
     param_taint: HashMap<String, HashMap<usize, TaintState>>,
     /// Return value taint: function_id -> taint_state
     return_taint: HashMap<String, TaintState>,
-    /// Function summaries computed during analysis
-    function_summaries: HashMap<String, FunctionSummary>,
-}
-
-/// Summary of a function's taint behavior (computed during analysis)
-#[derive(Debug, Clone, Default)]
-pub struct FunctionSummary {
-    /// Which parameters propagate to return value
-    pub params_to_return: HashSet<usize>,
-    /// Which parameters flow to sinks (dangerous)
-    pub params_to_sinks: HashMap<usize, Vec<String>>,
-    /// Whether return is inherently tainted
-    pub return_tainted: bool,
-    /// Whether this function acts as a sanitizer
-    pub is_sanitizer: bool,
+    /// Function summaries computed during analysis (unified type)
+    function_summaries: HashMap<String, FunctionTaintSummary>,
+    /// Call graph edges for inter-procedural propagation: caller_id -> call sites
+    call_edges: HashMap<String, Vec<CallSite>>,
+    /// Topological order of functions for analysis (callees first)
+    topo_order: Vec<String>,
 }
 
 impl InterProceduralContext {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Seed inter-procedural context from a built call graph.
+    ///
+    /// Imports call graph edges, function nodes, and topological order
+    /// so that inter-procedural taint propagation can follow actual call edges.
+    pub fn seed_from_call_graph(&mut self, graph: &crate::infrastructure::call_graph::CallGraph) {
+        // Import function summaries from call graph (if any pre-existing)
+        for func in graph.functions() {
+            self.enter_function(&func.id);
+            if let Some(summary) = graph.get_function_summary(&func.id) {
+                self.function_summaries
+                    .insert(func.id.clone(), summary.clone());
+            }
+        }
+
+        // Import call edges for inter-procedural traversal
+        for func in graph.functions() {
+            let calls = graph.get_calls(&func.id);
+            if !calls.is_empty() {
+                self.call_edges.insert(func.id.clone(), calls.to_vec());
+            }
+        }
+
+        // Cache topological order (callees before callers)
+        self.topo_order = graph.topological_order();
+    }
+
+    /// Get the topological order for analysis (callees first)
+    pub fn topo_order(&self) -> &[String] {
+        &self.topo_order
+    }
+
+    /// Get call edges from a function
+    pub fn get_call_edges(&self, function_id: &str) -> &[CallSite] {
+        self.call_edges
+            .get(function_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Enter a function context
@@ -281,13 +386,13 @@ impl InterProceduralContext {
     }
 
     /// Set the summary for a function (computed after analysis)
-    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionSummary) {
+    pub fn set_function_summary(&mut self, function_id: &str, summary: FunctionTaintSummary) {
         self.function_summaries
             .insert(function_id.to_string(), summary);
     }
 
     /// Get the summary for a function
-    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionSummary> {
+    pub fn get_function_summary(&self, function_id: &str) -> Option<&FunctionTaintSummary> {
         self.function_summaries.get(function_id)
     }
 
@@ -349,19 +454,7 @@ impl InterProceduralContext {
             return None;
         }
 
-        // Fallback: Use legacy parameter taint tracking
-        for (idx, arg_taint) in argument_taints.iter().enumerate() {
-            if arg_taint.is_some() {
-                if self.get_param_taint(function_id, idx).is_some() {
-                    if let Some(ret_taint) = self.get_return_taint(function_id) {
-                        return Some(ret_taint.clone());
-                    }
-                }
-            }
-        }
-
-        // Check if function has inherent return taint
-        self.get_return_taint(function_id).cloned()
+        None
     }
 
     /// Compute summary for a function based on its analysis results
@@ -371,7 +464,10 @@ impl InterProceduralContext {
     /// - Which parameters flow to dangerous sinks
     /// - Whether the function acts as a sanitizer
     pub fn compute_function_summary(&mut self, function_id: &str) {
-        let mut summary = FunctionSummary::default();
+        let mut summary = FunctionTaintSummary {
+            function_id: function_id.to_string(),
+            ..FunctionTaintSummary::default()
+        };
 
         // 1. Check if return is tainted and track its origin
         if let Some(return_state) = self.return_taint.get(function_id) {
@@ -392,7 +488,7 @@ impl InterProceduralContext {
 
         // 2. Analyze parameter taints that we've tracked
         if let Some(param_taints) = self.param_taint.get(function_id) {
-            for (&param_idx, _param_state) in param_taints {
+            for &param_idx in param_taints.keys() {
                 // Check if this parameter's taint reached any sinks
                 // This information comes from the function's analyzer findings
                 if let Some(analyzer) = self.function_contexts.get(function_id) {
@@ -425,7 +521,9 @@ impl InterProceduralContext {
                     if let Some(analyzer) = self.function_contexts.get(function_id) {
                         let param_source = format!("param:{}", param_idx);
 
-                        for (_, taint_state) in &analyzer.taint_states {
+                        for (_, taint_state) in
+                            analyzer.symbol_table().get_all_tainted_in_all_scopes()
+                        {
                             // Check if this state has labels from the parameter
                             let from_param =
                                 taint_state.labels.iter().any(|l| l.source == param_source);
@@ -490,7 +588,7 @@ pub struct InterProceduralStats {
 }
 
 // =============================================================================
-// TaintQueryEngine - Production-ready AST-aware taint detection
+// TaintQueryEngine - AST-aware taint detection
 // =============================================================================
 
 /// A detected taint location in code
@@ -523,12 +621,14 @@ pub struct TaintMatch {
 /// Engine for AST-aware taint source/sink/sanitizer detection
 /// Uses tree-sitter queries for precise pattern matching
 pub struct TaintQueryEngine {
-    /// Underlying tree-sitter query engine (owned, wrapped in RwLock for interior mutability)
-    query_engine: Arc<RwLock<TreeSitterQueryEngine>>,
     /// Taint configuration
     config: TaintConfig,
     /// Cache: (language_key, pattern_type) -> patterns already retrieved
     pattern_cache: HashMap<(String, TaintPatternType), Vec<TaintPattern>>,
+    /// Shared compiled query cache (moka, lock-free)
+    shared_cache: Option<crate::infrastructure::sast_engine::QueryCache>,
+    /// Fallback local cache when no shared cache is provided
+    local_cache: HashMap<(Language, String), Arc<Query>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -538,48 +638,61 @@ enum TaintPatternType {
     Sanitizer,
 }
 
+impl Default for TaintQueryEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaintQueryEngine {
     /// Create a new taint query engine with default config
-    pub fn new(query_engine: Arc<RwLock<TreeSitterQueryEngine>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            query_engine,
             config: TaintConfig::default(),
             pattern_cache: HashMap::new(),
+            shared_cache: None,
+            local_cache: HashMap::new(),
         }
     }
 
     /// Create with custom configuration
-    pub fn with_config(
-        query_engine: Arc<RwLock<TreeSitterQueryEngine>>,
-        config: TaintConfig,
-    ) -> Self {
+    pub fn with_config(config: TaintConfig) -> Self {
         Self {
-            query_engine,
             config,
             pattern_cache: HashMap::new(),
+            shared_cache: None,
+            local_cache: HashMap::new(),
+        }
+    }
+
+    /// Create with a shared moka query cache (injected from SastEngine)
+    pub fn with_shared_cache(cache: crate::infrastructure::sast_engine::QueryCache) -> Self {
+        Self {
+            config: TaintConfig::default(),
+            pattern_cache: HashMap::new(),
+            shared_cache: Some(cache),
+            local_cache: HashMap::new(),
         }
     }
 
     /// Create with an owned query engine (convenience constructor)
     pub fn new_owned() -> Self {
-        Self {
-            query_engine: Arc::new(RwLock::new(TreeSitterQueryEngine::new())),
-            config: TaintConfig::default(),
-            pattern_cache: HashMap::new(),
-        }
+        Self::new()
     }
 
     /// Create with owned query engine and custom config
     pub fn new_owned_with_config(config: TaintConfig) -> Self {
-        Self {
-            query_engine: Arc::new(RwLock::new(TreeSitterQueryEngine::new())),
-            config,
-            pattern_cache: HashMap::new(),
-        }
+        Self::with_config(config)
+    }
+
+    /// Update taint configuration and reset pattern cache
+    pub fn set_config(&mut self, config: TaintConfig) {
+        self.config = config;
+        self.pattern_cache.clear();
     }
 
     /// Detect taint sources in the parsed AST
-    pub fn detect_sources(
+    pub async fn detect_sources(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -593,10 +706,11 @@ impl TaintQueryEngine {
             &patterns,
             TaintPatternType::Source,
         )
+        .await
     }
 
     /// Detect taint sinks in the parsed AST
-    pub fn detect_sinks(
+    pub async fn detect_sinks(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -610,10 +724,11 @@ impl TaintQueryEngine {
             &patterns,
             TaintPatternType::Sink,
         )
+        .await
     }
 
     /// Detect sanitizers in the parsed AST
-    pub fn detect_sanitizers(
+    pub async fn detect_sanitizers(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -627,6 +742,7 @@ impl TaintQueryEngine {
             &patterns,
             TaintPatternType::Sanitizer,
         )
+        .await
     }
 
     /// Get patterns for a language and type, using cache
@@ -652,7 +768,7 @@ impl TaintQueryEngine {
     }
 
     /// Execute patterns against the AST and collect matches
-    fn execute_patterns(
+    async fn execute_patterns(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -663,18 +779,37 @@ impl TaintQueryEngine {
         let mut matches = Vec::new();
 
         for pattern in patterns {
-            // Compile the query using RwLock for interior mutability
-            let query = {
-                let mut engine = match self.query_engine.write() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to acquire query engine write lock");
-                        continue;
+            // Get or compile the query using shared moka cache or local fallback
+            let cache_key = (*language, pattern.query.clone());
+            let query = if let Some(ref shared) = self.shared_cache {
+                // Try shared moka cache first
+                if let Some(q) = shared.get(&cache_key).await {
+                    q
+                } else {
+                    match query_engine::compile_query(&pattern.query, language) {
+                        Ok(q_arc) => {
+                            shared.insert(cache_key, q_arc.clone()).await;
+                            q_arc
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                pattern = %pattern.name,
+                                language = %language,
+                                error = %e,
+                                "Failed to compile taint query"
+                            );
+                            continue;
+                        }
                     }
-                };
-
-                match engine.compile_query(&pattern.query, language) {
-                    Ok(q) => q,
+                }
+            } else if let Some(q) = self.local_cache.get(&cache_key) {
+                q.clone()
+            } else {
+                match query_engine::compile_query(&pattern.query, language) {
+                    Ok(q_arc) => {
+                        self.local_cache.insert(cache_key, q_arc.clone());
+                        q_arc
+                    }
                     Err(e) => {
                         tracing::warn!(
                             pattern = %pattern.name,
@@ -687,50 +822,35 @@ impl TaintQueryEngine {
                 }
             };
 
-            // Execute query with read lock
-            let query_matches = {
-                let engine = match self.query_engine.read() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        tracing::error!(error = %e, "Failed to acquire query engine read lock");
-                        continue;
-                    }
-                };
-                engine.execute_query(&query, tree, source_code)
-            };
+            // Execute query
+            let query_matches = query_engine::execute_query(&query, tree, source_code);
 
             for qm in query_matches {
                 // Extract variable name from captures if available
                 // Captures is HashMap<String, CaptureInfo>
                 // We check multiple common capture names used in taint patterns
-                let variable_name = qm
-                    .captures
-                    .iter()
-                    .find(|(name, _)| {
-                        matches!(
-                            name.as_str(),
-                            "name"
-                                | "var"
-                                | "target"
-                                | "source"
-                                | "arg"
-                                | "url"
-                                | "path"
-                                | "query"
-                                | "value"
-                                | "addr"
-                                | "req"
-                        )
-                    })
-                    .map(|(_, info)| info.text.clone());
+                let preferred_names = [
+                    "var", "target", "name", "arg", "url", "path", "query", "value", "addr", "req",
+                    "entry", "file", "template", "buffer", "data", "sql", "payload", "body",
+                    "client",
+                ];
 
-                // Get matched text from the first capture or construct from positions
-                let matched_text = qm
-                    .captures
-                    .values()
-                    .next()
-                    .map(|info| info.text.clone())
-                    .unwrap_or_default();
+                let variable_name = preferred_names.iter().find_map(|name| {
+                    qm.captures_by_name
+                        .get(*name)
+                        .and_then(|infos| infos.first())
+                        .map(|info| info.text.clone())
+                });
+
+                // Get matched text from the preferred capture (if any), else first capture
+                let matched_text = variable_name.clone().unwrap_or_else(|| {
+                    qm.captures_by_name
+                        .values()
+                        .next()
+                        .and_then(|infos| infos.first())
+                        .map(|info| info.text.clone())
+                        .unwrap_or_default()
+                });
 
                 let taint_match = TaintMatch {
                     pattern_name: pattern.name.clone(),
@@ -762,7 +882,7 @@ impl TaintQueryEngine {
     }
 
     /// Check if a specific line contains a taint source
-    pub fn is_source_at_line(
+    pub async fn is_source_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -770,12 +890,13 @@ impl TaintQueryEngine {
         line: usize,
     ) -> Option<TaintMatch> {
         self.detect_sources(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }
 
     /// Check if a specific line contains a taint sink
-    pub fn is_sink_at_line(
+    pub async fn is_sink_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -783,12 +904,13 @@ impl TaintQueryEngine {
         line: usize,
     ) -> Option<TaintMatch> {
         self.detect_sinks(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }
 
     /// Check if a specific line contains a sanitizer
-    pub fn is_sanitizer_at_line(
+    pub async fn is_sanitizer_at_line(
         &mut self,
         tree: &Tree,
         source_code: &[u8],
@@ -796,6 +918,7 @@ impl TaintQueryEngine {
         line: usize,
     ) -> Option<TaintMatch> {
         self.detect_sanitizers(tree, source_code, language)
+            .await
             .into_iter()
             .find(|m| m.line == line)
     }

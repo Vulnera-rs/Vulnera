@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tracing::{debug, info};
 
@@ -17,6 +17,10 @@ pub struct IncrementalTracker {
     /// Current state being built
     #[serde(skip)]
     current_state: HashMap<String, FileState>,
+    /// Cross-file dependencies: file_path -> set of files it depends on.
+    /// If any dependency changes, the dependent file needs re-analysis.
+    #[serde(default)]
+    file_dependencies: HashMap<String, HashSet<String>>,
     /// Metadata about the last scan
     #[serde(default)]
     pub metadata: ScanMetadata,
@@ -97,6 +101,7 @@ impl IncrementalTracker {
         let saveable = IncrementalTracker {
             previous_state: self.current_state.clone(),
             current_state: HashMap::new(),
+            file_dependencies: self.file_dependencies.clone(),
             metadata: self.metadata.clone(),
         };
 
@@ -118,23 +123,48 @@ impl IncrementalTracker {
         format!("{:x}", hasher.finalize())
     }
 
-    /// Check if a file needs re-analysis based on content hash
+    /// Check if a file needs re-analysis based on content hash and dependencies
     pub fn needs_analysis(&self, file_path: &str, content: &str) -> (bool, String) {
         let content_hash = Self::hash_content(content);
         let size = content.len() as u64;
 
-        let needs = match self.previous_state.get(file_path) {
+        let self_changed = match self.previous_state.get(file_path) {
             Some(prev_state) => {
-                // File changed if hash or size differs
                 prev_state.content_hash != content_hash || prev_state.size != size
             }
-            None => {
-                // New file, needs analysis
-                true
-            }
+            None => true, // New file
         };
 
-        (needs, content_hash)
+        if self_changed {
+            return (true, content_hash);
+        }
+
+        // Check if any dependency has changed (content differs from previous state).
+        // A dependency is "changed" if its current_state hash differs from previous_state hash,
+        // or if it exists in current_state but not previous_state (new file).
+        let dep_changed = self
+            .file_dependencies
+            .get(file_path)
+            .map(|deps| {
+                deps.iter().any(|dep| {
+                    match (self.previous_state.get(dep), self.current_state.get(dep)) {
+                        (Some(prev), Some(curr)) => prev.content_hash != curr.content_hash,
+                        (None, Some(_)) => true,  // New dependency file
+                        (Some(_), None) => false,  // Not yet processed — can't tell, skip
+                        (None, None) => false,
+                    }
+                })
+            })
+            .unwrap_or(false);
+
+        if dep_changed {
+            debug!(
+                file = file_path,
+                "File needs re-analysis: dependency changed"
+            );
+        }
+
+        (dep_changed, content_hash)
     }
 
     /// Record a file that was analyzed
@@ -158,6 +188,15 @@ impl IncrementalTracker {
     /// Get previous finding count for a file (if available)
     pub fn get_previous_findings(&self, file_path: &str) -> Option<usize> {
         self.previous_state.get(file_path).map(|s| s.finding_count)
+    }
+
+    /// Set cross-file dependency map extracted from call graph edges.
+    ///
+    /// `deps` maps each file to the set of files it depends on (i.e., files
+    /// containing functions it calls). When any dependency changes, the
+    /// dependent file is re-analyzed even if its own content is unchanged.
+    pub fn set_file_dependencies(&mut self, deps: HashMap<String, HashSet<String>>) {
+        self.file_dependencies = deps;
     }
 
     /// Get statistics about the current analysis

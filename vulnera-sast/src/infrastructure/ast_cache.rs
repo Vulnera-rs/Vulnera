@@ -296,8 +296,9 @@ impl AstCacheService for DragonflyAstCache {
 
 /// In-memory AST cache for testing and development
 pub struct InMemoryAstCache {
-    cache:
-        std::sync::RwLock<std::collections::HashMap<String, (CachedAstEntry, std::time::Instant)>>,
+    cache: tokio::sync::RwLock<
+        std::collections::HashMap<String, (CachedAstEntry, std::time::Instant)>,
+    >,
     default_ttl: Duration,
 }
 
@@ -305,7 +306,7 @@ impl InMemoryAstCache {
     /// Create new in-memory cache
     pub fn new() -> Self {
         Self {
-            cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             default_ttl: Duration::from_secs(DEFAULT_AST_TTL_SECS),
         }
     }
@@ -313,7 +314,7 @@ impl InMemoryAstCache {
     /// Create with custom TTL
     pub fn with_ttl(ttl: Duration) -> Self {
         Self {
-            cache: std::sync::RwLock::new(std::collections::HashMap::new()),
+            cache: tokio::sync::RwLock::new(std::collections::HashMap::new()),
             default_ttl: ttl,
         }
     }
@@ -333,7 +334,7 @@ impl AstCacheService for InMemoryAstCache {
         language: &Language,
     ) -> Result<Option<AstNode>, AstCacheError> {
         let key = self.cache_key(content_hash, language);
-        let cache = self.cache.read().unwrap();
+        let cache = self.cache.read().await;
 
         if let Some((entry, cached_at)) = cache.get(&key) {
             // Check if expired
@@ -359,14 +360,14 @@ impl AstCacheService for InMemoryAstCache {
             content_hash: content_hash.to_string(),
         };
 
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().await;
         cache.insert(key, (entry, std::time::Instant::now()));
         Ok(())
     }
 
     async fn exists(&self, content_hash: &str, language: &Language) -> Result<bool, AstCacheError> {
         let key = self.cache_key(content_hash, language);
-        let cache = self.cache.read().unwrap();
+        let cache = self.cache.read().await;
 
         if let Some((_, cached_at)) = cache.get(&key) {
             return Ok(cached_at.elapsed() < self.default_ttl);
@@ -376,13 +377,13 @@ impl AstCacheService for InMemoryAstCache {
 
     async fn remove(&self, content_hash: &str, language: &Language) -> Result<(), AstCacheError> {
         let key = self.cache_key(content_hash, language);
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().await;
         cache.remove(&key);
         Ok(())
     }
 
     async fn clear(&self) -> Result<(), AstCacheError> {
-        let mut cache = self.cache.write().unwrap();
+        let mut cache = self.cache.write().await;
         cache.clear();
         Ok(())
     }

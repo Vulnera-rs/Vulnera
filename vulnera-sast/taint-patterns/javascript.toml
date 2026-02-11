@@ -1,0 +1,843 @@
+# JavaScript/TypeScript taint patterns
+
+# =============================================================================
+# Sources
+# =============================================================================
+
+[[sources]]
+name = "Express request data"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(member_expression
+  object: (identifier) @req
+  property: (property_identifier) @prop
+  (#match? @req "^(req|request)$")
+  (#match? @prop "^(body|query|params|cookies|headers|files|file)$")
+) @source
+'''
+
+[[sources]]
+name = "Express request property"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(member_expression
+  object: (member_expression
+    object: (identifier) @req
+    property: (property_identifier) @container)
+  property: (property_identifier) @prop
+  (#match? @req "^(req|request)$")
+  (#match? @container "^(body|query|params|cookies|headers|files|file)$")
+) @source
+'''
+
+[[sources]]
+name = "Express request subscript"
+category = "user_input"
+labels = ["user_input", "web_request"]
+query = '''
+(subscript_expression
+  object: (member_expression
+    object: (identifier) @req
+    property: (property_identifier) @container)
+  (#match? @req "^(req|request)$")
+  (#match? @container "^(body|query|params|cookies|headers|files|file)$")
+) @source
+'''
+
+[[sources]]
+name = "DOM location/URL"
+category = "user_input"
+labels = ["user_input", "dom"]
+query = '''
+(member_expression
+  object: (identifier) @obj
+  property: (property_identifier) @prop
+  (#match? @obj "^(document|window)$")
+  (#match? @prop "^(location|URL|referrer|cookie|hash|search)$")
+) @source
+'''
+
+[[sources]]
+name = "Environment variable"
+category = "environment"
+labels = ["environment"]
+query = '''
+(member_expression
+  object: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @prop)
+  (#eq? @obj "process")
+  (#eq? @prop "env")
+) @source
+'''
+
+[[sources]]
+name = "Command line argument"
+category = "cli_input"
+labels = ["user_input", "cli"]
+query = '''
+(member_expression
+  object: (identifier) @obj
+  property: (property_identifier) @prop
+  (#eq? @obj "process")
+  (#eq? @prop "argv")
+) @source
+'''
+
+
+[[sources]]
+name = "Archive entry path"
+category = "user_input"
+labels = ["user_input", "archive"]
+query = '''
+(member_expression
+  object: (identifier) @entry
+  property: (property_identifier) @prop
+  (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+  (#match? @prop "^(path|name|fileName|entryName)$")
+) @source
+'''
+
+[[sources]]
+name = "Archive entry path"
+category = "archive_data"
+labels = ["archive_data", "path_traversal_risk"]
+query = '''
+(member_expression
+  object: (identifier) @entry
+  property: (property_identifier) @prop
+  (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+  (#match? @prop "^(path|fileName|entryName|name|fullPath)$")
+) @source
+'''
+
+[[sources]]
+name = "Archive entry header path"
+category = "archive_data"
+labels = ["archive_data", "path_traversal_risk"]
+query = '''
+(member_expression
+  object: (member_expression
+    object: (identifier) @entry
+    property: (property_identifier) @container)
+  property: (property_identifier) @prop
+  (#match? @entry "^(entry|zipEntry|tarEntry|file)$")
+  (#match? @container "^(header|attrs|stat)$")
+  (#match? @prop "^(name|path|linkpath)$")
+) @source
+'''
+
+[[sources]]
+name = "Zip entry name"
+category = "archive_data"
+labels = ["archive_data", "path_traversal_risk"]
+query = '''
+(member_expression
+  object: (identifier) @entry
+  property: (property_identifier) @prop
+  (#match? @prop "^(fileName|entryName|path|name)$")
+) @source
+'''
+
+# =============================================================================
+# Sinks
+# =============================================================================
+
+[[sinks]]
+name = "innerHTML assignment"
+category = "xss"
+query = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop)
+  right: (identifier) @value
+  (#eq? @prop "innerHTML")
+) @sink
+'''
+
+[[sinks]]
+name = "document.write"
+category = "xss"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @obj
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @obj "document")
+  (#match? @method "^(write|writeln)$")
+) @sink
+'''
+
+[[sinks]]
+name = "eval"
+category = "code_injection"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @fn "eval")
+) @sink
+'''
+
+[[sinks]]
+name = "Function constructor"
+category = "code_injection"
+query = '''
+(new_expression
+  constructor: (identifier) @fn
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @fn "Function")
+) @sink
+'''
+
+[[sinks]]
+name = "child_process execution"
+category = "command_injection"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @mod
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (identifier) @arg)
+  (#match? @mod "^(child_process|cp)$")
+  (#match? @method "^(exec|execSync|spawn|spawnSync)$")
+) @sink
+'''
+
+[[sinks]]
+name = "SQL query with template string"
+category = "sql_injection"
+query = '''
+(call_expression
+  function: (member_expression
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (template_string) @query)
+  (#match? @method "^(query|execute|run|all|get)$")
+) @sink
+'''
+
+[[sinks]]
+name = "dangerouslySetInnerHTML"
+category = "xss"
+query = '''
+(jsx_attribute
+  (property_identifier) @attr
+  (#eq? @attr "dangerouslySetInnerHTML")
+) @sink
+'''
+
+[[sinks]]
+name = "Location href assignment"
+category = "open_redirect"
+query = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop)
+  right: (identifier) @value
+  (#eq? @prop "href")
+) @sink
+'''
+
+[[sinks]]
+name = "Pug template compilation"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    . [
+      (identifier) @arg
+      (member_expression) @arg
+      (subscript_expression) @arg
+      (call_expression) @arg
+    ])
+  (#eq? @lib "pug")
+  (#match? @method "^(compile|compileFile|compileClient|render|renderFile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Pug template via require"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (call_expression
+      function: (identifier) @req
+      arguments: (arguments
+        (string) @mod))
+    property: (property_identifier) @method)
+  arguments: (arguments
+    . [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @req "require")
+  (#match? @method "^(compile|compileFile|render|renderFile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "EJS template rendering"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    . [
+      (identifier) @arg
+      (member_expression) @arg
+      (subscript_expression) @arg
+      (call_expression) @arg
+      (template_string) @arg
+    ])
+  (#eq? @lib "ejs")
+  (#match? @method "^(render|renderFile|compile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Nunjucks template rendering"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    . [
+      (identifier) @arg
+      (member_expression) @arg
+      (subscript_expression) @arg
+    ])
+  (#match? @lib "^(nunjucks|env)$")
+  (#match? @method "^(render|renderString|compile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Handlebars template compilation"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    . [
+      (identifier) @arg
+      (member_expression) @arg
+      (subscript_expression) @arg
+    ])
+  (#eq? @lib "Handlebars")
+  (#match? @method "^(compile|precompile|registerPartial)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Mustache template rendering"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @lib "Mustache")
+  (#match? @method "^(render|parse|compile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "doT template compilation"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @lib "doT")
+  (#match? @method "^(template|compile)$")
+) @sink
+'''
+
+[[sinks]]
+name = "Lodash template"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @lib "_")
+  (#eq? @method "template")
+) @sink
+'''
+
+[[sinks]]
+name = "underscore template"
+category = "ssti"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @lib "underscore")
+  (#eq? @method "template")
+) @sink
+'''
+
+[[sinks]]
+name = "vm context execution"
+category = "code_injection"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (identifier) @arg
+      (member_expression) @arg
+    ])
+  (#eq? @lib "vm")
+  (#match? @method "^(runInContext|runInNewContext|runInThisContext|compileFunction)$")
+) @sink
+'''
+
+[[sinks]]
+name = "fs write operations"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (identifier) @path)
+  (#eq? @lib "fs")
+  (#match? @method "^(createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync)$")
+) @sink
+'''
+
+[[sinks]]
+name = "fs write with dynamic path"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    [
+      (call_expression) @path
+      (member_expression) @path
+    ])
+  (#eq? @lib "fs")
+  (#match? @method "^(createWriteStream|writeFile|writeFileSync|appendFile|appendFileSync|open|openSync)$")
+) @sink
+'''
+
+[[sinks]]
+name = "path.join with entry path"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (_)*
+    (member_expression
+      property: (property_identifier) @prop
+      (#match? @prop "^(path|name|fileName|entryName)$")))
+  (#eq? @lib "path")
+  (#match? @method "^(join|resolve)$")
+) @sink
+'''
+
+[[sinks]]
+name = "path operations with user input"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (_)*
+    (identifier) @path)
+  (#eq? @lib "path")
+  (#match? @method "^(join|resolve)$")
+) @sink
+'''
+
+[[sinks]]
+name = "decompress"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @fn "decompress")
+) @sink
+'''
+
+[[sinks]]
+name = "tar extraction"
+category = "path_traversal"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      (#eq? @lib "tar")
+      (#eq? @method "extract"))
+    property: (property_identifier) @end)
+  arguments: (arguments
+    (_) @arg)
+  (#eq? @end "end")
+) @sink
+'''
+
+[[sinks]]
+name = "fetch with user input"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @url)
+  (#eq? @fn "fetch")
+) @sink
+'''
+
+[[sinks]]
+name = "axios HTTP request"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (identifier) @url)
+  (#eq? @lib "axios")
+  (#match? @method "^(get|post|put|delete|patch|head|options|request)$")
+) @sink
+'''
+
+[[sinks]]
+name = "http/https request"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (identifier) @url)
+  (#match? @lib "^(http|https)$")
+  (#match? @method "^(get|request)$")
+) @sink
+'''
+
+[[sinks]]
+name = "got HTTP request"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @url)
+  (#eq? @fn "got")
+) @sink
+'''
+
+[[sinks]]
+name = "request HTTP call"
+category = "ssrf"
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @url)
+  (#eq? @fn "request")
+) @sink
+'''
+
+# =============================================================================
+# Sanitizers
+# =============================================================================
+
+[[sanitizers]]
+name = "URL encoding"
+category = "url"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(encodeURIComponent|encodeURI)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "DOMPurify.sanitize"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @lib
+    property: (property_identifier) @method)
+  (#eq? @lib "DOMPurify")
+  (#eq? @method "sanitize")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "textContent (safe)"
+category = "xss"
+is_known = true
+clears_labels = []
+query = '''
+(assignment_expression
+  left: (member_expression
+    property: (property_identifier) @prop)
+  (#eq? @prop "textContent")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Numeric conversion"
+category = "type_coercion"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(parseInt|parseFloat|Number)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "Generic validation"
+category = "generic"
+is_known = false
+query = '''
+(call_expression
+  function: (identifier) @fn
+  (#match? @fn "^(validate|sanitize|clean|escape|encode|filter|trim)$")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.basename"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (variable_declarator
+    name: (identifier) @var
+    value: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      (#eq? @lib "path")
+      (#eq? @method "basename"))
+  )
+  (assignment_expression
+    left: (identifier) @var
+    right: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      (#eq? @lib "path")
+      (#eq? @method "basename"))
+  )
+  (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      (#eq? @lib "path")
+      (#eq? @method "basename")
+  ) @sanitizer
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "basename"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (variable_declarator
+    name: (identifier) @var
+    value: (call_expression
+      function: (member_expression
+        property: (property_identifier) @method)
+      (#eq? @method "basename"))
+  )
+  (assignment_expression
+    left: (identifier) @var
+    right: (call_expression
+      function: (member_expression
+        property: (property_identifier) @method)
+      (#eq? @method "basename"))
+  )
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "decompress safe"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (identifier) @fn
+  arguments: (arguments
+    (identifier) @arg
+    (_)*
+    (object
+      (pair
+        key: (property_identifier) @key
+        (#eq? @key "strip")))
+    (_)*)
+  (#eq? @fn "decompress")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.resolve"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+[
+  (variable_declarator
+    name: (identifier) @var
+    value: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (_)*
+        (member_expression
+          property: (property_identifier) @prop
+          (#match? @prop "^(path|name|fileName|entryName)$"))))
+    (#eq? @lib "path")
+    (#eq? @method "resolve")
+  )
+  (assignment_expression
+    left: (identifier) @var
+    right: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (_)*
+        (member_expression
+          property: (property_identifier) @prop
+          (#match? @prop "^(path|name|fileName|entryName)$"))))
+    (#eq? @lib "path")
+    (#eq? @method "resolve")
+  )
+] @sanitizer
+'''
+
+[[sanitizers]]
+name = "tar.extract with filter"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (call_expression
+      function: (member_expression
+        object: (identifier) @lib
+        property: (property_identifier) @method)
+      arguments: (arguments
+        (object
+          (pair
+            key: (property_identifier) @key
+            (#eq? @key "filter")))))
+      (#eq? @lib "tar")
+      (#eq? @method "extract"))
+    property: (property_identifier) @end)
+  arguments: (arguments
+    (identifier) @arg)
+  (#eq? @end "end")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "path.startsWith validation"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @var
+    property: (property_identifier) @method)
+  (#eq? @method "startsWith")
+) @sanitizer
+'''
+
+[[sanitizers]]
+name = "indexOf validation"
+category = "path_traversal"
+is_known = true
+clears_labels = []
+query = '''
+(call_expression
+  function: (member_expression
+    object: (identifier) @var
+    property: (property_identifier) @method)
+  arguments: (arguments
+    (string) @pattern
+    (_)*)
+  (#eq? @method "indexOf")
+  (#match? @pattern "\\.\\.")
+) @sanitizer
+'''

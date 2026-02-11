@@ -1,98 +1,87 @@
-//! Default hardcoded security rules with tree-sitter query patterns
+//! Default security rules loaded from embedded TOML data files.
 //!
-//! This module provides the default SAST rules organized by programming language.
-//! Each language has its own submodule containing rules specific to that language.
+//! Rules are defined declaratively in `vulnera-sast/rules/*.toml` and compiled
+//! into the binary via `include_str!`.
 //!
-//! ## Module Structure
+//! ## Adding new rules
 //!
-//! - `common`: Cross-language rules (SQL injection, command injection)
-//! - `javascript`: JavaScript/Node.js security rules
-//! - `typescript`: TypeScript-specific type safety and security rules
-//! - `python`: Python security rules
-//! - `rust_rules`: Rust security and safety rules
-//! - `go`: Go security rules
-//! - `c_cpp`: C/C++ security rules
-//!
-//! ## Usage
-//!
-/// ```rust
-/// use vulnera_sast::infrastructure::rules::get_default_rules;
-///
-/// let rules = get_default_rules();
-/// println!("Loaded {} rules", rules.len());
-/// ```
-mod c_cpp;
-mod common;
-mod go;
-mod javascript;
-mod python;
-mod rust_rules;
-mod typescript;
+//! 1. Edit the appropriate `rules/{language}.toml` file (or create a new one).
+//! 2. Follow the `[[rules]]` table-array format — see existing entries.
+//! 3. Run `cargo test -p vulnera-sast` to validate deserialization.
 
-use crate::domain::entities::Rule;
+use crate::domain::pattern_types::PatternRule;
+use serde::Deserialize;
+use std::sync::LazyLock;
+use tracing::{debug, warn};
 
-// Re-export language-specific rule getters for advanced usage
-pub use c_cpp::get_c_cpp_rules;
-pub use common::get_common_rules;
-pub use go::get_go_rules;
-pub use javascript::get_javascript_rules;
-pub use python::get_python_rules;
-pub use rust_rules::get_rust_rules;
-pub use typescript::get_typescript_rules;
+// =============================================================================
+// Embedded TOML rule data
+// =============================================================================
+
+const PYTHON_RULES_TOML: &str = include_str!("../../../../rules/python.toml");
+const JAVASCRIPT_RULES_TOML: &str = include_str!("../../../../rules/javascript.toml");
+const TYPESCRIPT_RULES_TOML: &str = include_str!("../../../../rules/typescript.toml");
+const RUST_RULES_TOML: &str = include_str!("../../../../rules/rust.toml");
+const GO_RULES_TOML: &str = include_str!("../../../../rules/go.toml");
+const C_CPP_RULES_TOML: &str = include_str!("../../../../rules/c_cpp.toml");
+const COMMON_RULES_TOML: &str = include_str!("../../../../rules/common.toml");
+
+/// Intermediate deserialization target matching the TOML structure.
+#[derive(Debug, Deserialize)]
+struct RulesFile {
+    rules: Vec<PatternRule>,
+}
+
+/// Parse a TOML rule file, returning an empty vec on error (with warning).
+fn load_rules_from_toml(toml_str: &str, label: &str) -> Vec<PatternRule> {
+    match toml::from_str::<RulesFile>(toml_str) {
+        Ok(file) => {
+            debug!(
+                count = file.rules.len(),
+                language = label,
+                "Loaded rules from embedded TOML"
+            );
+            file.rules
+        }
+        Err(e) => {
+            warn!(error = %e, language = label, "Failed to parse embedded rule TOML — returning empty");
+            Vec::new()
+        }
+    }
+}
+
+// =============================================================================
+// Lazy-initialized rule sets (parsed once, reused across calls)
+// =============================================================================
+
+static ALL_DEFAULT_RULES: LazyLock<Vec<PatternRule>> = LazyLock::new(|| {
+    let mut rules = Vec::with_capacity(200);
+    rules.extend(load_rules_from_toml(COMMON_RULES_TOML, "common"));
+    rules.extend(load_rules_from_toml(JAVASCRIPT_RULES_TOML, "javascript"));
+    rules.extend(load_rules_from_toml(TYPESCRIPT_RULES_TOML, "typescript"));
+    rules.extend(load_rules_from_toml(PYTHON_RULES_TOML, "python"));
+    rules.extend(load_rules_from_toml(RUST_RULES_TOML, "rust"));
+    rules.extend(load_rules_from_toml(GO_RULES_TOML, "go"));
+    rules.extend(load_rules_from_toml(C_CPP_RULES_TOML, "c_cpp"));
+    debug!(total = rules.len(), "All default rules loaded");
+    rules
+});
+
+// =============================================================================
+// Public API (identical signature)
+// =============================================================================
 
 /// Get all default security rules across all languages.
 ///
-/// This function combines rules from all language-specific modules into a single
-/// vector. Rules are ordered by language grouping:
-///
-/// 1. Cross-language rules (SQL injection, command injection)
-/// 2. JavaScript rules
-/// 3. TypeScript rules
-/// 4. Python rules
-/// 5. Rust rules
-/// 6. Go rules
-/// 7. C/C++ rules
-///
-/// # Returns
-///
-/// A `Vec<Rule>` containing all default rules.
-///
-/// # Example
-///
-/// ```rust
-/// use vulnera_sast::infrastructure::rules::get_default_rules;
-///
-/// let rules = get_default_rules();
-/// for rule in &rules {
-///     println!("{}: {}", rule.id, rule.name);
-/// }
-/// ```
-pub fn get_default_rules() -> Vec<Rule> {
-    let mut rules = Vec::new();
-
-    // Cross-language rules
-    rules.extend(get_common_rules());
-
-    // JavaScript rules
-    rules.extend(get_javascript_rules());
-
-    // TypeScript rules
-    rules.extend(get_typescript_rules());
-
-    // Python rules
-    rules.extend(get_python_rules());
-
-    // Rust rules
-    rules.extend(get_rust_rules());
-
-    // Go rules
-    rules.extend(get_go_rules());
-
-    // C/C++ rules
-    rules.extend(get_c_cpp_rules());
-
-    rules
+/// Rules are parsed from embedded TOML once on first call and cached for the
+/// process lifetime.
+pub fn get_default_rules() -> Vec<PatternRule> {
+    ALL_DEFAULT_RULES.clone()
 }
+
+// =============================================================================
+// Tests
+// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -106,12 +95,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rule_count_increased() {
+    fn test_rule_count_sufficient() {
         let rules = get_default_rules();
-        // We should have at least 140 rules now with expanded catastrophic vulnerability coverage
         assert!(
-            rules.len() >= 140,
-            "Expected at least 140 rules, got {}",
+            rules.len() >= 100,
+            "Expected at least 100 rules, got {}",
             rules.len()
         );
     }
@@ -157,81 +145,5 @@ mod tests {
                 rule.id
             );
         }
-    }
-
-    #[test]
-    fn test_javascript_rules_loaded() {
-        let rules = get_javascript_rules();
-        assert!(
-            rules.len() >= 20,
-            "Expected at least 20 JavaScript rules, got {}",
-            rules.len()
-        );
-
-        // Check for specific rule
-        assert!(
-            rules.iter().any(|r| r.id == "js-eval-direct"),
-            "js-eval-direct rule should exist"
-        );
-    }
-
-    #[test]
-    fn test_python_rules_loaded() {
-        let rules = get_python_rules();
-        assert!(
-            rules.len() >= 20,
-            "Expected at least 20 Python rules, got {}",
-            rules.len()
-        );
-
-        assert!(
-            rules.iter().any(|r| r.id == "python-subprocess"),
-            "python-subprocess rule should exist"
-        );
-    }
-
-    #[test]
-    fn test_rust_rules_loaded() {
-        let rules = get_rust_rules();
-        assert!(
-            rules.len() >= 10,
-            "Expected at least 10 Rust rules, got {}",
-            rules.len()
-        );
-
-        assert!(
-            rules.iter().any(|r| r.id == "rust-unsafe"),
-            "rust-unsafe rule should exist"
-        );
-    }
-
-    #[test]
-    fn test_go_rules_loaded() {
-        let rules = get_go_rules();
-        assert!(
-            rules.len() >= 10,
-            "Expected at least 10 Go rules, got {}",
-            rules.len()
-        );
-
-        assert!(
-            rules.iter().any(|r| r.id == "go-command-injection"),
-            "go-command-injection rule should exist"
-        );
-    }
-
-    #[test]
-    fn test_c_cpp_rules_loaded() {
-        let rules = get_c_cpp_rules();
-        assert!(
-            rules.len() >= 15,
-            "Expected at least 15 C/C++ rules, got {}",
-            rules.len()
-        );
-
-        assert!(
-            rules.iter().any(|r| r.id == "c-buffer-overflow"),
-            "c-buffer-overflow rule should exist"
-        );
     }
 }

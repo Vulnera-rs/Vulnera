@@ -1,4 +1,7 @@
 //! AST parsers for different languages
+//!
+//! Uses a single generic `TreeSitterParser` parameterized by `Language` instead
+//! of per-language structs. The grammar is resolved via `Language::grammar()`.
 
 use crate::domain::value_objects::Language;
 use tracing::{debug, error, instrument, warn};
@@ -31,189 +34,58 @@ pub enum ParseError {
     Io(#[from] std::io::Error),
 }
 
-/// Python parser using tree-sitter
-pub struct PythonParser {
+/// Generic tree-sitter parser for any supported language.
+///
+/// Replaces the previous per-language parser structs (`PythonParser`,
+/// `JavaScriptParser`, etc.) with a single parameterized implementation.
+pub struct TreeSitterParser {
     parser: tree_sitter::Parser,
+    lang: Language,
 }
 
-impl PythonParser {
-    pub fn new() -> Result<Self, ParseError> {
+impl TreeSitterParser {
+    /// Create a parser for the given language.
+    pub fn new(lang: Language) -> Result<Self, ParseError> {
         let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_python::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load Python grammar");
-            ParseError::ParseFailed(format!("Failed to load Python grammar: {}", e))
+        let grammar = lang.grammar();
+        parser.set_language(&grammar).map_err(|e| {
+            error!(language = %lang, error = %e, "Failed to load grammar");
+            ParseError::ParseFailed(format!("Failed to load {} grammar: {}", lang, e))
         })?;
 
-        debug!("Python parser initialized");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for PythonParser {
-    fn language(&self) -> Language {
-        Language::Python
+        debug!(language = %lang, "Parser initialized");
+        Ok(Self { parser, lang })
     }
 
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse Python code");
-            ParseError::ParseFailed("Failed to parse Python code".to_string())
-        })?;
-
-        let root_node = tree.root_node();
-        debug!(
-            node_count = root_node.child_count(),
-            "Python AST parsed successfully"
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// JavaScript parser using tree-sitter
-pub struct JavaScriptParser {
-    parser: tree_sitter::Parser,
-}
-
-impl JavaScriptParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_javascript::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load JavaScript grammar");
-            ParseError::ParseFailed(format!("Failed to load JavaScript grammar: {}", e))
-        })?;
-
-        debug!("JavaScript parser initialized");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for JavaScriptParser {
-    fn language(&self) -> Language {
-        Language::JavaScript
-    }
-
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse JavaScript code");
-            ParseError::ParseFailed("Failed to parse JavaScript code".to_string())
-        })?;
-
-        let root_node = tree.root_node();
-        debug!(
-            node_count = root_node.child_count(),
-            "JavaScript AST parsed successfully"
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// TypeScript parser using tree-sitter-typescript
-pub struct TypeScriptParser {
-    parser: tree_sitter::Parser,
-    is_tsx: bool,
-}
-
-impl TypeScriptParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load TypeScript grammar");
-            ParseError::ParseFailed(format!("Failed to load TypeScript grammar: {}", e))
-        })?;
-
-        debug!("TypeScript parser initialized");
-        Ok(Self {
-            parser,
-            is_tsx: false,
-        })
-    }
-
-    /// Create a TSX parser for React components
-    pub fn new_tsx() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_typescript::LANGUAGE_TSX.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load TSX grammar");
-            ParseError::ParseFailed(format!("Failed to load TSX grammar: {}", e))
-        })?;
-
-        debug!("TSX parser initialized");
-        Ok(Self {
-            parser,
-            is_tsx: true,
+    /// Parse source code and return the raw tree-sitter Tree.
+    /// This is useful for executing queries directly against the AST.
+    pub fn parse_tree(&mut self, source: &str) -> Result<tree_sitter::Tree, ParseError> {
+        self.parser.parse(source, None).ok_or_else(|| {
+            let label = self.lang.to_tree_sitter_name();
+            warn!(language = label, "Failed to parse code");
+            ParseError::ParseFailed(format!("Failed to parse {} code", label))
         })
     }
 }
 
-impl Parser for TypeScriptParser {
+impl Parser for TreeSitterParser {
     fn language(&self) -> Language {
-        Language::TypeScript
+        self.lang
     }
 
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
+    #[instrument(skip(self, source), fields(language = %self.lang, source_len = source.len()))]
     fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
+        let label = self.lang.to_tree_sitter_name();
+
         let tree = self.parser.parse(source, None).ok_or_else(|| {
-            let lang = if self.is_tsx { "TSX" } else { "TypeScript" };
-            warn!("Failed to parse {} code", lang);
-            ParseError::ParseFailed(format!("Failed to parse {} code", lang))
-        })?;
-
-        let root_node = tree.root_node();
-        let lang = if self.is_tsx { "TSX" } else { "TypeScript" };
-        debug!(
-            node_count = root_node.child_count(),
-            "{} AST parsed successfully", lang
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// Rust parser using tree-sitter-rust (consistent with other language parsers)
-pub struct RustParser {
-    parser: tree_sitter::Parser,
-}
-
-impl Default for RustParser {
-    fn default() -> Self {
-        Self::new().expect("Failed to initialize Rust parser")
-    }
-}
-
-impl RustParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_rust::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load Rust grammar");
-            ParseError::ParseFailed(format!("Failed to load Rust grammar: {}", e))
-        })?;
-
-        debug!("Rust parser initialized with tree-sitter-rust");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for RustParser {
-    fn language(&self) -> Language {
-        Language::Rust
-    }
-
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse Rust code");
-            ParseError::ParseFailed("Failed to parse Rust code".to_string())
+            warn!(language = label, "Failed to parse code");
+            ParseError::ParseFailed(format!("Failed to parse {} code", label))
         })?;
 
         let root_node = tree.root_node();
         debug!(
             node_count = root_node.child_count(),
-            "Rust AST parsed successfully"
+            "{} AST parsed successfully", label
         );
         Ok(convert_tree_sitter_node(root_node, source, None))
     }
@@ -224,147 +96,8 @@ pub struct ParserFactory;
 
 impl ParserFactory {
     pub fn create_parser(&self, language: &Language) -> Result<Box<dyn Parser>, ParseError> {
-        match language {
-            Language::Python => Ok(Box::new(PythonParser::new()?)),
-            Language::JavaScript => Ok(Box::new(JavaScriptParser::new()?)),
-            Language::TypeScript => Ok(Box::new(TypeScriptParser::new()?)),
-            Language::Rust => Ok(Box::new(RustParser::new()?)),
-            Language::Go => Ok(Box::new(GoParser::new()?)),
-            Language::C => Ok(Box::new(CParser::new()?)),
-            Language::Cpp => Ok(Box::new(CppParser::new()?)),
-        }
+        Ok(Box::new(TreeSitterParser::new(*language)?))
     }
-
-    /// Create a TSX parser specifically for React/JSX files
-    pub fn create_tsx_parser(&self) -> Result<Box<dyn Parser>, ParseError> {
-        Ok(Box::new(TypeScriptParser::new_tsx()?))
-    }
-}
-
-/// Go parser using tree-sitter
-pub struct GoParser {
-    parser: tree_sitter::Parser,
-}
-
-impl GoParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_go::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load Go grammar");
-            ParseError::ParseFailed(format!("Failed to load Go grammar: {}", e))
-        })?;
-
-        debug!("Go parser initialized");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for GoParser {
-    fn language(&self) -> Language {
-        Language::Go
-    }
-
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse Go code");
-            ParseError::ParseFailed("Failed to parse Go code".to_string())
-        })?;
-
-        let root_node = tree.root_node();
-        debug!(
-            node_count = root_node.child_count(),
-            "Go AST parsed successfully"
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// C parser using tree-sitter
-pub struct CParser {
-    parser: tree_sitter::Parser,
-}
-
-impl CParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_c::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load C grammar");
-            ParseError::ParseFailed(format!("Failed to load C grammar: {}", e))
-        })?;
-
-        debug!("C parser initialized");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for CParser {
-    fn language(&self) -> Language {
-        Language::C
-    }
-
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse C code");
-            ParseError::ParseFailed("Failed to parse C code".to_string())
-        })?;
-
-        let root_node = tree.root_node();
-        debug!(
-            node_count = root_node.child_count(),
-            "C AST parsed successfully"
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// C++ parser using tree-sitter
-pub struct CppParser {
-    parser: tree_sitter::Parser,
-}
-
-impl CppParser {
-    pub fn new() -> Result<Self, ParseError> {
-        let mut parser = tree_sitter::Parser::new();
-        let language = tree_sitter_cpp::LANGUAGE.into();
-        parser.set_language(&language).map_err(|e| {
-            error!(error = %e, "Failed to load C++ grammar");
-            ParseError::ParseFailed(format!("Failed to load C++ grammar: {}", e))
-        })?;
-
-        debug!("C++ parser initialized");
-        Ok(Self { parser })
-    }
-}
-
-impl Parser for CppParser {
-    fn language(&self) -> Language {
-        Language::Cpp
-    }
-
-    #[instrument(skip(self, source), fields(source_len = source.len()))]
-    fn parse(&mut self, source: &str) -> Result<AstNode, ParseError> {
-        let tree = self.parser.parse(source, None).ok_or_else(|| {
-            warn!("Failed to parse C++ code");
-            ParseError::ParseFailed("Failed to parse C++ code".to_string())
-        })?;
-
-        let root_node = tree.root_node();
-        debug!(
-            node_count = root_node.child_count(),
-            "C++ AST parsed successfully"
-        );
-        Ok(convert_tree_sitter_node(root_node, source, None))
-    }
-}
-
-/// Build an AST from an existing tree-sitter tree
-pub(crate) fn ast_from_tree(tree: &tree_sitter::Tree, source: &str) -> AstNode {
-    let root_node = tree.root_node();
-    convert_tree_sitter_node(root_node, source, None)
 }
 
 /// Convert tree-sitter node to our AST representation
@@ -412,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_python_field_names() {
-        if let Ok(mut parser) = PythonParser::new() {
+        if let Ok(mut parser) = TreeSitterParser::new(Language::Python) {
             let code = "def foo(x): pass";
             let ast = parser.parse(code).expect("Should parse");
 

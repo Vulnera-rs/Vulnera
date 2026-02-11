@@ -14,8 +14,8 @@ use vulnera_core::infrastructure::cache::CacheServiceImpl;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_deps::DependencyAnalyzerModule;
 use vulnera_orchestrator::infrastructure::ModuleRegistry;
-use vulnera_sast::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
 use vulnera_sast::{AstCacheService, DragonflyAstCache, SastModule};
+use vulnera_sast::application::use_cases::AnalysisConfig;
 use vulnera_secrets::SecretDetectionModule;
 
 /// Collection of initialized analysis modules
@@ -44,25 +44,7 @@ impl AnalysisModules {
 
         // 2. Initialize SAST Module
         let sast_module = {
-            let analysis_config = AnalysisConfig {
-                enable_data_flow: config.sast.enable_data_flow,
-                enable_call_graph: config.sast.enable_call_graph,
-                enable_ast_cache: config.sast.enable_ast_cache.unwrap_or(true),
-                ast_cache_ttl_hours: config.sast.ast_cache_ttl_hours.unwrap_or(4),
-                max_concurrent_files: config.sast.max_concurrent_files.unwrap_or(4),
-                analysis_depth: config.sast.analysis_depth,
-                dynamic_depth_enabled: config.sast.dynamic_depth_enabled.unwrap_or(false),
-                dynamic_depth_file_count_threshold: config.sast.dynamic_depth_file_count_threshold,
-                dynamic_depth_total_bytes_threshold: config
-                    .sast
-                    .dynamic_depth_total_bytes_threshold,
-                tree_cache_max_entries: config.sast.tree_cache_max_entries.unwrap_or(1024),
-                max_file_size_bytes: config.sast.max_file_size_bytes.unwrap_or(1_048_576),
-                per_file_timeout_seconds: config.sast.per_file_timeout_seconds.unwrap_or(30),
-                scan_timeout_seconds: config.sast.scan_timeout_seconds,
-                max_findings_per_file: config.sast.max_findings_per_file.unwrap_or(100),
-                max_total_findings: config.sast.max_total_findings,
-            };
+            let analysis_config = AnalysisConfig::from(&config.sast);
 
             let ast_cache: Option<Arc<dyn AstCacheService>> = if analysis_config.enable_ast_cache {
                 Some(Arc::new(DragonflyAstCache::with_ttl(
@@ -73,14 +55,15 @@ impl AnalysisModules {
                 None
             };
 
-            let use_case = ScanProjectUseCase::with_config(&config.sast, analysis_config);
-            let use_case = if let Some(cache) = ast_cache {
-                use_case.with_ast_cache(cache)
-            } else {
-                use_case
-            };
+            let mut builder = SastModule::builder()
+                .sast_config(&config.sast)
+                .analysis_config(analysis_config);
 
-            Arc::new(SastModule::with_use_case(Arc::new(use_case)))
+            if let Some(cache) = ast_cache {
+                builder = builder.ast_cache(cache);
+            }
+
+            Arc::new(builder.build())
         };
 
         // 3. Initialize Secret Detection Module
