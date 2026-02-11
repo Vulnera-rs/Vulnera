@@ -4,7 +4,7 @@
 
 **High-Performance Vulnerability Analysis Platform**
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: BUSL 1.1](https://img.shields.io/badge/License-BUSL_1.1-blue.svg)](LICENSE)
 [![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange.svg)](https://www.rust-lang.org/tools/install)
 [![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://hub.docker.com/)
@@ -290,7 +290,12 @@ Azure Front Door → API Management → App Service/Container Apps
 
 ## 📜 License
 
-[AGPL v3.0](LICENSE) — see [LICENSE](./LICENSE) for details.
+Core platform (server, analysis modules, orchestration): **Business Source License 1.1** with a
+Change Date to **GPL-3.0-or-later**.
+
+CLI , Advisors and LSP (adapter): **AGPL-3.0-or-later**.
+
+See [LICENSE](./LICENSE) for details and commercial licensing.
 
 ---
 

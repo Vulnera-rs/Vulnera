@@ -102,7 +102,8 @@ tempfile.workspace = true
 version = "0.5.0"
 edition = "2024"
 authors = ["Vulnera-Team"]
-license = "Proprietary"
+license = "BUSL-1.1"
+license-file = "LICENSE"
 repository = "https://github.com/k5602/vulnera"
 keywords = ["security", "vulnerability", "analysis", "dependencies"]
 categories = ["web-programming", "development-tools"]
@@ -207,7 +208,6 @@ tree-sitter-go = "0.25.0"
 tree-sitter-c = "0.24.1"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-grep = "0.1.0"
-tree-sitter-swift = "0.7.1"
 globset = "0.4"
 
 # Serialization (binary)
