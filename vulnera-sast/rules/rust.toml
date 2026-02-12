@@ -124,23 +124,45 @@ message = "Review unsafe code carefully. Document safety invariants."
 [rules.pattern]
 type = "TreeSitterQuery"
 value = '''
-[
-  ; Match any unsafe block
-  (unsafe_block) @unsafe
+(unsafe_block) @unsafe
+'''
 
-  ; Match unsafe function declarations
-  (function_item) @unsafe_fn
-  (#match? @unsafe_fn "^unsafe\\s+fn")
+[[rules]]
+id = "rust-unsafe-fn"
+name = "Unsafe Function"
+description = "unsafe function declaration bypasses Rust's safety guarantees"
+severity = "Medium"
+languages = ["Rust"]
+cwe_ids = ["CWE-119"]
+owasp_categories = []
+tags = ["unsafe", "rust"]
+message = "Review unsafe code carefully. Document safety invariants."
 
-  ; Match unsafe trait implementations
-  (unsafe_impl) @unsafe_impl
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(function_item
+  (visibility_modifier)?
+  "unsafe"
+  "fn"
+) @unsafe_fn
+'''
 
-  ; Match raw pointer dereference
-  (unary_expression
-    operator: "*"
-    argument: (identifier) @ptr
-  ) @deref
-]
+[[rules]]
+id = "rust-unsafe-impl"
+name = "Unsafe Implementation"
+description = "unsafe trait implementation bypasses Rust's safety guarantees"
+severity = "Medium"
+languages = ["Rust"]
+cwe_ids = ["CWE-119"]
+owasp_categories = []
+tags = ["unsafe", "rust"]
+message = "Review unsafe code carefully. Document safety invariants."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(unsafe_impl) @unsafe_impl
 '''
 
 [[rules]]

@@ -269,7 +269,7 @@ async fn test_go_command_injection_detected() {
     create_source_file(
         &dir,
         "main.go",
-        "package main\nimport \"os/exec\"\nfunc main() {\n    exec.Command(\"ls\").Run()\n}\n",
+        "package main\nimport \"os/exec\"\nfunc main() {\n    cmd := \"ls\"\n    exec.Command(cmd).Run()\n}\n",
     )
     .await;
     let result = scan_dir(&dir).await;
