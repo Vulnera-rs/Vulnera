@@ -341,15 +341,46 @@ impl GradleParser {
         }
 
         // Handle Gradle version catalogs and property references
-        if version_str.starts_with("$") {
-            return Ok("0.0.0".to_string()); // Default for unresolved properties
+        if version_str.starts_with("$") || version_str.contains("${") {
+            return Ok("1.0.0".to_string());
         }
 
-        // Handle version ranges (simplified)
-        if version_str.contains('+') {
-            // Handle dynamic versions like "1.+" -> "1.0.0"
-            let base_version = version_str.replace('+', "0");
-            return Ok(base_version);
+        // Handle dynamic selectors used by Gradle/Maven metadata
+        if matches!(
+            version_str.to_ascii_lowercase().as_str(),
+            "latest.release" | "latest.integration" | "release" | "latest"
+        ) {
+            return Ok("1.0.0".to_string());
+        }
+
+        // Handle version ranges like [1.2,2.0), (1.0,], [1.0,)
+        if (version_str.starts_with('[') || version_str.starts_with('('))
+            && (version_str.ends_with(']') || version_str.ends_with(')'))
+            && version_str.contains(',')
+        {
+            let inner = &version_str[1..version_str.len() - 1];
+            let mut parts = inner.split(',').map(str::trim);
+            let lower = parts.next().unwrap_or_default();
+            let upper = parts.next().unwrap_or_default();
+
+            let chosen = if !lower.is_empty() { lower } else { upper };
+            if !chosen.is_empty() {
+                return Ok(chosen.to_string());
+            }
+        }
+
+        // Handle dynamic versions like "1.+", "1.2.+"
+        if version_str.ends_with('+') {
+            let mut parts: Vec<&str> = version_str.trim_end_matches('+').split('.').collect();
+            if matches!(parts.last(), Some(last) if last.is_empty()) {
+                parts.pop();
+            }
+
+            while parts.len() < 3 {
+                parts.push("0");
+            }
+
+            return Ok(parts[..3].join("."));
         }
 
         // Handle classifier suffixes like "-jre", "-android", etc.
@@ -482,9 +513,13 @@ dependencies {
         assert_eq!(parser.clean_gradle_version("5.3.21").unwrap(), "5.3.21");
         assert_eq!(
             parser.clean_gradle_version("$springVersion").unwrap(),
-            "0.0.0"
+            "1.0.0"
         );
-        assert_eq!(parser.clean_gradle_version("1.+").unwrap(), "1.0");
+        assert_eq!(parser.clean_gradle_version("1.+").unwrap(), "1.0.0");
+        assert_eq!(parser.clean_gradle_version("1.2.+").unwrap(), "1.2.0");
+        assert_eq!(parser.clean_gradle_version("[1.2,2.0)").unwrap(), "1.2");
+        assert_eq!(parser.clean_gradle_version("(,2.0]").unwrap(), "2.0");
+        assert_eq!(parser.clean_gradle_version("latest.release").unwrap(), "1.0.0");
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub struct DashboardOverview {
 /// Quota usage summary
 #[derive(Debug, Clone)]
 pub struct QuotaUsage {
+    pub tier: Option<SubscriptionTier>,
     pub scans_used: u32,
     pub scans_limit: Option<u32>,
     pub scans_percentage: f64,
@@ -324,6 +325,7 @@ fn calculate_quota_usage(
         || api_calls_limit.map(|l| api_calls_used > l).unwrap_or(false);
 
     QuotaUsage {
+        tier: limits.as_ref().map(|l| l.tier),
         scans_used,
         scans_limit,
         scans_percentage,

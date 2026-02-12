@@ -296,6 +296,13 @@ impl Validate for AuthConfig {
             ));
         }
 
+        // Validate API key TTL days when configured
+        if self.api_key_ttl_days.is_some_and(|days| days == 0) {
+            return Err(ValidationError::auth(
+                "API key TTL days must be greater than 0 when configured".to_string(),
+            ));
+        }
+
         // Validate CSRF token length (16-64 bytes for reasonable entropy)
         if self.csrf_token_bytes < 16 || self.csrf_token_bytes > 64 {
             return Err(ValidationError::auth(
