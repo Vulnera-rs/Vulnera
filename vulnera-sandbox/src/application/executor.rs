@@ -183,7 +183,7 @@ impl SandboxExecutor {
             .arg("--project-id")
             .arg(&config.project_id)
             .arg("--job-id")
-            .arg(&config.job_id.to_string())
+            .arg(config.job_id.to_string())
             .arg("--module-config")
             .arg(&config_json)
             .arg("--policy")

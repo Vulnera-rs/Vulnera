@@ -160,9 +160,11 @@ pub async fn build_graph_from_lockfile(
     // Create nodes for all packages
     for package in packages.packages {
         let id = PackageId::from_package(&package);
-        let mut metadata = PackageMetadata::default();
-        metadata.resolved_version = Some(package.version.clone());
-        metadata.is_direct = true;
+        let metadata = PackageMetadata {
+            resolved_version: Some(package.version.clone()),
+            is_direct: true,
+            ..Default::default()
+        };
 
         let node = PackageNode::new(package.clone()).with_metadata(metadata);
         package_map.insert(id.clone(), node);
@@ -212,8 +214,10 @@ pub async fn build_graph_from_manifest(
 
     // Add direct dependencies as nodes
     for package in packages.packages {
-        let mut metadata = PackageMetadata::default();
-        metadata.is_direct = true;
+        let metadata = PackageMetadata {
+            is_direct: true,
+            ..Default::default()
+        };
 
         let node = PackageNode::new(package.clone()).with_metadata(metadata);
         graph.add_node(node);
@@ -241,8 +245,10 @@ pub async fn build_graph_from_manifest(
             match resolver.resolve_transitive(package, registry.clone()).await {
                 Ok(transitive_deps) => {
                     for dep in transitive_deps {
-                        let mut metadata = PackageMetadata::default();
-                        metadata.is_direct = false; // These are transitive
+                        let metadata = PackageMetadata {
+                            is_direct: false, // These are transitive
+                            ..Default::default()
+                        };
 
                         let dep_node = PackageNode::new(dep).with_metadata(metadata);
                         graph.add_node(dep_node.clone());

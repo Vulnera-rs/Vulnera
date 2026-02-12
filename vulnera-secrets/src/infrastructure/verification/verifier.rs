@@ -56,10 +56,11 @@ pub struct VerificationService {
 
 impl VerificationService {
     pub fn new(timeout: Duration) -> Self {
-        let mut verifiers: Vec<Box<dyn SecretVerifier>> = Vec::new();
-        verifiers.push(Box::new(AwsVerifier {}));
-        verifiers.push(Box::new(GitHubVerifier::new()));
-        verifiers.push(Box::new(GitLabVerifier::new()));
+        let verifiers: Vec<Box<dyn SecretVerifier>> = vec![
+            Box::new(AwsVerifier {}),
+            Box::new(GitHubVerifier::new()),
+            Box::new(GitLabVerifier::new()),
+        ];
 
         Self { verifiers, timeout }
     }

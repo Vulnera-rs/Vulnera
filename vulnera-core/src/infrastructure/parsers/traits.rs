@@ -42,72 +42,30 @@ pub struct ParserFactory {
 impl ParserFactory {
     /// Create a new parser factory with all available parsers
     pub fn new() -> Self {
-        let mut parsers: Vec<Box<dyn PackageFileParser>> = Vec::new();
+        let mut parsers: Vec<Box<dyn PackageFileParser>> = vec![
+            Box::new(crate::infrastructure::parsers::npm::NpmParser::new()),
+            Box::new(crate::infrastructure::parsers::npm::PackageLockParser::new()),
+            Box::new(crate::infrastructure::parsers::yarn_pest::YarnPestParser::new()),
+            Box::new(crate::infrastructure::parsers::npm::YarnLockParser::new()),
+            Box::new(crate::infrastructure::parsers::python::RequirementsTxtParser::new()),
+            Box::new(crate::infrastructure::parsers::python::PipfileParser::new()),
+            Box::new(crate::infrastructure::parsers::python::PyProjectTomlParser::new()),
+            Box::new(crate::infrastructure::parsers::python_uv::UvLockParser::new()),
+            Box::new(crate::infrastructure::parsers::java::MavenParser::new()),
+            Box::new(crate::infrastructure::parsers::gradle_pest::GradlePestParser::new()),
+            Box::new(crate::infrastructure::parsers::rust::CargoParser::new()),
+            Box::new(crate::infrastructure::parsers::rust::CargoLockParser::new()),
+            Box::new(crate::infrastructure::parsers::go::GoModParser::new()),
+            Box::new(crate::infrastructure::parsers::go::GoSumParser::new()),
+            Box::new(crate::infrastructure::parsers::php::ComposerParser::new()),
+            Box::new(crate::infrastructure::parsers::php::ComposerLockParser::new()),
+            Box::new(crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new()),
+            Box::new(crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new()),
+            Box::new(crate::infrastructure::parsers::ruby::GemfileLockParser::new()),
+            Box::new(crate::infrastructure::parsers::ruby::GemfileParser::new()),
+        ];
 
         // Note: XML parsing uses the existing MavenParser (quick-xml based) which is more robust
-
-        // Fallback parsers (original implementations)
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::NpmParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::PackageLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::yarn_pest::YarnPestParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::npm::YarnLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::RequirementsTxtParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::PipfileParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python::PyProjectTomlParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::python_uv::UvLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::java::MavenParser::new(),
-        ));
-        // Pest-based Gradle parser
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::gradle_pest::GradlePestParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::rust::CargoParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::rust::CargoLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::go::GoModParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::go::GoSumParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::php::ComposerParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::php::ComposerLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::nuget::NuGetPackagesConfigParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::nuget::NuGetProjectXmlParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::ruby::GemfileLockParser::new(),
-        ));
-        parsers.push(Box::new(
-            crate::infrastructure::parsers::ruby::GemfileParser::new(),
-        ));
 
         // Tree-sitter parsers (Lowered priority to prefer fallback parsers with edge extraction)
         // JSON parsers

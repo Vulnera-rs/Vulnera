@@ -21,7 +21,7 @@ pub enum ProviderType {
 
 impl ProviderType {
     /// Parse from string
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "google_ai" | "gemini" | "google" => Self::GoogleAI,
             "openai" | "gpt" => Self::OpenAI,
@@ -368,10 +368,10 @@ mod tests {
 
     #[test]
     fn test_provider_type_parsing() {
-        assert_eq!(ProviderType::from_str("google_ai"), ProviderType::GoogleAI);
-        assert_eq!(ProviderType::from_str("gemini"), ProviderType::GoogleAI);
-        assert_eq!(ProviderType::from_str("openai"), ProviderType::OpenAI);
-        assert_eq!(ProviderType::from_str("azure"), ProviderType::Azure);
+        assert_eq!(ProviderType::parse("google_ai"), ProviderType::GoogleAI);
+        assert_eq!(ProviderType::parse("gemini"), ProviderType::GoogleAI);
+        assert_eq!(ProviderType::parse("openai"), ProviderType::OpenAI);
+        assert_eq!(ProviderType::parse("azure"), ProviderType::Azure);
     }
 
     #[test]

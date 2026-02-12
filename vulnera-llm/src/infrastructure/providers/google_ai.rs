@@ -120,7 +120,7 @@ impl GoogleAIProvider {
     }
 
     /// Convert Gemini response to our format
-    fn from_gemini_response(
+    fn parse_gemini_response(
         &self,
         response: GeminiResponse,
         model: &str,
@@ -226,7 +226,7 @@ impl LlmProvider for GoogleAIProvider {
         }
 
         let gemini_response: GeminiResponse = response.json().await?;
-        self.from_gemini_response(gemini_response, model)
+        self.parse_gemini_response(gemini_response, model)
     }
 
     async fn complete_stream(

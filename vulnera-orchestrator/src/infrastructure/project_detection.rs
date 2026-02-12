@@ -33,8 +33,10 @@ impl FileSystemProjectDetector {
             ));
         }
 
-        let mut metadata = ProjectMetadata::default();
-        metadata.root_path = Some(root.to_string_lossy().to_string());
+        let mut metadata = ProjectMetadata {
+            root_path: Some(root.to_string_lossy().to_string()),
+            ..Default::default()
+        };
 
         let mut languages = HashSet::new();
         let mut frameworks = HashSet::new();

@@ -41,6 +41,14 @@ use crate::infrastructure::taint_queries::{
     TaintConfig, get_propagation_queries, get_sanitizer_queries,
 };
 
+type CallUpdate = (
+    String,
+    u32,
+    u32,
+    String,
+    Vec<Option<crate::domain::finding::TaintState>>,
+);
+
 /// Result of a SAST scan
 #[derive(Debug)]
 pub struct ScanResult {
@@ -752,7 +760,7 @@ impl ScanProjectUseCase {
         findings: &mut Vec<SastFinding>,
     ) -> Result<(), ScanError> {
         // Filter to pattern rules (tree-sitter, metavariables, and composites)
-        let pattern_rules: Vec<&PatternRule> = rules.iter().copied().collect();
+        let pattern_rules: Vec<&PatternRule> = rules.to_vec();
 
         if pattern_rules.is_empty() {
             return Ok(());
@@ -989,13 +997,7 @@ impl ScanProjectUseCase {
                     let call_edges = ctx.get_call_edges(&function_id).to_vec();
                     let mut param_states: Vec<(usize, crate::domain::finding::TaintState)> =
                         Vec::new();
-                    let mut call_updates: Vec<(
-                        String,
-                        u32,
-                        u32,
-                        String,
-                        Vec<Option<crate::domain::finding::TaintState>>,
-                    )> = Vec::new();
+                    let mut call_updates: Vec<CallUpdate> = Vec::new();
                     let mut return_state: Option<crate::domain::finding::TaintState> = None;
 
                     {
@@ -1595,7 +1597,7 @@ impl ScanProjectUseCase {
         matches
             .iter()
             .filter(|m| {
-                let in_range = range.map_or(true, |r| Self::line_in_range(m.line, r));
+                let in_range = range.is_none_or(|r| Self::line_in_range(m.line, r));
                 let excluded = exclude_ranges
                     .map(|ranges| Self::line_in_any_range(m.line, ranges))
                     .unwrap_or(false);
@@ -1613,7 +1615,7 @@ impl ScanProjectUseCase {
         assignments
             .iter()
             .filter(|(_, _, line, _)| {
-                let in_range = range.map_or(true, |r| Self::line_in_range(*line, r));
+                let in_range = range.is_none_or(|r| Self::line_in_range(*line, r));
                 let excluded = exclude_ranges
                     .map(|ranges| Self::line_in_any_range(*line, ranges))
                     .unwrap_or(false);
@@ -1631,7 +1633,7 @@ impl ScanProjectUseCase {
         assignments
             .iter()
             .filter(|assignment| {
-                let in_range = range.map_or(true, |r| Self::line_in_range(assignment.line, r));
+                let in_range = range.is_none_or(|r| Self::line_in_range(assignment.line, r));
                 let excluded = exclude_ranges
                     .map(|ranges| Self::line_in_any_range(assignment.line, ranges))
                     .unwrap_or(false);
@@ -1649,7 +1651,7 @@ impl ScanProjectUseCase {
         returns
             .iter()
             .filter(|(_, line, _)| {
-                let in_range = range.map_or(true, |r| Self::line_in_range(*line, r));
+                let in_range = range.is_none_or(|r| Self::line_in_range(*line, r));
                 let excluded = exclude_ranges
                     .map(|ranges| Self::line_in_any_range(*line, ranges))
                     .unwrap_or(false);

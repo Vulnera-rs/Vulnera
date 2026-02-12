@@ -8,6 +8,8 @@ use crate::domain::entities::{ApiFinding, FindingSeverity};
 use crate::infrastructure::analyzers::*;
 use crate::infrastructure::parser::OpenApiParser;
 
+type AnalyzerFn = fn(&crate::domain::value_objects::OpenApiSpec) -> Vec<ApiFinding>;
+
 /// Result of an API security scan
 #[derive(Debug)]
 pub struct ScanResult {
@@ -59,10 +61,7 @@ impl ScanApiSpecificationUseCase {
         let mut all_findings = Vec::new();
 
         // Define analyzer names and their corresponding analyzer functions
-        let analyzers: Vec<(
-            &str,
-            fn(&crate::domain::value_objects::OpenApiSpec) -> Vec<ApiFinding>,
-        )> = vec![
+        let analyzers: Vec<(&str, AnalyzerFn)> = vec![
             ("authentication", |s| AuthenticationAnalyzer::analyze(s)),
             ("authorization", |s| AuthorizationAnalyzer::analyze(s)),
             ("input_validation", |s| InputValidationAnalyzer::analyze(s)),

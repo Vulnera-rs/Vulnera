@@ -188,7 +188,7 @@ impl DirectoryScanner {
         match file.read(&mut buffer) {
             Ok(n) if n > 0 => {
                 // A common heuristic: if a file contains null bytes, it's likely binary
-                buffer[..n].iter().any(|&b| b == 0)
+                buffer[..n].contains(&0)
             }
             _ => false,
         }

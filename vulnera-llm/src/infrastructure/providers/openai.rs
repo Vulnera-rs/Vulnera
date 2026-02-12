@@ -149,7 +149,7 @@ impl OpenAIProvider {
     }
 
     /// Convert from OpenAI response format
-    fn from_openai_response(&self, response: OpenAIResponse) -> CompletionResponse {
+    fn parse_openai_response(&self, response: OpenAIResponse) -> CompletionResponse {
         let choice = response.choices.into_iter().next();
 
         let content = choice
@@ -262,7 +262,7 @@ impl LlmProvider for OpenAIProvider {
         }
 
         let openai_response: OpenAIResponse = response.json().await?;
-        Ok(self.from_openai_response(openai_response))
+        Ok(self.parse_openai_response(openai_response))
     }
 
     async fn complete_stream(

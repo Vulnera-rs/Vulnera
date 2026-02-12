@@ -548,7 +548,7 @@ impl InterProceduralContext {
             let has_taint_input = !self
                 .param_taint
                 .get(function_id)
-                .map_or(true, |p| p.is_empty());
+                .is_none_or(|p| p.is_empty());
             let has_no_findings = analyzer.get_detected_paths().is_empty();
 
             // Sanitizer: takes tainted input, produces non-tainted or cleaned output

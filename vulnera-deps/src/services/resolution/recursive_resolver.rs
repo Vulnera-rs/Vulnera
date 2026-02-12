@@ -59,9 +59,11 @@ impl<C: CacheService> RecursiveResolver<C> {
 
             // Add root nodes to graph if not already present
             if graph.get_node(&pkg_id).is_none() {
-                let mut metadata = PackageMetadata::default();
-                metadata.is_direct = true;
-                metadata.resolved_version = Some(root.version.clone());
+                let metadata = PackageMetadata {
+                    is_direct: true,
+                    resolved_version: Some(root.version.clone()),
+                    ..Default::default()
+                };
 
                 let node = PackageNode::new(root.clone()).with_metadata(metadata);
                 graph.add_node(node);
@@ -138,9 +140,11 @@ impl<C: CacheService> RecursiveResolver<C> {
 
                 // Add node to graph if not present
                 if graph.get_node(&dep_id).is_none() {
-                    let mut metadata = PackageMetadata::default();
-                    metadata.is_direct = false;
-                    metadata.resolved_version = Some(dep_pkg.version.clone());
+                    let metadata = PackageMetadata {
+                        is_direct: false,
+                        resolved_version: Some(dep_pkg.version.clone()),
+                        ..Default::default()
+                    };
 
                     let node = PackageNode::new(dep_pkg.clone()).with_metadata(metadata);
                     graph.add_node(node);

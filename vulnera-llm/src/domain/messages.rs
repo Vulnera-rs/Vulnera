@@ -161,6 +161,7 @@ impl Message {
 
 /// Completion request to send to an LLM provider
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct CompletionRequest {
     /// The conversation messages
     pub messages: Vec<Message>,
@@ -202,22 +203,6 @@ pub struct CompletionRequest {
     pub stream: Option<bool>,
 }
 
-impl Default for CompletionRequest {
-    fn default() -> Self {
-        Self {
-            messages: Vec::new(),
-            model: None,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            stop: Vec::new(),
-            stream: None,
-        }
-    }
-}
 
 impl CompletionRequest {
     /// Create a new completion request

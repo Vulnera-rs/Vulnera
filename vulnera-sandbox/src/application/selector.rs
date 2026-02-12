@@ -34,7 +34,7 @@ impl SandboxSelector {
             }
 
             info!("Landlock not available, using process sandbox");
-            return Arc::new(ProcessSandbox::new());
+            Arc::new(ProcessSandbox::new())
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -87,7 +87,7 @@ impl SandboxSelector {
             if LandlockSandbox::is_supported() {
                 return "landlock";
             }
-            return "process";
+            "process"
         }
 
         #[cfg(not(target_os = "linux"))]

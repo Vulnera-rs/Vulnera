@@ -7,7 +7,7 @@ use sha2::Sha256;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use vulnera_core::application::analytics::AnalyticsRecorder;
+use vulnera_core::application::analytics::{AnalyticsRecorder, FindingsSummary};
 use vulnera_core::domain::organization::value_objects::StatsSubject;
 use vulnera_core::infrastructure::cache::CacheServiceImpl;
 
@@ -254,11 +254,13 @@ async fn process_job(
                         subject.clone(),
                         user_id,
                         job_id,
-                        severity.critical as u32,
-                        severity.high as u32,
-                        severity.medium as u32,
-                        severity.low as u32,
-                        severity.info as u32,
+                        FindingsSummary {
+                            critical: severity.critical as u32,
+                            high: severity.high as u32,
+                            medium: severity.medium as u32,
+                            low: severity.low as u32,
+                            info: severity.info as u32,
+                        },
                     )
                     .await
                 {
@@ -307,7 +309,7 @@ async fn process_job(
             if let Some(ref subject) = analytics_subject {
                 if let Err(e) = ctx
                     .analytics_recorder
-                    .on_scan_completed(subject.clone(), user_id, job_id, 0, 0, 0, 0, 0)
+                    .on_scan_completed(subject.clone(), user_id, job_id, FindingsSummary::default())
                     .await
                 {
                     warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
