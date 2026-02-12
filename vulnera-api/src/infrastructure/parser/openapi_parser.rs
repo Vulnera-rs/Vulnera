@@ -558,6 +558,15 @@ impl OpenApiParser {
                 let max_length = obj_schema.max_length.map(|v| v as u32);
                 let min_items = obj_schema.min_items.map(|v| v as u32);
                 let max_items = obj_schema.max_items.map(|v| v as u32);
+                let items = obj_schema.items.as_ref().map(|item_schema| {
+                    let parsed = match item_schema.as_ref() {
+                        oas3::spec::Schema::Object(object_schema) => {
+                            Self::parse_schema(object_schema.as_ref(), schema_resolver)
+                        }
+                        oas3::spec::Schema::Boolean(_) => ApiSchema::default(),
+                    };
+                    Box::new(parsed)
+                });
 
                 // Map logical constraints
                 let all_of: Vec<ApiSchema> = obj_schema
@@ -629,6 +638,7 @@ impl OpenApiParser {
                     max_length,
                     min_items,
                     max_items,
+                    items,
                     enum_values,
                     multiple_of,
                     example,

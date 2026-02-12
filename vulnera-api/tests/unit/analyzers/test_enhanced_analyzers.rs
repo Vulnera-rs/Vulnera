@@ -6,7 +6,7 @@ use vulnera_api::domain::value_objects::{
 };
 use vulnera_api::infrastructure::analyzers::{
     AuthorizationAnalyzer, DataExposureAnalyzer, InputValidationAnalyzer,
-    ResourceRestrictionAnalyzer, SecurityMisconfigAnalyzer,
+    ResourceRestrictionAnalyzer, SecurityHeadersAnalyzer, SecurityMisconfigAnalyzer,
 };
 
 // --- Helpers ---
@@ -122,6 +122,52 @@ fn test_detects_mass_assignment() {
     );
 }
 
+#[test]
+fn test_input_validation_recurses_into_array_item_schemas() {
+    let spec = OpenApiSpec {
+        version: "3.0.0".to_string(),
+        paths: vec![ApiPath {
+            path: "/bulk-users".to_string(),
+            operations: vec![ApiOperation {
+                method: "POST".to_string(),
+                security: vec![],
+                parameters: vec![],
+                request_body: Some(ApiRequestBody {
+                    required: true,
+                    content: vec![ApiContent {
+                        media_type: "application/json".to_string(),
+                        schema: Some(ApiSchema {
+                            schema_type: Some("array".to_string()),
+                            max_items: Some(100),
+                            items: Some(Box::new(ApiSchema {
+                                schema_type: Some("object".to_string()),
+                                properties: vec![ApiProperty {
+                                    name: "username".to_string(),
+                                    schema: ApiSchema {
+                                        schema_type: Some("string".to_string()),
+                                        ..Default::default()
+                                    },
+                                }],
+                                ..Default::default()
+                            })),
+                            ..Default::default()
+                        }),
+                    }],
+                }),
+                responses: vec![],
+            }],
+        }],
+        security_schemes: vec![],
+        global_security: vec![],
+    };
+
+    let findings = InputValidationAnalyzer::analyze(&spec);
+    assert!(findings.iter().any(|f| {
+        f.vulnerability_type == ApiVulnerabilityType::UnboundedInput
+            && f.description.contains("body[].username")
+    }));
+}
+
 // --- Authorization Tests ---
 
 #[test]
@@ -232,6 +278,50 @@ fn test_detects_missing_pagination() {
     );
 }
 
+#[test]
+fn test_detects_missing_pagination_for_wrapped_array_response() {
+    let spec = OpenApiSpec {
+        version: "3.0.0".to_string(),
+        paths: vec![ApiPath {
+            path: "/wrapped-items".to_string(),
+            operations: vec![ApiOperation {
+                method: "GET".to_string(),
+                security: vec![],
+                parameters: vec![],
+                request_body: None,
+                responses: vec![ApiResponse {
+                    status_code: "200".to_string(),
+                    content: vec![ApiContent {
+                        media_type: "application/json".to_string(),
+                        schema: Some(ApiSchema {
+                            schema_type: Some("object".to_string()),
+                            properties: vec![ApiProperty {
+                                name: "data".to_string(),
+                                schema: ApiSchema {
+                                    schema_type: Some("array".to_string()),
+                                    ..Default::default()
+                                },
+                            }],
+                            ..Default::default()
+                        }),
+                    }],
+                    headers: vec![],
+                }],
+            }],
+        }],
+        security_schemes: vec![],
+        global_security: vec![],
+    };
+
+    let findings = ResourceRestrictionAnalyzer::analyze(&spec);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.id.contains("missing-pagination")
+                && f.vulnerability_type == ApiVulnerabilityType::ResourceExhaustion)
+    );
+}
+
 // --- Security Misconfig Tests ---
 
 #[test]
@@ -269,4 +359,40 @@ fn test_detects_cors_wildcard() {
             .iter()
             .any(|f| f.vulnerability_type == ApiVulnerabilityType::CorsWildcard)
     );
+}
+
+#[test]
+fn test_security_headers_detects_insecure_cors_wildcard_from_schema() {
+    let spec = OpenApiSpec {
+        version: "3.0.0".to_string(),
+        paths: vec![ApiPath {
+            path: "/cors".to_string(),
+            operations: vec![ApiOperation {
+                method: "GET".to_string(),
+                security: vec![],
+                parameters: vec![],
+                request_body: None,
+                responses: vec![ApiResponse {
+                    status_code: "200".to_string(),
+                    content: vec![],
+                    headers: vec![ApiHeader {
+                        name: "Access-Control-Allow-Origin".to_string(),
+                        schema: Some(ApiSchema {
+                            schema_type: Some("string".to_string()),
+                            default: Some(serde_json::Value::String("*".to_string())),
+                            ..Default::default()
+                        }),
+                    }],
+                }],
+            }],
+        }],
+        security_schemes: vec![],
+        global_security: vec![],
+    };
+
+    let findings = SecurityHeadersAnalyzer::analyze(&spec);
+    assert!(findings.iter().any(|f| {
+        f.vulnerability_type == ApiVulnerabilityType::InsecureCors
+            && f.severity == vulnera_api::domain::entities::FindingSeverity::High
+    }));
 }

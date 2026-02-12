@@ -237,10 +237,16 @@ impl InputValidationAnalyzer {
                     method: Some(method.to_string()),
                 });
             }
-            // NOTE: Recursive analysis for array items logic would need item schema extraction,
-            // but ApiSchema doesn't have 'items' field in value_objects.rs yet (omitted in initial implementation plan?)
-            // Checked value_objects.rs: 'items' is missing!
-            // I should add it later, but for now properties recursion is good for objects.
+
+            if let Some(item_schema) = &schema.items {
+                Self::analyze_schema(
+                    item_schema,
+                    path,
+                    method,
+                    &format!("{}[]", context),
+                    findings,
+                );
+            }
         }
     }
 }

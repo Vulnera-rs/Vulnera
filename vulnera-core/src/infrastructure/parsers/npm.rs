@@ -306,44 +306,10 @@ impl PackageLockParser {
 
                     packages.push(package.clone());
 
-                    // Extract dependencies from 'requires' (v1) or 'dependencies' (lockfileVersion 2/3 packages)
-                    // Note: In v1 'dependencies' is the nested tree, 'requires' is the logical deps.
-                    // In lockfileVersion 2/3 'packages' entries, 'dependencies' is the logical deps.
-                    // We check both 'requires' and 'dependencies' here but treat them as logical deps if they are simple key-value pairs
-                    // However, 'dependencies' in v1 is nested objects, so we need to be careful.
-                    // A simple heuristic: if the value is a string, it's a version requirement (logical dep).
-                    // If it's an object, it's a nested dependency (physical tree).
-
-                    let mut extract_edges_from = |key: &str| {
-                        if let Some(reqs) = dep_info.get(key).and_then(|r| r.as_object()) {
-                            for (dep_name, dep_ver_val) in reqs {
-                                if let Some(dep_req) = dep_ver_val.as_str() {
-                                    pending_dependencies.push((
-                                        package.clone(),
-                                        dep_name.clone(),
-                                        dep_req.to_string(),
-                                    ));
-                                }
-                            }
-                        }
-                    };
-
-                    extract_edges_from("requires");
-                    // For lockfileVersion 2/3 'packages' entries, 'dependencies' lists logical deps as strings
-                    // But we need to distinguish from v1 'dependencies' which are objects.
-                    if let Some(deps_val) = dep_info.get("dependencies") {
-                        if let Some(deps_obj) = deps_val.as_object() {
-                            // Instead of checking only the first value, iterate over all values.
-                            for (dep_name, dep_ver_val) in deps_obj {
-                                if let Some(dep_req) = dep_ver_val.as_str() {
-                                    pending_dependencies.push((
-                                        package.clone(),
-                                        dep_name.clone(),
-                                        dep_req.to_string(),
-                                    ));
-                                }
-                            }
-                        }
+                    for (dep_name, dep_req) in
+                        Self::extract_logical_dependency_specs(dep_info, is_packages_section)
+                    {
+                        pending_dependencies.push((package.clone(), dep_name, dep_req));
                     }
                 }
 
@@ -351,15 +317,12 @@ impl PackageLockParser {
                 // Skip for lockfileVersion 2/3 as they use a flat packages structure instead of nested dependencies
                 if !is_packages_section {
                     if let Some(nested_deps) = dep_info.get("dependencies") {
-                        // Check if values are objects (nested deps)
+                        // Recurse when v1 dependencies map contains nested package objects.
                         if let Some(deps_obj) = nested_deps.as_object() {
-                            if let Some((_, val)) = deps_obj.iter().next() {
-                                if val.is_object() {
-                                    let nested_result =
-                                        Self::extract_lockfile_data(nested_deps, false)?;
-                                    packages.extend(nested_result.packages);
-                                    dependencies.extend(nested_result.dependencies);
-                                }
+                            if deps_obj.values().any(Value::is_object) {
+                                let nested_result = Self::extract_lockfile_data(nested_deps, false)?;
+                                packages.extend(nested_result.packages);
+                                dependencies.extend(nested_result.dependencies);
                             }
                         }
                     }
@@ -377,6 +340,51 @@ impl PackageLockParser {
             packages,
             dependencies,
         })
+    }
+
+    fn extract_string_dependency_map(dep_info: &Value, key: &str) -> Vec<(String, String)> {
+        dep_info
+            .get(key)
+            .and_then(Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(dep_name, dep_val)| {
+                        dep_val
+                            .as_str()
+                            .map(|req| (dep_name.clone(), req.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn extract_logical_dependency_specs(
+        dep_info: &Value,
+        is_packages_section: bool,
+    ) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+
+        if is_packages_section {
+            // npm lockfile v2/v3 package entries use string maps for logical dependency specs.
+            for key in [
+                "dependencies",
+                "optionalDependencies",
+                "peerDependencies",
+                "devDependencies",
+            ] {
+                out.extend(Self::extract_string_dependency_map(dep_info, key));
+            }
+            return out;
+        }
+
+        // npm lockfile v1: `requires` is the canonical logical dependency map.
+        let requires = Self::extract_string_dependency_map(dep_info, "requires");
+        if !requires.is_empty() {
+            return requires;
+        }
+
+        // Compatibility fallback for malformed/non-standard lockfiles.
+        Self::extract_string_dependency_map(dep_info, "dependencies")
     }
 }
 
@@ -940,5 +948,36 @@ lodash@~4.17.21:
             .find(|d| d.from.name == "express" && d.to.name == "accepts")
             .expect("Express should depend on accepts");
         assert_eq!(express_dep.requirement, "~1.3.7");
+    }
+
+    #[tokio::test]
+    async fn test_package_lock_v1_prefers_requires_for_logical_edges() {
+        let parser = PackageLockParser::new();
+        let content = r#"
+        {
+            "name": "app",
+            "lockfileVersion": 1,
+            "dependencies": {
+                "express": {
+                    "version": "4.17.1",
+                    "requires": {
+                        "accepts": "~1.3.7"
+                    },
+                    "dependencies": {
+                        "accepts": {
+                            "version": "1.3.7"
+                        }
+                    }
+                }
+            }
+        }
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+
+        assert!(result
+            .dependencies
+            .iter()
+            .any(|d| d.from.name == "express" && d.to.name == "accepts" && d.requirement == "~1.3.7"));
     }
 }

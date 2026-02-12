@@ -2,10 +2,27 @@
 
 use crate::domain::entities::{ApiFinding, ApiLocation, FindingSeverity};
 use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec, ParameterLocation};
-use tracing::error;
+use regex::Regex;
+use std::sync::OnceLock;
 
 /// Analyzer for sensitive data exposure
 pub struct DataExposureAnalyzer;
+
+fn jwt_pattern() -> &'static Regex {
+    static JWT_PATTERN: OnceLock<Regex> = OnceLock::new();
+    JWT_PATTERN.get_or_init(|| {
+        Regex::new(r"eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+")
+            .expect("JWT regex pattern must be valid")
+    })
+}
+
+fn private_key_pattern() -> &'static Regex {
+    static PRIVATE_KEY_PATTERN: OnceLock<Regex> = OnceLock::new();
+    PRIVATE_KEY_PATTERN.get_or_init(|| {
+        Regex::new(r"-----BEGIN [A-Z]+ PRIVATE KEY-----")
+            .expect("private key regex pattern must be valid")
+    })
+}
 
 impl DataExposureAnalyzer {
     pub fn analyze(spec: &OpenApiSpec) -> Vec<ApiFinding> {
@@ -21,31 +38,8 @@ impl DataExposureAnalyzer {
             "refresh_token",
         ];
 
-        // Compile regexes for secret detection
-        // Note: Using lazy_static here would be better performance-wise if this analyzer is instantiated often,
-        // but for now local compilation is fine or better yet, move to lazy_static in module scope if possible.
-        // Given existing structure, we'll compile locally or use a static block if we refactor.
-        let jwt_pattern =
-            match regex::Regex::new(r"eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+") {
-                Ok(pattern) => pattern,
-                Err(error) => {
-                    error!(
-                        "Failed to compile JWT regex in data exposure analyzer: {}",
-                        error
-                    );
-                    return findings;
-                }
-            };
-        let private_key_pattern = match regex::Regex::new(r"-----BEGIN [A-Z]+ PRIVATE KEY-----") {
-            Ok(pattern) => pattern,
-            Err(error) => {
-                error!(
-                    "Failed to compile private key regex in data exposure analyzer: {}",
-                    error
-                );
-                return findings;
-            }
-        };
+        let jwt_pattern = jwt_pattern();
+        let private_key_pattern = private_key_pattern();
 
         for path in &spec.paths {
             for operation in &path.operations {
@@ -130,8 +124,8 @@ impl DataExposureAnalyzer {
                                 &operation.method,
                                 "request_body",
                                 &mut findings,
-                                &jwt_pattern,
-                                &private_key_pattern,
+                                jwt_pattern,
+                                private_key_pattern,
                             );
                         }
                     }
@@ -147,8 +141,8 @@ impl DataExposureAnalyzer {
                                 &operation.method,
                                 &format!("response:{}", response.status_code),
                                 &mut findings,
-                                &jwt_pattern,
-                                &private_key_pattern,
+                                jwt_pattern,
+                                private_key_pattern,
                             );
                         }
                     }
@@ -232,8 +226,8 @@ impl DataExposureAnalyzer {
                 method,
                 &format!("{}.{}", context, prop.name),
                 findings,
-                jwt_pattern,
-                private_key_pattern,
+                                jwt_pattern,
+                                private_key_pattern,
             );
         }
     }
