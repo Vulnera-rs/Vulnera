@@ -78,7 +78,7 @@ pub fn calculate_limits(
     let capped_memory = dynamic_memory.min(config.max_memory_cap_bytes);
 
     // Apply reasonable minimum and maximum bounds
-    let final_timeout = Duration::from_millis(dynamic_timeout_ms.max(30_000).min(600_000)); // 30s - 10min
+    let final_timeout = Duration::from_millis(dynamic_timeout_ms.clamp(30_000, 600_000)); // 30s - 10min
     let final_memory = capped_memory.max(512 * 1024 * 1024); // Minimum 512MB
 
     ResourceLimits {

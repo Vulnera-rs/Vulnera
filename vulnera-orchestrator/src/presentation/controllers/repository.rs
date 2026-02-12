@@ -70,7 +70,8 @@ pub async fn analyze_repository(
         repository_url.as_deref(),
         owner.as_deref(),
         repo.as_deref(),
-    )?;
+    )
+    .map_err(|response| *response)?;
 
     let requested_ref = r#ref.or_else(|| coordinates.derived_ref.clone());
     let include_packages_in_response = return_packages.unwrap_or(false);
@@ -146,14 +147,17 @@ fn resolve_repository_coordinates(
     repository_url: Option<&str>,
     owner: Option<&str>,
     repo: Option<&str>,
-) -> Result<RepositoryCoordinates, Response> {
+) -> Result<RepositoryCoordinates, Box<Response>> {
     if let Some(url) = repository_url {
         let trimmed = url.trim();
         if trimmed.is_empty() {
-            return Err(validation_error_response("repository_url cannot be empty"));
+            return Err(Box::new(validation_error_response(
+                "repository_url cannot be empty",
+            )));
         }
         let (owner, repo, derived_ref) =
-            parse_repository_identifier(trimmed).map_err(validation_error_response)?;
+            parse_repository_identifier(trimmed)
+                .map_err(|error| Box::new(validation_error_response(error)))?;
         return Ok(RepositoryCoordinates {
             owner,
             repo,
@@ -168,7 +172,9 @@ fn resolve_repository_coordinates(
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .ok_or_else(|| {
-            validation_error_response("owner is required when repository_url is not provided")
+            Box::new(validation_error_response(
+                "owner is required when repository_url is not provided",
+            ))
         })?;
 
     let repo_val = repo
@@ -177,7 +183,9 @@ fn resolve_repository_coordinates(
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .ok_or_else(|| {
-            validation_error_response("repo is required when repository_url is not provided")
+            Box::new(validation_error_response(
+                "repo is required when repository_url is not provided",
+            ))
         })?;
 
     Ok(RepositoryCoordinates {

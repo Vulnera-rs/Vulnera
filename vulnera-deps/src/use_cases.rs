@@ -278,14 +278,13 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             // Include if it's an original package OR discovered transitive dependency (has incoming edges).
             let has_incoming = dependency_graph.edges.iter().any(|e| &e.to == id);
 
-            if initial_package_ids.contains(id) || has_incoming {
-                if !final_packages
+            if (initial_package_ids.contains(id) || has_incoming)
+                && !final_packages
                     .iter()
                     .any(|p: &Package| p.name == pkg.name && p.version == pkg.version)
                 {
                     final_packages.push(pkg.clone());
                 }
-            }
         }
         packages = final_packages;
 

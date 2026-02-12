@@ -179,8 +179,8 @@ impl InputValidationAnalyzer {
         }
 
         // Check for mass assignment (objects allowing additional properties)
-        if schema.schema_type.as_deref() == Some("object") {
-            if schema.additional_properties == AdditionalProperties::Allowed
+        if schema.schema_type.as_deref() == Some("object")
+            && schema.additional_properties == AdditionalProperties::Allowed
                 && (method == "POST" || method == "PUT" || method == "PATCH")
             {
                 findings.push(ApiFinding {
@@ -202,7 +202,6 @@ impl InputValidationAnalyzer {
                     method: Some(method.to_string()),
                 });
             }
-        }
 
         // Recurse into properties
         for prop in &schema.properties {

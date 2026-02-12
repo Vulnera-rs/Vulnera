@@ -100,7 +100,7 @@ impl ScanForSecretsUseCase {
             .map(|path| Arc::new(FileBaselineRepository::new(path)));
 
         // Use verification_concurrent_limit for file scanning concurrency, with a reasonable default
-        let max_concurrent_scans = config.verification_concurrent_limit.max(10).min(100);
+        let max_concurrent_scans = config.verification_concurrent_limit.clamp(10, 100);
         let scan_semaphore = Arc::new(Semaphore::new(max_concurrent_scans));
 
         let file_read_timeout = Duration::from_secs(config.file_read_timeout_seconds);
@@ -175,7 +175,6 @@ impl ScanForSecretsUseCase {
                 let detector_engine = self.detector_engine.clone();
                 let semaphore = semaphore.clone();
                 let cancel_tx_task = cancel_tx_clone.clone();
-                let scan_markdown_codeblocks = scan_markdown_codeblocks;
                 let handle = tokio::spawn(async move {
                     // Check cancellation before acquiring permit
                     if *cancel_tx_task.subscribe().borrow() {

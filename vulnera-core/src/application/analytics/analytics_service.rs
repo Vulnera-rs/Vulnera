@@ -31,6 +31,21 @@ pub struct AnalyticsAggregationService {
     enable_user_level_tracking: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FindingsSummary {
+    pub critical: u32,
+    pub high: u32,
+    pub medium: u32,
+    pub low: u32,
+    pub info: u32,
+}
+
+impl FindingsSummary {
+    pub fn total(self) -> u32 {
+        self.critical + self.high + self.medium + self.low + self.info
+    }
+}
+
 impl AnalyticsAggregationService {
     pub fn new(
         events_repository: Arc<dyn IAnalysisEventRepository>,
@@ -206,19 +221,15 @@ impl AnalyticsAggregationService {
         subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
-        findings_critical: u32,
-        findings_high: u32,
-        findings_medium: u32,
-        findings_low: u32,
-        findings_info: u32,
+        findings: FindingsSummary,
     ) -> Result<(), OrganizationError> {
         let metadata = serde_json::json!({
-            "findings_critical": findings_critical,
-            "findings_high": findings_high,
-            "findings_medium": findings_medium,
-            "findings_low": findings_low,
-            "findings_info": findings_info,
-            "total_findings": findings_critical + findings_high + findings_medium + findings_low + findings_info
+            "findings_critical": findings.critical,
+            "findings_high": findings.high,
+            "findings_medium": findings.medium,
+            "findings_low": findings.low,
+            "findings_info": findings.info,
+            "total_findings": findings.total()
         });
 
         // Record the event
@@ -236,11 +247,11 @@ impl AnalyticsAggregationService {
         self.add_findings_for_subject(
             &subject,
             &year_month,
-            findings_critical,
-            findings_high,
-            findings_medium,
-            findings_low,
-            findings_info,
+            findings.critical,
+            findings.high,
+            findings.medium,
+            findings.low,
+            findings.info,
         )
         .await?;
 
@@ -251,11 +262,11 @@ impl AnalyticsAggregationService {
                     .add_findings_for_subject(
                         &StatsSubject::User(*user),
                         &year_month,
-                        findings_critical,
-                        findings_high,
-                        findings_medium,
-                        findings_low,
-                        findings_info,
+                        findings.critical,
+                        findings.high,
+                        findings.medium,
+                        findings.low,
+                        findings.info,
                     )
                     .await
                 {
@@ -374,11 +385,7 @@ pub trait AnalyticsRecorder: Send + Sync {
         subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
-        findings_critical: u32,
-        findings_high: u32,
-        findings_medium: u32,
-        findings_low: u32,
-        findings_info: u32,
+        findings: FindingsSummary,
     ) -> Result<(), OrganizationError>;
 
     /// Record an API call
@@ -416,23 +423,10 @@ impl AnalyticsRecorder for AnalyticsAggregationService {
         subject: StatsSubject,
         user_id: Option<UserId>,
         job_id: Uuid,
-        findings_critical: u32,
-        findings_high: u32,
-        findings_medium: u32,
-        findings_low: u32,
-        findings_info: u32,
+        findings: FindingsSummary,
     ) -> Result<(), OrganizationError> {
-        self.record_scan_completed(
-            subject,
-            user_id,
-            job_id,
-            findings_critical,
-            findings_high,
-            findings_medium,
-            findings_low,
-            findings_info,
-        )
-        .await
+        self.record_scan_completed(subject, user_id, job_id, findings)
+            .await
     }
 
     async fn on_api_call(&self, subject: StatsSubject) -> Result<(), OrganizationError> {
@@ -475,11 +469,7 @@ impl AnalyticsRecorder for NoOpAnalyticsRecorder {
         _subject: StatsSubject,
         _user_id: Option<UserId>,
         _job_id: Uuid,
-        _findings_critical: u32,
-        _findings_high: u32,
-        _findings_medium: u32,
-        _findings_low: u32,
-        _findings_info: u32,
+        _findings: FindingsSummary,
     ) -> Result<(), OrganizationError> {
         Ok(())
     }
