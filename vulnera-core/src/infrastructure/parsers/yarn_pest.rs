@@ -5,8 +5,8 @@ use pest_derive::Parser;
 
 use crate::application::errors::ParseError;
 use crate::domain::vulnerability::{
-    entities::Package,
-    value_objects::{Ecosystem, Version},
+    entities::{Dependency, Package},
+    value_objects::{Ecosystem, Version, VersionRange},
 };
 
 use super::traits::{PackageFileParser, ParseResult};
@@ -64,6 +64,13 @@ struct YarnLockPest;
 /// - Returns packages with Ecosystem::Npm
 /// - Handles Yarn v1 lockfiles only (Yarn v2+ uses different format)
 pub struct YarnPestParser;
+
+#[derive(Debug, Clone)]
+struct ParsedEntry {
+    names: Vec<String>,
+    version: Option<String>,
+    dependency_specs: Vec<(String, String)>,
+}
 
 impl Default for YarnPestParser {
     fn default() -> Self {
@@ -145,13 +152,14 @@ impl YarnPestParser {
         })
     }
 
-    fn process_entry(entry: Pair<'_, Rule>) -> (Vec<String>, Option<String>) {
+    fn process_entry(entry: Pair<'_, Rule>) -> ParsedEntry {
         // Capture raw entry text up front for fallbacks
         let entry_text = entry.as_str().to_string();
 
         let mut names: Vec<String> = Vec::new();
         let mut version: Option<String> = None;
         let mut header_text: Option<String> = None;
+        let mut dependency_specs: Vec<(String, String)> = Vec::new();
 
         for p in entry.clone().into_inner() {
             match p.as_rule() {
@@ -217,27 +225,40 @@ impl YarnPestParser {
                 | Rule::bundled_dependencies_block
                 | Rule::dependencies_block
                 | Rule::optional_dependencies_block => {
-                    // Process dependency blocks (peerDependencies, bundledDependencies, etc.)
-                    // Extract dependency names for potential future use or validation
-                    // For now, we just recognize these blocks - they don't affect package extraction
-                    // but improve error recovery by not failing on unknown blocks
+                    // Process dependency blocks and extract dependency specs.
                     for dep_item in p.into_inner() {
                         match dep_item.as_rule() {
                             Rule::dep_kv_line => {
-                                // Extract dependency name from dep_key
+                                let mut dep_name: Option<String> = None;
+                                let mut dep_req: Option<String> = None;
                                 for dep_part in dep_item.into_inner() {
-                                    if dep_part.as_rule() == Rule::dep_key {
-                                        // Dependency key captured - could be used for validation
-                                        // Currently we just acknowledge it for error recovery
-                                        let _dep_name = dep_part.as_str();
+                                    match dep_part.as_rule() {
+                                        Rule::dep_key => {
+                                            dep_name = Some(Self::dequote(dep_part.as_str()));
+                                        }
+                                        Rule::dep_value
+                                        | Rule::dep_range
+                                        | Rule::quoted_string
+                                        | Rule::bare_fragment => {
+                                            dep_req = Some(Self::dequote(dep_part.as_str()));
+                                        }
+                                        _ => {}
                                     }
+                                }
+
+                                if let Some(name) = dep_name {
+                                    let requirement = dep_req.unwrap_or_else(|| "*".to_string());
+                                    dependency_specs.push((name, requirement));
                                 }
                             }
                             Rule::dep_name_line => {
-                                // For bundledDependencies, sometimes just names are listed
+                                // bundledDependencies can list names without versions.
                                 for dep_part in dep_item.into_inner() {
                                     if dep_part.as_rule() == Rule::dep_key {
-                                        let _dep_name = dep_part.as_str();
+                                        dependency_specs.push((
+                                            Self::dequote(dep_part.as_str()),
+                                            "*".to_string(),
+                                        ));
                                     }
                                 }
                             }
@@ -276,6 +297,10 @@ impl YarnPestParser {
             version = Self::fallback_extract_version_from_entry(&entry_text);
         }
 
+        if dependency_specs.is_empty() {
+            dependency_specs = Self::fallback_extract_dependency_specs_from_entry(&entry_text);
+        }
+
         // Deduplicate names while preserving order
         let mut unique = Vec::new();
         for n in names {
@@ -284,7 +309,72 @@ impl YarnPestParser {
             }
         }
 
-        (unique, version)
+        ParsedEntry {
+            names: unique,
+            version,
+            dependency_specs,
+        }
+    }
+
+    fn fallback_extract_dependency_specs_from_entry(entry_text: &str) -> Vec<(String, String)> {
+        let mut specs = Vec::new();
+        let mut in_dep_block = false;
+
+        for line in entry_text.lines() {
+            let trimmed_end = line.trim_end();
+
+            let block_header = trimmed_end.trim_start();
+            let is_dependency_header = block_header == "dependencies:"
+                || block_header == "optionalDependencies:"
+                || block_header == "peerDependencies:"
+                || block_header == "bundledDependencies:";
+
+            if is_dependency_header {
+                in_dep_block = true;
+                continue;
+            }
+
+            if !in_dep_block {
+                continue;
+            }
+
+            if trimmed_end.trim().is_empty() {
+                continue;
+            }
+
+            if !line.starts_with("    ") {
+                in_dep_block = false;
+                continue;
+            }
+
+            let dep_line = line.trim();
+            if dep_line.is_empty() {
+                continue;
+            }
+
+            if let Some(name_only) = dep_line.strip_prefix("- ") {
+                let dep_name = Self::dequote(name_only.trim());
+                if !dep_name.is_empty() {
+                    specs.push((dep_name, "*".to_string()));
+                }
+                continue;
+            }
+
+            let mut parts = dep_line.split_whitespace();
+            if let Some(dep_name_raw) = parts.next() {
+                let dep_name = Self::dequote(dep_name_raw);
+                let requirement = parts
+                    .next()
+                    .map(Self::dequote)
+                    .unwrap_or_else(|| "*".to_string());
+
+                if !dep_name.is_empty() {
+                    specs.push((dep_name, requirement));
+                }
+            }
+        }
+
+        specs
     }
     // Fallback: extract names from a header line like:
     //   "lodash@^4.17.21", "@babel/core@^7.22.0":
@@ -393,6 +483,7 @@ impl PackageFileParser for YarnPestParser {
         let pairs = self.parse_file_pairs(content)?;
 
         let mut packages: Vec<Package> = Vec::new();
+        let mut parsed_entries: Vec<ParsedEntry> = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
         // Walk the parse tree to find entries and extract names + versions
@@ -401,15 +492,15 @@ impl PackageFileParser for YarnPestParser {
                 Rule::file => {
                     for inner in top.into_inner() {
                         if inner.as_rule() == Rule::entry {
-                            let (names, version_opt) = Self::process_entry(inner);
-                            if let Some(ver_str) = version_opt {
+                            let parsed = Self::process_entry(inner);
+                            if let Some(ver_str) = parsed.version.clone() {
                                 // Parse a semantic-ish version; fall back to "0.0.0" if invalid
                                 let version = Version::parse(&ver_str).unwrap_or_else(|_| {
                                     Version::parse("0.0.0")
                                         .unwrap_or_else(|_| Version::new(0, 0, 0))
                                 });
 
-                                for name in names {
+                                for name in &parsed.names {
                                     if seen.insert((name.clone(), version.to_string())) {
                                         if let Ok(pkg) = Package::new(
                                             name.clone(),
@@ -421,18 +512,19 @@ impl PackageFileParser for YarnPestParser {
                                     }
                                 }
                             }
+                            parsed_entries.push(parsed);
                         }
                     }
                 }
                 Rule::entry => {
                     // In case the top node is directly an entry
-                    let (names, version_opt) = Self::process_entry(top);
-                    if let Some(ver_str) = version_opt {
+                    let parsed = Self::process_entry(top);
+                    if let Some(ver_str) = parsed.version.clone() {
                         let version = Version::parse(&ver_str).unwrap_or_else(|_| {
                             Version::parse("0.0.0").unwrap_or_else(|_| Version::new(0, 0, 0))
                         });
 
-                        for name in names {
+                        for name in &parsed.names {
                             if seen.insert((name.clone(), version.to_string())) {
                                 if let Ok(pkg) =
                                     Package::new(name.clone(), version.clone(), Ecosystem::Npm)
@@ -442,6 +534,7 @@ impl PackageFileParser for YarnPestParser {
                             }
                         }
                     }
+                    parsed_entries.push(parsed);
                 }
                 _ => {}
             }
@@ -454,9 +547,77 @@ impl PackageFileParser for YarnPestParser {
                 dependencies: Vec::new(),
             });
         }
+
+        let mut package_index: std::collections::HashMap<String, Vec<Package>> =
+            std::collections::HashMap::new();
+        for package in &packages {
+            package_index
+                .entry(package.name.clone())
+                .or_default()
+                .push(package.clone());
+        }
+
+        let mut dependencies: Vec<Dependency> = Vec::new();
+        let mut seen_dependencies: std::collections::HashSet<(String, String, String)> =
+            std::collections::HashSet::new();
+
+        for entry in parsed_entries {
+            let Some(from_version_str) = entry.version else {
+                continue;
+            };
+
+            let Ok(from_version) = Version::parse(&from_version_str) else {
+                continue;
+            };
+
+            for from_name in &entry.names {
+                let Ok(from_package) =
+                    Package::new(from_name.clone(), from_version.clone(), Ecosystem::Npm)
+                else {
+                    continue;
+                };
+
+                for (dep_name, requirement) in &entry.dependency_specs {
+                    let Some(candidates) = package_index.get(dep_name) else {
+                        continue;
+                    };
+
+                    let matched = if requirement == "*" {
+                        candidates.iter().max_by(|a, b| a.version.cmp(&b.version))
+                    } else {
+                        let Ok(range) = VersionRange::parse(requirement) else {
+                            continue;
+                        };
+                        candidates
+                            .iter()
+                            .filter(|candidate| range.contains(&candidate.version))
+                            .max_by(|a, b| a.version.cmp(&b.version))
+                    };
+
+                    let Some(to_package) = matched else {
+                        continue;
+                    };
+
+                    let key = (
+                        from_package.name.clone(),
+                        to_package.name.clone(),
+                        requirement.clone(),
+                    );
+                    if seen_dependencies.insert(key) {
+                        dependencies.push(Dependency::new(
+                            from_package.clone(),
+                            to_package.clone(),
+                            requirement.clone(),
+                            false,
+                        ));
+                    }
+                }
+            }
+        }
+
         Ok(ParseResult {
             packages,
-            dependencies: Vec::new(),
+            dependencies,
         })
     }
 
@@ -522,6 +683,40 @@ lodash@^4.17.21:
                 .packages
                 .iter()
                 .map(|p| (&p.name, p.version.to_string(), &p.ecosystem))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_yarn_lock_extracts_dependency_edges() {
+        let content = r#"
+foo@^1.0.0:
+    version "1.0.0"
+    dependencies:
+        bar "^2.0.0"
+
+bar@^2.0.0:
+    version "2.1.0"
+"#;
+
+        let parser = YarnPestParser::new();
+        let result = parser.parse_file(content).await.unwrap();
+
+        assert!(
+            result
+                .dependencies
+                .iter()
+                .any(|d| d.from.name == "foo" && d.to.name == "bar" && d.requirement == "^2.0.0"),
+            "dependencies={:?}, packages={:?}",
+            result
+                .dependencies
+                .iter()
+                .map(|d| format!("{} -> {} ({})", d.from.name, d.to.name, d.requirement))
+                .collect::<Vec<_>>(),
+            result
+                .packages
+                .iter()
+                .map(|p| format!("{}@{}", p.name, p.version))
                 .collect::<Vec<_>>()
         );
     }

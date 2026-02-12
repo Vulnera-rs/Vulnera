@@ -33,8 +33,18 @@ impl RequirementsTxtParser {
             return Ok(None);
         }
 
-        // Skip URLs and VCS requirements for now
-        if line.starts_with("http") || line.starts_with("git+") || line.starts_with("-e ") {
+        if line.starts_with("-e ") || line.starts_with("git+") || line.contains(" @ http") {
+            if let Some((name, version_hint)) = self.parse_url_or_vcs_requirement(line) {
+                let normalized = self.normalize_python_version(&version_hint)?;
+                let version = Version::parse(&normalized).map_err(|_| ParseError::Version {
+                    version: version_hint.clone(),
+                })?;
+
+                let package = Package::new(name, version, Ecosystem::PyPI)
+                    .map_err(|e| ParseError::MissingField { field: e })?;
+                return Ok(Some(package));
+            }
+
             return Ok(None);
         }
 
@@ -70,6 +80,56 @@ impl RequirementsTxtParser {
             .map_err(|e| ParseError::MissingField { field: e })?;
 
         Ok(Some(package))
+    }
+
+    fn parse_url_or_vcs_requirement(&self, line: &str) -> Option<(String, String)> {
+        static RE_EGG_NAME: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"#egg=([A-Za-z0-9_.\-]+)").unwrap());
+        static RE_WHEEL_NAME_VERSION: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"([A-Za-z0-9_.\-]+)-([0-9]+(?:\.[0-9]+){0,2}(?:[ab]|rc)?[0-9]*)").unwrap()
+        });
+
+        let requirement = line.trim_start_matches("-e ").trim();
+
+        if let Some((name, url)) = requirement.split_once(" @ ") {
+            let package_name = name.trim();
+            if package_name.is_empty() {
+                return None;
+            }
+
+            let version_hint = self
+                .extract_version_hint_from_url(url)
+                .unwrap_or_else(|| "0.0.0".to_string());
+            return Some((package_name.to_string(), version_hint));
+        }
+
+        if let Some(captures) = RE_EGG_NAME.captures(requirement) {
+            let package_name = captures.get(1)?.as_str().to_string();
+            let version_hint = self
+                .extract_version_hint_from_url(requirement)
+                .unwrap_or_else(|| "0.0.0".to_string());
+            return Some((package_name, version_hint));
+        }
+
+        let filename = requirement.rsplit('/').next().unwrap_or(requirement);
+        if let Some(captures) = RE_WHEEL_NAME_VERSION.captures(filename) {
+            let name = captures.get(1)?.as_str().replace('_', "-");
+            let version = captures.get(2)?.as_str().to_string();
+            return Some((name, version));
+        }
+
+        None
+    }
+
+    fn extract_version_hint_from_url(&self, url: &str) -> Option<String> {
+        let token = url.split('@').next_back()?.split(['#', '?']).next()?.trim();
+
+        if token.is_empty() || token.contains('/') {
+            return None;
+        }
+
+        let candidate = token.strip_prefix('v').unwrap_or(token);
+        self.normalize_python_version(candidate).ok()
     }
 
     /// Clean Python version specifier

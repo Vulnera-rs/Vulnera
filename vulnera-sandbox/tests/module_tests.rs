@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 use vulnera_api::module::ApiSecurityModule;
-use vulnera_core::config::{ApiSecurityConfig, SandboxConfig, SastConfig, SecretDetectionConfig};
+use vulnera_core::config::{
+    ApiSecurityConfig, SandboxBackendPreference, SandboxConfig, SastConfig, SecretDetectionConfig,
+};
 use vulnera_core::domain::module::{AnalysisModule, ModuleConfig, ModuleType};
 use vulnera_sandbox::{SandboxExecutor, SandboxSelector, calculate_limits};
 use vulnera_sast::module::SastModule;
@@ -95,7 +97,11 @@ fn test_sandbox_enabled_by_default() {
     let config = SandboxConfig::default();
 
     assert!(config.enabled, "Sandbox should be enabled by default");
-    assert_eq!(config.backend, "auto", "Backend should default to auto");
+    assert_eq!(
+        config.backend,
+        SandboxBackendPreference::Landlock,
+        "Backend should default to landlock"
+    );
     assert!(
         config.allow_network,
         "Network should be allowed for DependencyAnalyzer"

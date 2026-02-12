@@ -91,7 +91,8 @@ The sandbox provides secure isolation for SAST and secrets detection modules.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `VULNERA__SANDBOX__ENABLED` | Enable sandboxing | `true` |
-| `VULNERA__SANDBOX__BACKEND` | Sandbox backend (see below) | `auto` |
+| `VULNERA__SANDBOX__BACKEND` | Sandbox backend (see below) | `landlock` |
+| `VULNERA__SANDBOX__FAILURE_MODE` | Sandbox setup behavior | `best_effort` |
 | `VULNERA__SANDBOX__EXECUTION_TIMEOUT_SECS` | Execution timeout | `30` |
 | `VULNERA__SANDBOX__MEMORY_LIMIT_MB` | Memory limit (process backend) | `256` |
 
@@ -99,12 +100,19 @@ The sandbox provides secure isolation for SAST and secrets detection modules.
 
 | Backend | Description | Requirements |
 |---------|-------------|--------------|
-| `auto` | Auto-detect best backend | Recommended |
 | `landlock` | Kernel-level isolation | Linux 5.13+ |
+| `auto` | Auto-detect best backend | Linux/non-Linux |
 | `process` | Fork-based isolation | Any Linux |
-| `none` | Disable sandboxing | Not recommended |
+| `noop` | Disable sandboxing | Not recommended |
 
-**Landlock** provides near-zero overhead security using Linux kernel capabilities. Falls back to **process** on older kernels.
+**Landlock** provides near-zero overhead security using Linux kernel capabilities.
+
+Failure modes:
+
+| Mode | Behavior |
+|------|----------|
+| `best_effort` | Continue analysis if sandbox setup degrades |
+| `fail_closed` | Abort module execution if sandbox setup fails |
 
 ---
 
@@ -141,7 +149,8 @@ VULNERA__LLM__RESILIENCE__ENABLED=true
 
 # Sandbox
 VULNERA__SANDBOX__ENABLED=true
-VULNERA__SANDBOX__BACKEND='auto'
+VULNERA__SANDBOX__BACKEND='landlock'
+VULNERA__SANDBOX__FAILURE_MODE='best_effort'
 
 # Server
 VULNERA__SERVER__ENABLE_DOCS=false

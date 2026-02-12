@@ -3,6 +3,7 @@
 //! This module provides context management for analyzing dependencies across
 //! entire projects, including workspace detection and configuration management.
 
+use globset::{Glob, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
@@ -88,27 +89,42 @@ impl AnalysisContext {
 
     /// Check if a path should be ignored based on ignore patterns
     pub fn should_ignore(&self, path: &Path) -> bool {
-        let path_str = path.to_string_lossy();
+        let normalized = normalize_path(path);
+        let suffix = normalized
+            .split_once('/')
+            .map(|(_, rest)| rest)
+            .unwrap_or(normalized.as_str());
+
         for pattern in &self.config.ignore_patterns {
-            // Simple glob matching (could be enhanced with proper glob library)
-            if self.matches_pattern(&path_str, pattern) {
+            if self.matches_pattern(&normalized, suffix, pattern) {
                 return true;
             }
         }
         false
     }
 
-    /// Simple pattern matching (supports ** and *)
-    fn matches_pattern(&self, path: &str, pattern: &str) -> bool {
-        // Convert pattern to regex-like matching
-        let pattern = pattern.replace("**", "___DOUBLE_STAR___");
-        let pattern = pattern.replace('*', "___STAR___");
-        let pattern = pattern.replace("___DOUBLE_STAR___", ".*");
-        let pattern = pattern.replace("___STAR___", "[^/]*");
+    fn matches_pattern(&self, path: &str, suffix: &str, pattern: &str) -> bool {
+        let mut builder = GlobSetBuilder::new();
+        let normalized_pattern = pattern.replace('\\', "/");
 
-        // Simple substring matching for now
-        // A full implementation would use proper glob matching
-        path.contains(&pattern.replace(".*", "").replace("[^/]*", "")) || pattern == ".*"
+        let glob = match Glob::new(&normalized_pattern) {
+            Ok(glob) => glob,
+            Err(_) => return false,
+        };
+
+        builder.add(glob);
+
+        let prefixed_pattern = format!("**/{normalized_pattern}");
+        if let Ok(prefixed_glob) = Glob::new(&prefixed_pattern) {
+            builder.add(prefixed_glob);
+        }
+
+        let set = match builder.build() {
+            Ok(set) => set,
+            Err(_) => return false,
+        };
+
+        set.is_match(path) || set.is_match(suffix)
     }
 
     /// Update cache entry for a file
@@ -134,6 +150,20 @@ impl AnalysisContext {
         // Not in cache, needs analysis
         true
     }
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| {
+            let value = component.as_os_str().to_string_lossy();
+            if value == "/" || value == "." {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+        .collect::<Vec<String>>()
+        .join("/")
 }
 
 /// Detect workspace information from a directory
@@ -194,6 +224,17 @@ mod tests {
         let ctx = AnalysisContext::new("/tmp/test");
         assert!(ctx.should_ignore(Path::new("/tmp/test/node_modules/express")));
         assert!(!ctx.should_ignore(Path::new("/tmp/test/src/main.rs")));
+    }
+
+    #[test]
+    fn test_should_ignore_glob_patterns() {
+        let mut config = AnalysisConfig::default();
+        config.ignore_patterns = vec!["**/*.lock".to_string(), "src/generated/**".to_string()];
+        let ctx = AnalysisContext::with_config("/tmp/test", config);
+
+        assert!(ctx.should_ignore(Path::new("/tmp/test/Cargo.lock")));
+        assert!(ctx.should_ignore(Path::new("/tmp/test/src/generated/types.rs")));
+        assert!(!ctx.should_ignore(Path::new("/tmp/test/src/domain/mod.rs")));
     }
 
     #[test]

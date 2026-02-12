@@ -522,8 +522,7 @@ pub async fn rate_limit_middleware(
     // Extract request metadata
     let ip = extract_ip(&request);
 
-    // Get authentication info from request extensions (set by auth extractors)
-    // For now, we check headers directly since extensions might not be set yet
+    // Get authentication info from request extensions populated by early_auth_middleware
     let (user_id, api_key_id, is_org_member) = extract_auth_info(&request);
 
     // Determine request cost
@@ -666,12 +665,10 @@ pub async fn auth_rate_limit_middleware(
     }
 }
 
-/// Extract authentication info from request headers and extensions
+/// Extract authentication info from request extensions
 /// Returns (user_id, api_key_id, is_org_member)
 fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
-    use crate::presentation::auth::extractors::{ApiKeyAuth, Auth, AuthUser};
-
-    // First check for EarlyAuthInfo (set by early_auth_middleware)
+    // EarlyAuthInfo is set by early_auth_middleware before rate limiting.
     if let Some(early_auth) = request.extensions().get::<EarlyAuthInfo>() {
         if early_auth.user_id.is_some() {
             return (
@@ -680,34 +677,6 @@ fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
                 early_auth.is_org_member,
             );
         }
-    }
-
-    // Fall back to checking handler extractors (in case middleware didn't run)
-    // First check for the unified Auth extractor (has most info)
-    if let Some(auth) = request.extensions().get::<Auth>() {
-        return (
-            Some(auth.user_id.into()),
-            auth.api_key_id.map(|id| id.into()),
-            auth.organization_id.is_some(), // Use actual org membership
-        );
-    }
-
-    // Check for API key auth in extensions
-    if let Some(api_key_auth) = request.extensions().get::<ApiKeyAuth>() {
-        return (
-            Some(api_key_auth.user_id.into()),
-            Some(api_key_auth.api_key_id.into()),
-            false, // API key users have individual limits, org bonus handled separately
-        );
-    }
-
-    // Check for cookie-based auth in extensions
-    if let Some(auth_user) = request.extensions().get::<AuthUser>() {
-        return (
-            Some(auth_user.user_id.into()),
-            None,  // Cookie auth doesn't use API keys
-            false, // Cookie auth doesn't carry org info currently
-        );
     }
 
     // Anonymous user

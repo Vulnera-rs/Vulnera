@@ -155,9 +155,8 @@ fn resolve_repository_coordinates(
                 "repository_url cannot be empty",
             )));
         }
-        let (owner, repo, derived_ref) =
-            parse_repository_identifier(trimmed)
-                .map_err(|error| Box::new(validation_error_response(error)))?;
+        let (owner, repo, derived_ref) = parse_repository_identifier(trimmed)
+            .map_err(|error| Box::new(validation_error_response(error)))?;
         return Ok(RepositoryCoordinates {
             owner,
             repo,

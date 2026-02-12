@@ -241,28 +241,66 @@ impl CacheServiceImpl {
             "Invalidating all cache entries for ecosystem: {}",
             ecosystem
         );
+        let ecosystem_name = ecosystem.canonical_name();
 
-        // Dragonfly cache doesn't support filesystem-based invalidation
-        // This would require SCAN operations which are expensive
-        // For now, return 0 and log a warning
-        warn!(
-            "Ecosystem cache invalidation not fully supported for Dragonfly cache. Use individual key invalidation instead."
+        let patterns = [
+            format!("vuln:{}:*", ecosystem_name),
+            format!("analysis:{}:*", ecosystem_name),
+            format!("packages:{}:*", ecosystem_name),
+            format!("registry_versions:{}:*", ecosystem_name),
+        ];
+
+        let mut total_deleted: u64 = 0;
+        for pattern in patterns {
+            let deleted = self.cache_repository.delete_by_pattern(&pattern).await?;
+            total_deleted += deleted as u64;
+            debug!(
+                pattern = %pattern,
+                deleted = deleted,
+                "Deleted ecosystem cache keys"
+            );
+        }
+
+        info!(
+            ecosystem = %ecosystem,
+            deleted = total_deleted,
+            "Completed ecosystem cache invalidation"
         );
-        Ok(0)
+        Ok(total_deleted)
     }
 
     /// Get cache statistics
     pub async fn get_cache_statistics(&self) -> Result<CacheStatistics, ApplicationError> {
-        // Dragonfly cache doesn't provide detailed statistics in the same way
-        // Return default statistics
+        let metrics = self.cache_repository.info_stats().await?;
+        let total_entries = self.cache_repository.db_size().await?;
+
+        let parse_u64 = |name: &str| -> u64 {
+            metrics
+                .get(name)
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+
+        let hits = parse_u64("keyspace_hits");
+        let misses = parse_u64("keyspace_misses");
+        let expired_entries = parse_u64("expired_keys");
+        let cleanup_runs = parse_u64("expire_cycle_cpu_milliseconds");
+        let total_size_bytes = parse_u64("used_memory");
+        let denominator = hits + misses;
+        let hit_rate = if denominator > 0 {
+            hits as f64 / denominator as f64
+        } else {
+            0.0
+        };
+
         Ok(CacheStatistics {
-            hits: 0,
-            misses: 0,
-            hit_rate: 0.0,
-            total_entries: 0,
-            total_size_bytes: 0,
-            expired_entries: 0,
-            cleanup_runs: 0,
+            hits,
+            misses,
+            hit_rate,
+            total_entries,
+            total_size_bytes,
+            expired_entries,
+            cleanup_runs,
         })
     }
 

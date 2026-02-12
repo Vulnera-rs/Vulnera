@@ -181,9 +181,9 @@ impl InputValidationAnalyzer {
         // Check for mass assignment (objects allowing additional properties)
         if schema.schema_type.as_deref() == Some("object")
             && schema.additional_properties == AdditionalProperties::Allowed
-                && (method == "POST" || method == "PUT" || method == "PATCH")
-            {
-                findings.push(ApiFinding {
+            && (method == "POST" || method == "PUT" || method == "PATCH")
+        {
+            findings.push(ApiFinding {
                     id: format!("mass-assignment-{}-{}-{}", path, method, context),
                     vulnerability_type: ApiVulnerabilityType::MassAssignmentRisk,
                     location: ApiLocation {
@@ -201,7 +201,7 @@ impl InputValidationAnalyzer {
                     path: Some(path.to_string()),
                     method: Some(method.to_string()),
                 });
-            }
+        }
 
         // Recurse into properties
         for prop in &schema.properties {
@@ -237,10 +237,16 @@ impl InputValidationAnalyzer {
                     method: Some(method.to_string()),
                 });
             }
-            // NOTE: Recursive analysis for array items logic would need item schema extraction,
-            // but ApiSchema doesn't have 'items' field in value_objects.rs yet (omitted in initial implementation plan?)
-            // Checked value_objects.rs: 'items' is missing!
-            // I should add it later, but for now properties recursion is good for objects.
+
+            if let Some(item_schema) = &schema.items {
+                Self::analyze_schema(
+                    item_schema,
+                    path,
+                    method,
+                    &format!("{}[]", context),
+                    findings,
+                );
+            }
         }
     }
 }

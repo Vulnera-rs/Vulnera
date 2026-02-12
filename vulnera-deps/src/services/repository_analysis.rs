@@ -327,11 +327,7 @@ where
 }
 
 fn is_lockfile_path(path: &str) -> bool {
-    let file_name = path
-        .rsplit('/')
-        .next()
-        .unwrap_or(path)
-        .to_ascii_lowercase();
+    let file_name = path.rsplit('/').next().unwrap_or(path).to_ascii_lowercase();
 
     matches!(
         file_name.as_str(),

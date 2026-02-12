@@ -55,7 +55,7 @@ pub enum ApiVulnerabilityType {
     IneffectiveScopeHierarchy,
 }
 
-/// OpenAPI specification model (simplified)
+/// OpenAPI specification model for analyzer pipelines
 #[derive(Debug, Clone)]
 pub struct OpenApiSpec {
     pub version: String,
@@ -149,6 +149,7 @@ pub struct ApiSchema {
     pub multiple_of: Option<f64>,         // Number must be multiple of this
     pub min_items: Option<u32>,           // Minimum array items
     pub max_items: Option<u32>,           // Maximum array items
+    pub items: Option<Box<ApiSchema>>,    // Array item schema
 
     // Logical constraints (composition)
     pub one_of: Vec<ApiSchema>,

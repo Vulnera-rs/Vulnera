@@ -5,8 +5,9 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, instrument, warn};
 use vulnera_core::domain::module::{
-    FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult,
+    FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult, ModuleType,
 };
+use walkdir::WalkDir;
 
 use crate::domain::entities::{
     AggregatedReport, AnalysisJob, CveInfo, DependencyRecommendations, FindingsByType,
@@ -15,8 +16,10 @@ use crate::domain::entities::{
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, SourceType};
 use crate::infrastructure::ModuleRegistry;
-use vulnera_core::config::SandboxConfig;
-use vulnera_sandbox::{SandboxExecutor, SandboxPolicy, SandboxSelector};
+use vulnera_core::config::{SandboxConfig, SandboxFailureMode};
+use vulnera_sandbox::{
+    SandboxExecutor, SandboxPolicy, SandboxPolicyProfile, SandboxSelector, calculate_limits,
+};
 
 /// Use case for creating a new analysis job
 pub struct CreateAnalysisJobUseCase {
@@ -98,18 +101,21 @@ impl ExecuteAnalysisJobUseCase {
                 vulnera_sandbox::infrastructure::noop::NoOpSandbox::new(),
             )))
         } else {
-            // Select backend based on config (auto, landlock, process, wasm)
-            let backend = match SandboxSelector::select_by_name(&config.backend) {
+            // Select backend based on typed config
+            let backend = match SandboxSelector::select_by_name(config.backend.as_str()) {
                 Some(backend) => backend,
                 None => {
                     warn!(
-                        backend = %config.backend,
+                        backend = config.backend.as_str(),
                         "Requested sandbox backend unavailable, falling back to automatic selection"
                     );
                     SandboxSelector::select()
                 }
             };
-            Arc::new(SandboxExecutor::new(backend))
+            Arc::new(SandboxExecutor::with_options(
+                backend,
+                matches!(config.failure_mode, SandboxFailureMode::FailClosed),
+            ))
         };
 
         Self {
@@ -146,6 +152,14 @@ impl ExecuteAnalysisJobUseCase {
             "Starting parallel execution of analysis modules"
         );
 
+        let source_size_bytes = estimate_source_size_bytes(&effective_source_uri);
+        debug!(
+            job_id = %job.job_id,
+            source_uri = %effective_source_uri,
+            source_size_bytes = source_size_bytes.unwrap_or(0),
+            "Estimated source size for dynamic sandbox limits"
+        );
+
         // Create JoinSet for parallel execution
         // We always return Ok from spawned tasks (errors are converted to ModuleResult with error field)
         let mut join_set: JoinSet<(vulnera_core::domain::module::ModuleType, ModuleResult)> =
@@ -178,10 +192,7 @@ impl ExecuteAnalysisJobUseCase {
                 let module_arc = Arc::clone(&module);
 
                 let executor = self.executor.clone();
-                let sandbox_timeout = std::time::Duration::from_millis(self.config.timeout_ms);
-                let sandbox_mem_bytes = self.config.max_memory_bytes;
                 let sandbox_config = self.config.clone();
-
                 debug!(
                     job_id = %job.job_id,
                     module = ?module_type_clone,
@@ -191,27 +202,22 @@ impl ExecuteAnalysisJobUseCase {
                 join_set.spawn(async move {
                     let module_start = std::time::Instant::now();
 
+                    let limits = calculate_limits(
+                        &sandbox_config,
+                        source_size_bytes,
+                        module_type_clone.clone(),
+                    );
+
+                    let profile = module_policy_profile(&module_type_clone, &sandbox_config);
+                    let profile_name = sandbox_profile_name(profile).to_string();
+                    let backend_name = executor.backend_name().to_string();
+                    let strict_mode = executor.strict_mode();
+
                     // Build sandbox policy with essential system paths for analysis
                     // for_analysis() includes /usr, /lib, /proc, /etc/ssl, /tmp etc.
-                    let effective_mem_limit =
-                        std::cmp::max(sandbox_mem_bytes, 2 * 1024 * 1024 * 1024);
-
-                    let mut policy = SandboxPolicy::for_analysis(&config.source_uri)
-                        .with_timeout(sandbox_timeout)
-                        .with_memory_limit(effective_mem_limit);
-
-                    // Configure network access if enabled
-                    if sandbox_config.allow_network {
-                        // Add common HTTPS ports
-                        policy = policy.with_http_access();
-
-                        // DependencyAnalyzer needs to connect to Dragonfly (Redis)
-                        if module_type_clone
-                            == vulnera_core::domain::module::ModuleType::DependencyAnalyzer
-                        {
-                            policy = policy.with_port(6379);
-                        }
-                    }
+                    let policy = SandboxPolicy::for_profile(&config.source_uri, profile)
+                        .with_timeout(limits.timeout)
+                        .with_memory_limit(limits.max_memory);
 
                     // Execute within sandbox
                     let result = executor
@@ -256,16 +262,65 @@ impl ExecuteAnalysisJobUseCase {
                     // Convert error to ModuleResult with error field set
                     // Always return a ModuleResult (either success or error)
                     match result {
-                        Ok(r) => (module_type_clone, r),
+                        Ok(mut r) => {
+                            r.metadata
+                                .additional_info
+                                .insert("sandbox.profile".to_string(), profile_name.clone());
+                            r.metadata.additional_info.insert(
+                                "sandbox.timeout_ms".to_string(),
+                                limits.timeout.as_millis().to_string(),
+                            );
+                            r.metadata.additional_info.insert(
+                                "sandbox.max_memory_bytes".to_string(),
+                                limits.max_memory.to_string(),
+                            );
+                            r.metadata.additional_info.insert(
+                                "sandbox.backend_effective".to_string(),
+                                backend_name.clone(),
+                            );
+                            r.metadata
+                                .additional_info
+                                .insert("sandbox.strict_mode".to_string(), strict_mode.to_string());
+                            r.metadata.additional_info.insert(
+                                "sandbox.source_size_bytes".to_string(),
+                                source_size_bytes.unwrap_or(0).to_string(),
+                            );
+
+                            (module_type_clone, r)
+                        }
                         Err(e) => {
                             // Create error result
-                            let error_result = ModuleResult {
+                            let mut error_result = ModuleResult {
                                 job_id: config.job_id,
                                 module_type: module_type_clone.clone(),
                                 findings: vec![],
                                 metadata: Default::default(),
                                 error: Some(e.to_string()),
                             };
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.profile".to_string(), profile_name);
+                            error_result.metadata.additional_info.insert(
+                                "sandbox.timeout_ms".to_string(),
+                                limits.timeout.as_millis().to_string(),
+                            );
+                            error_result.metadata.additional_info.insert(
+                                "sandbox.max_memory_bytes".to_string(),
+                                limits.max_memory.to_string(),
+                            );
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.backend_effective".to_string(), backend_name);
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.strict_mode".to_string(), strict_mode.to_string());
+                            error_result.metadata.additional_info.insert(
+                                "sandbox.source_size_bytes".to_string(),
+                                source_size_bytes.unwrap_or(0).to_string(),
+                            );
                             (module_type_clone, error_result)
                         }
                     }
@@ -356,6 +411,69 @@ impl ExecuteAnalysisJobUseCase {
 
         Ok(results)
     }
+}
+
+fn module_policy_profile(
+    module_type: &ModuleType,
+    sandbox_config: &SandboxConfig,
+) -> SandboxPolicyProfile {
+    match module_type {
+        ModuleType::DependencyAnalyzer if sandbox_config.allow_network => {
+            SandboxPolicyProfile::DependencyResolution {
+                include_cache_port: true,
+            }
+        }
+        _ => SandboxPolicyProfile::ReadOnlyAnalysis,
+    }
+}
+
+fn sandbox_profile_name(profile: SandboxPolicyProfile) -> &'static str {
+    match profile {
+        SandboxPolicyProfile::ReadOnlyAnalysis => "read_only_analysis",
+        SandboxPolicyProfile::DependencyResolution { .. } => "dependency_resolution",
+    }
+}
+
+fn estimate_source_size_bytes(source_uri: &str) -> Option<u64> {
+    let path = std::path::Path::new(source_uri);
+    if !path.exists() {
+        return None;
+    }
+
+    if path.is_file() {
+        return std::fs::metadata(path).ok().map(|m| m.len());
+    }
+
+    let ignored_dirs = [
+        ".git",
+        "target",
+        "node_modules",
+        "vendor",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        "__pycache__",
+    ];
+
+    let mut total: u64 = 0;
+    for entry in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !ignored_dirs.contains(&name.as_ref())
+        })
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_file() {
+            if let Ok(metadata) = entry.metadata() {
+                total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+
+    Some(total)
 }
 
 /// Use case for aggregating results from multiple modules

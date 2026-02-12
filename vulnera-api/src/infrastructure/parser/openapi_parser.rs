@@ -9,6 +9,15 @@ use tracing::{debug, error, info, warn};
 /// Parser for OpenAPI/Swagger specifications
 pub struct OpenApiParser;
 
+#[derive(Debug, Clone, Default)]
+struct ComponentRefMaps {
+    parameters: std::collections::HashMap<String, JsonValue>,
+    request_bodies: std::collections::HashMap<String, JsonValue>,
+    responses: std::collections::HashMap<String, JsonValue>,
+    headers: std::collections::HashMap<String, JsonValue>,
+    security_schemes: std::collections::HashMap<String, JsonValue>,
+}
+
 impl OpenApiParser {
     /// Parse an OpenAPI/Swagger specification from a file
     pub fn parse_file(file_path: &Path) -> Result<OpenApiSpec, ParseError> {
@@ -67,6 +76,7 @@ impl OpenApiParser {
 
         // Extract component schemas for reference resolution
         let schema_map = Self::extract_schemas_from_json(&raw_spec);
+        let component_refs = Self::extract_component_refs_from_json(&raw_spec);
 
         // Parse using oas3 crate for the rest of the spec
         let spec = if content.trim_start().starts_with('{') {
@@ -113,6 +123,7 @@ impl OpenApiParser {
             path_securities,
             oauth_token_urls,
             schema_map,
+            component_refs,
         )
     }
 
@@ -129,6 +140,7 @@ impl OpenApiParser {
             std::collections::HashMap<String, String>,
         >,
         schema_map: crate::infrastructure::parser::SchemaMap,
+        component_refs: ComponentRefMaps,
     ) -> Result<OpenApiSpec, ParseError> {
         debug!(
             version = %spec.openapi,
@@ -147,9 +159,13 @@ impl OpenApiParser {
                 .unwrap_or(&std::collections::BTreeMap::new()),
             &path_securities,
             &mut schema_resolver,
+            &component_refs,
         );
-        let security_schemes =
-            Self::parse_security_schemes_with_oauth_urls(&spec.components, &oauth_token_urls);
+        let security_schemes = Self::parse_security_schemes_with_oauth_urls(
+            &spec.components,
+            &oauth_token_urls,
+            &component_refs,
+        );
 
         Ok(OpenApiSpec {
             version: spec.openapi,
@@ -166,6 +182,7 @@ impl OpenApiParser {
             std::collections::HashMap<String, Vec<SecurityRequirement>>,
         >,
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> Vec<ApiPath> {
         let mut api_paths = Vec::new();
 
@@ -191,6 +208,7 @@ impl OpenApiParser {
                     get,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref post) = path_item.post {
@@ -204,6 +222,7 @@ impl OpenApiParser {
                     post,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref put) = path_item.put {
@@ -217,6 +236,7 @@ impl OpenApiParser {
                     put,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref delete) = path_item.delete {
@@ -230,6 +250,7 @@ impl OpenApiParser {
                     delete,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref patch) = path_item.patch {
@@ -243,6 +264,7 @@ impl OpenApiParser {
                     patch,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref head) = path_item.head {
@@ -256,6 +278,7 @@ impl OpenApiParser {
                     head,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref options) = path_item.options {
@@ -269,6 +292,7 @@ impl OpenApiParser {
                     options,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
             if let Some(ref trace) = path_item.trace {
@@ -282,6 +306,7 @@ impl OpenApiParser {
                     trace,
                     &op_security,
                     schema_resolver,
+                    component_refs,
                 ));
             }
 
@@ -299,19 +324,25 @@ impl OpenApiParser {
         operation: &oas3::spec::Operation,
         security: &[crate::domain::value_objects::SecurityRequirement],
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> ApiOperation {
         // Security requirements are now passed in from the raw JSON/YAML parsing
         // Operation-level security overrides path-level security (handled in parse_paths_with_security)
 
-        let parameters = Self::parse_parameters(&operation.parameters, schema_resolver);
-        let request_body =
-            Self::parse_request_body(operation.request_body.as_ref(), schema_resolver);
+        let parameters =
+            Self::parse_parameters(&operation.parameters, schema_resolver, component_refs);
+        let request_body = Self::parse_request_body(
+            operation.request_body.as_ref(),
+            schema_resolver,
+            component_refs,
+        );
         let responses = Self::parse_responses(
             operation
                 .responses
                 .as_ref()
                 .unwrap_or(&std::collections::BTreeMap::new()),
             schema_resolver,
+            component_refs,
         );
 
         ApiOperation {
@@ -326,6 +357,7 @@ impl OpenApiParser {
     fn parse_parameters(
         parameters: &[oas3::spec::ObjectOrReference<oas3::spec::Parameter>],
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> Vec<ApiParameter> {
         let mut api_params = Vec::new();
 
@@ -343,20 +375,24 @@ impl OpenApiParser {
                         name: param.name.clone(),
                         location,
                         required: param.required.unwrap_or(false),
-                        schema: param.schema.as_ref().and_then(|s| match s {
-                            oas3::spec::ObjectOrReference::Object(_) => {
-                                Some(Self::parse_schema(s, schema_resolver))
-                            }
-                            oas3::spec::ObjectOrReference::Ref { .. } => {
-                                warn!("Skipping schema reference in parameter");
-                                None
-                            }
-                        }),
+                        schema: param
+                            .schema
+                            .as_ref()
+                            .map(|s| Self::parse_schema(s, schema_resolver)),
                     });
                 }
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    // Skip references for now - could be resolved later
-                    warn!("Skipping parameter reference");
+                oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                    if let Some(param_json) =
+                        Self::resolve_component_ref(ref_path, "parameters", component_refs)
+                    {
+                        if let Some(param) =
+                            Self::parse_parameter_from_json(param_json, schema_resolver)
+                        {
+                            api_params.push(param);
+                        }
+                    } else {
+                        warn!(ref_path = %ref_path, "Failed to resolve parameter reference");
+                    }
                 }
             }
         }
@@ -367,6 +403,7 @@ impl OpenApiParser {
     fn parse_request_body(
         rb_ref: Option<&oas3::spec::ObjectOrReference<oas3::spec::RequestBody>>,
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> Option<ApiRequestBody> {
         match rb_ref {
             Some(oas3::spec::ObjectOrReference::Object(rb)) => {
@@ -376,10 +413,15 @@ impl OpenApiParser {
                     content,
                 })
             }
-            Some(oas3::spec::ObjectOrReference::Ref { .. }) => {
-                // We could resolve request body refs here too if we extracted them
-                warn!("Skipping request body reference");
-                None
+            Some(oas3::spec::ObjectOrReference::Ref { ref_path, .. }) => {
+                if let Some(rb_json) =
+                    Self::resolve_component_ref(ref_path, "requestBodies", component_refs)
+                {
+                    Self::parse_request_body_from_json(rb_json, schema_resolver)
+                } else {
+                    warn!(ref_path = %ref_path, "Failed to resolve request body reference");
+                    None
+                }
             }
             None => None,
         }
@@ -391,6 +433,7 @@ impl OpenApiParser {
             oas3::spec::ObjectOrReference<oas3::spec::Response>,
         >,
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> Vec<ApiResponse> {
         let mut api_responses = Vec::new();
 
@@ -399,7 +442,11 @@ impl OpenApiParser {
                 oas3::spec::ObjectOrReference::Object(response) => {
                     let content =
                         Self::parse_content(&Some(response.content.clone()), schema_resolver);
-                    let headers = Self::parse_response_headers(&response.headers, schema_resolver);
+                    let headers = Self::parse_response_headers(
+                        &response.headers,
+                        schema_resolver,
+                        component_refs,
+                    );
 
                     api_responses.push(ApiResponse {
                         status_code: status_code.clone(),
@@ -407,9 +454,21 @@ impl OpenApiParser {
                         headers,
                     });
                 }
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    // Skip references for now - could be resolved later
-                    warn!(status_code = %status_code, "Skipping response reference");
+                oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                    if let Some(response_json) =
+                        Self::resolve_component_ref(ref_path, "responses", component_refs)
+                    {
+                        if let Some(response) = Self::parse_response_from_json(
+                            status_code,
+                            response_json,
+                            schema_resolver,
+                            component_refs,
+                        ) {
+                            api_responses.push(response);
+                        }
+                    } else {
+                        warn!(status_code = %status_code, ref_path = %ref_path, "Failed to resolve response reference");
+                    }
                 }
             }
         }
@@ -452,6 +511,7 @@ impl OpenApiParser {
             oas3::spec::ObjectOrReference<oas3::spec::Header>,
         >,
         schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
     ) -> Vec<ApiHeader> {
         let mut api_headers = Vec::new();
 
@@ -461,23 +521,24 @@ impl OpenApiParser {
                     let schema = header
                         .schema
                         .as_ref()
-                        .and_then(|schema_ref| match schema_ref {
-                            oas3::spec::ObjectOrReference::Object(_) => {
-                                Some(Self::parse_schema(schema_ref, schema_resolver))
-                            }
-                            oas3::spec::ObjectOrReference::Ref { .. } => {
-                                warn!("Skipping schema reference in header");
-                                None
-                            }
-                        });
+                        .map(|schema_ref| Self::parse_schema(schema_ref, schema_resolver));
                     api_headers.push(ApiHeader {
                         name: name.clone(),
                         schema,
                     });
                 }
-                oas3::spec::ObjectOrReference::Ref { .. } => {
-                    // Skip references for now
-                    warn!(header_name = %name, "Skipping header reference");
+                oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                    if let Some(header_json) =
+                        Self::resolve_component_ref(ref_path, "headers", component_refs)
+                    {
+                        if let Some(header) =
+                            Self::parse_header_from_json(name, header_json, schema_resolver)
+                        {
+                            api_headers.push(header);
+                        }
+                    } else {
+                        warn!(header_name = %name, ref_path = %ref_path, "Failed to resolve header reference");
+                    }
                 }
             }
         }
@@ -516,6 +577,15 @@ impl OpenApiParser {
                 let max_length = obj_schema.max_length.map(|v| v as u32);
                 let min_items = obj_schema.min_items.map(|v| v as u32);
                 let max_items = obj_schema.max_items.map(|v| v as u32);
+                let items = obj_schema.items.as_ref().map(|item_schema| {
+                    let parsed = match item_schema.as_ref() {
+                        oas3::spec::Schema::Object(object_schema) => {
+                            Self::parse_schema(object_schema.as_ref(), schema_resolver)
+                        }
+                        oas3::spec::Schema::Boolean(_) => ApiSchema::default(),
+                    };
+                    Box::new(parsed)
+                });
 
                 // Map logical constraints
                 let all_of: Vec<ApiSchema> = obj_schema
@@ -534,9 +604,21 @@ impl OpenApiParser {
                     .map(|s| Self::parse_schema(s, schema_resolver))
                     .collect();
 
-                // enum values access is unclear from oas3 docs without internet, skipping for now
-                // will rely on schema_resolver for deep inspection
-                let enum_values = None;
+                let enum_values = if obj_schema.enum_values.is_empty() {
+                    None
+                } else {
+                    Some(
+                        obj_schema
+                            .enum_values
+                            .iter()
+                            .map(|v| {
+                                v.as_str()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| v.to_string())
+                            })
+                            .collect(),
+                    )
+                };
 
                 // numeric constraints
                 let minimum = obj_schema.minimum.as_ref().and_then(|n| n.as_f64());
@@ -546,12 +628,31 @@ impl OpenApiParser {
                 // Simple metadata
                 let read_only = obj_schema.read_only.unwrap_or(false);
                 let write_only = obj_schema.write_only.unwrap_or(false);
-                // example/default might be complex in oas3, skipping for now to rely on defaults or simple mapping if easy
+                let example = obj_schema.example.clone();
+                let default = obj_schema.default.clone();
+
+                let additional_properties = match obj_schema.additional_properties.as_ref() {
+                    Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(false))) => {
+                        AdditionalProperties::Denied
+                    }
+                    Some(oas3::spec::Schema::Boolean(oas3::spec::BooleanSchema(true))) => {
+                        AdditionalProperties::Allowed
+                    }
+                    Some(oas3::spec::Schema::Object(object_schema)) => {
+                        AdditionalProperties::Schema(Box::new(Self::parse_schema(
+                            object_schema.as_ref(),
+                            schema_resolver,
+                        )))
+                    }
+                    None => AdditionalProperties::Allowed,
+                };
 
                 ApiSchema {
                     schema_type,
                     format: obj_schema.format.clone(),
                     properties,
+                    summary: obj_schema.title.clone(),
+                    description: obj_schema.description.clone(),
                     required: obj_schema.required.clone(),
                     pattern,
                     minimum,
@@ -560,14 +661,17 @@ impl OpenApiParser {
                     max_length,
                     min_items,
                     max_items,
+                    items,
                     enum_values,
                     multiple_of,
+                    example,
+                    default,
                     read_only,
                     write_only,
+                    additional_properties,
                     all_of,
                     one_of,
                     any_of,
-                    ..Default::default()
                 }
             }
             oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
@@ -582,6 +686,7 @@ impl OpenApiParser {
             String,
             std::collections::HashMap<String, String>,
         >,
+        component_refs: &ComponentRefMaps,
     ) -> Vec<SecurityScheme> {
         let mut schemes = Vec::new();
 
@@ -635,9 +740,66 @@ impl OpenApiParser {
                             scheme_type,
                         });
                     }
-                    oas3::spec::ObjectOrReference::Ref { .. } => {
-                        // Skip references for now
-                        warn!(scheme_name = %name, "Skipping security scheme reference");
+                    oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
+                        if let Some(scheme_json) =
+                            Self::resolve_component_ref(ref_path, "securitySchemes", component_refs)
+                        {
+                            if let Ok(scheme) = serde_json::from_value::<oas3::spec::SecurityScheme>(
+                                scheme_json.clone(),
+                            ) {
+                                let scheme_type = match &scheme {
+                                    oas3::spec::SecurityScheme::ApiKey {
+                                        location,
+                                        name: key_name,
+                                        description: _,
+                                    } => SecuritySchemeType::ApiKey {
+                                        location: format!("{:?}", location),
+                                        name: key_name.clone(),
+                                    },
+                                    oas3::spec::SecurityScheme::Http {
+                                        scheme: http_scheme,
+                                        bearer_format,
+                                        description: _,
+                                    } => SecuritySchemeType::Http {
+                                        scheme: http_scheme.clone(),
+                                        bearer_format: bearer_format.clone(),
+                                    },
+                                    oas3::spec::SecurityScheme::OAuth2 {
+                                        flows,
+                                        description: _,
+                                    } => {
+                                        let scheme_token_urls =
+                                            oauth_token_urls.get(name).cloned().unwrap_or_default();
+                                        let oauth_flows = Self::parse_oauth_flows_with_urls(
+                                            flows,
+                                            &scheme_token_urls,
+                                        );
+                                        SecuritySchemeType::OAuth2 { flows: oauth_flows }
+                                    }
+                                    oas3::spec::SecurityScheme::OpenIdConnect {
+                                        open_id_connect_url,
+                                        description: _,
+                                    } => SecuritySchemeType::OpenIdConnect {
+                                        url: open_id_connect_url.clone(),
+                                    },
+                                    oas3::spec::SecurityScheme::MutualTls { description: _ } => {
+                                        warn!(
+                                            "MutualTLS security scheme is not supported, skipping"
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                schemes.push(SecurityScheme {
+                                    name: name.clone(),
+                                    scheme_type,
+                                });
+                            } else {
+                                warn!(scheme_name = %name, ref_path = %ref_path, "Failed to deserialize security scheme reference");
+                            }
+                        } else {
+                            warn!(scheme_name = %name, ref_path = %ref_path, "Failed to resolve security scheme reference");
+                        }
                     }
                 }
             }
@@ -899,6 +1061,194 @@ impl OpenApiParser {
         }
 
         schemas
+    }
+
+    fn extract_component_refs_from_json(spec: &JsonValue) -> ComponentRefMaps {
+        let mut refs = ComponentRefMaps::default();
+
+        if let Some(components) = spec.get("components").and_then(|c| c.as_object()) {
+            if let Some(parameters) = components.get("parameters").and_then(|v| v.as_object()) {
+                refs.parameters = parameters
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+            }
+
+            if let Some(request_bodies) =
+                components.get("requestBodies").and_then(|v| v.as_object())
+            {
+                refs.request_bodies = request_bodies
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+            }
+
+            if let Some(responses) = components.get("responses").and_then(|v| v.as_object()) {
+                refs.responses = responses
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+            }
+
+            if let Some(headers) = components.get("headers").and_then(|v| v.as_object()) {
+                refs.headers = headers
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+            }
+
+            if let Some(security_schemes) = components
+                .get("securitySchemes")
+                .and_then(|v| v.as_object())
+            {
+                refs.security_schemes = security_schemes
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+            }
+        }
+
+        refs
+    }
+
+    fn resolve_component_ref<'a>(
+        ref_path: &str,
+        expected_component: &str,
+        component_refs: &'a ComponentRefMaps,
+    ) -> Option<&'a JsonValue> {
+        let parts: Vec<&str> = ref_path.trim_start_matches("#/").split('/').collect();
+        if parts.len() != 3 || parts[0] != "components" || parts[1] != expected_component {
+            return None;
+        }
+
+        let key = parts[2];
+        match expected_component {
+            "parameters" => component_refs.parameters.get(key),
+            "requestBodies" => component_refs.request_bodies.get(key),
+            "responses" => component_refs.responses.get(key),
+            "headers" => component_refs.headers.get(key),
+            "securitySchemes" => component_refs.security_schemes.get(key),
+            _ => None,
+        }
+    }
+
+    fn parse_parameter_from_json(
+        param_json: &JsonValue,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> Option<ApiParameter> {
+        let name = param_json.get("name").and_then(|v| v.as_str())?.to_string();
+        let location = match param_json.get("in").and_then(|v| v.as_str())? {
+            "query" => ParameterLocation::Query,
+            "header" => ParameterLocation::Header,
+            "path" => ParameterLocation::Path,
+            "cookie" => ParameterLocation::Cookie,
+            _ => return None,
+        };
+
+        let required = param_json
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let schema = param_json
+            .get("schema")
+            .map(|schema_json| schema_resolver.parse_schema_from_json(schema_json));
+
+        Some(ApiParameter {
+            name,
+            location,
+            required,
+            schema,
+        })
+    }
+
+    fn parse_request_body_from_json(
+        rb_json: &JsonValue,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> Option<ApiRequestBody> {
+        let required = rb_json
+            .get("required")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let content = Self::parse_content_from_json(rb_json.get("content"), schema_resolver);
+
+        Some(ApiRequestBody { required, content })
+    }
+
+    fn parse_response_from_json(
+        status_code: &str,
+        response_json: &JsonValue,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+        component_refs: &ComponentRefMaps,
+    ) -> Option<ApiResponse> {
+        let content = Self::parse_content_from_json(response_json.get("content"), schema_resolver);
+        let headers = response_json
+            .get("headers")
+            .and_then(|v| v.as_object())
+            .map(|headers_obj| {
+                headers_obj
+                    .iter()
+                    .filter_map(|(name, header_json)| {
+                        if let Some(ref_path) = header_json.get("$ref").and_then(|v| v.as_str()) {
+                            if let Some(resolved) =
+                                Self::resolve_component_ref(ref_path, "headers", component_refs)
+                            {
+                                return Self::parse_header_from_json(
+                                    name,
+                                    resolved,
+                                    schema_resolver,
+                                );
+                            }
+                            return None;
+                        }
+                        Self::parse_header_from_json(name, header_json, schema_resolver)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Some(ApiResponse {
+            status_code: status_code.to_string(),
+            content,
+            headers,
+        })
+    }
+
+    fn parse_header_from_json(
+        name: &str,
+        header_json: &JsonValue,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> Option<ApiHeader> {
+        let schema = header_json
+            .get("schema")
+            .map(|schema_json| schema_resolver.parse_schema_from_json(schema_json));
+        Some(ApiHeader {
+            name: name.to_string(),
+            schema,
+        })
+    }
+
+    fn parse_content_from_json(
+        content_json: Option<&JsonValue>,
+        schema_resolver: &mut crate::infrastructure::parser::SchemaRefResolver,
+    ) -> Vec<ApiContent> {
+        let mut api_content = Vec::new();
+        let Some(content_map) = content_json.and_then(|v| v.as_object()) else {
+            return api_content;
+        };
+
+        for (media_type, media_value) in content_map {
+            let schema = media_value
+                .get("schema")
+                .map(|schema_json| schema_resolver.parse_schema_from_json(schema_json));
+
+            api_content.push(ApiContent {
+                media_type: media_type.clone(),
+                schema,
+            });
+        }
+
+        api_content
     }
 }
 

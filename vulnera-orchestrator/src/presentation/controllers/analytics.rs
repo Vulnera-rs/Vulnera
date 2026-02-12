@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tracing::{error, instrument};
 use uuid::Uuid;
 
-use vulnera_core::domain::organization::value_objects::OrganizationId;
+use vulnera_core::domain::organization::value_objects::{OrganizationId, SubscriptionTier};
 
 use crate::presentation::auth::Auth;
 use crate::presentation::controllers::OrchestratorState;
@@ -266,8 +266,14 @@ pub async fn get_quota(
 
     let is_over_limit = scans.is_exceeded || api_calls.is_exceeded || members.is_exceeded;
 
-    // Determine tier (default to Free for now)
-    let tier = "Free".to_string();
+    // Determine tier from subscription limits; default to Free when limits are not initialized
+    let tier = match quota.tier.unwrap_or(SubscriptionTier::Free) {
+        SubscriptionTier::Free => "Free",
+        SubscriptionTier::Starter => "Starter",
+        SubscriptionTier::Professional => "Professional",
+        SubscriptionTier::Enterprise => "Enterprise",
+    }
+    .to_string();
 
     Ok(Json(QuotaUsageResponse {
         organization_id: id,

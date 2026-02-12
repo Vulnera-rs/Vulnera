@@ -35,6 +35,7 @@ pub struct AuthAppState {
     pub csrf_service: Arc<CsrfService>,
     pub token_ttl_hours: u64,
     pub refresh_token_ttl_hours: u64,
+    pub api_key_ttl_days: Option<u64>,
     // Token blacklist for logout
     pub token_blacklist: Option<Arc<dyn TokenBlacklistService>>,
     pub blacklist_tokens_on_logout: bool,
@@ -534,11 +535,11 @@ pub async fn create_api_key(
     State(state): State<AuthAppState>,
     axum::Json(request): axum::Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyResponse>, (StatusCode, Json<ErrorResponse>)> {
-    // Get config for API key TTL
-    // For now, calculate expires_at from config
+    // Compute default API key expiration from configured auth policy
     let expires_at = request.expires_at.or_else(|| {
-        // Default: 1 year from now
-        Some(Utc::now() + Duration::days(365))
+        state
+            .api_key_ttl_days
+            .map(|days| Utc::now() + Duration::days(days as i64))
     });
 
     // Get dependencies from state

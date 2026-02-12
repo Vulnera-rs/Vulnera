@@ -10,6 +10,7 @@ use crate::domain::vulnerability::{
     value_objects::{Ecosystem, Version},
 };
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 /// Parser for uv.lock files
 ///
@@ -33,6 +34,7 @@ impl UvLockParser {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
         let mut seen_packages = std::collections::HashSet::new();
+        let mut pending_dependencies: Vec<(Package, String, String)> = Vec::new();
 
         // UV lockfiles have a [[package]] array
         if let Some(packages_array) = toml_value.get("package").and_then(|p| p.as_array()) {
@@ -72,7 +74,7 @@ impl UvLockParser {
 
                     packages.push(package.clone());
 
-                    // Extract dependencies
+                    // Collect dependencies for second-pass target resolution
                     if let Some(deps) = package_table.get("dependencies").and_then(|d| d.as_array())
                     {
                         for dep_val in deps {
@@ -80,27 +82,33 @@ impl UvLockParser {
                                 // dep_str is like "certifi>=2021" or "charset-normalizer<4,>=2"
                                 // We need to split name and requirement
                                 let (dep_name, dep_req) = self.parse_dependency_string(dep_str);
-
-                                // Create a placeholder package for the dependency target
-                                // We use 0.0.0 as version since we don't know the resolved version here directly
-                                // (though we could find it by looking up other packages, but that requires 2 passes)
-                                let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                                if let Ok(dep_pkg) = Package::new(
+                                pending_dependencies.push((
+                                    package.clone(),
                                     dep_name.to_string(),
-                                    dep_pkg_version,
-                                    Ecosystem::PyPI,
-                                ) {
-                                    dependencies.push(Dependency::new(
-                                        package.clone(),
-                                        dep_pkg,
-                                        dep_req.to_string(),
-                                        false,
-                                    ));
-                                }
+                                    dep_req.to_string(),
+                                ));
                             }
                         }
                     }
                 }
+            }
+        }
+
+        let mut package_by_name: HashMap<String, Package> = HashMap::new();
+        for package in &packages {
+            package_by_name
+                .entry(package.name.clone())
+                .and_modify(|current| {
+                    if package.version > current.version {
+                        *current = package.clone();
+                    }
+                })
+                .or_insert_with(|| package.clone());
+        }
+
+        for (from, dep_name, dep_req) in pending_dependencies {
+            if let Some(to) = package_by_name.get(&dep_name) {
+                dependencies.push(Dependency::new(from, to.clone(), dep_req, false));
             }
         }
 

@@ -8,6 +8,34 @@ use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec};
 pub struct ResourceRestrictionAnalyzer;
 
 impl ResourceRestrictionAnalyzer {
+    fn schema_contains_array(schema: &crate::domain::value_objects::ApiSchema) -> bool {
+        if schema.schema_type.as_deref() == Some("array") {
+            return true;
+        }
+
+        if schema
+            .properties
+            .iter()
+            .any(|prop| Self::schema_contains_array(&prop.schema))
+        {
+            return true;
+        }
+
+        if schema.one_of.iter().any(Self::schema_contains_array)
+            || schema.any_of.iter().any(Self::schema_contains_array)
+            || schema.all_of.iter().any(Self::schema_contains_array)
+        {
+            return true;
+        }
+
+        match &schema.additional_properties {
+            crate::domain::value_objects::AdditionalProperties::Schema(nested) => {
+                Self::schema_contains_array(nested)
+            }
+            _ => false,
+        }
+    }
+
     pub fn analyze(spec: &OpenApiSpec) -> Vec<ApiFinding> {
         let mut findings = Vec::new();
 
@@ -24,20 +52,11 @@ impl ResourceRestrictionAnalyzer {
                         if response.status_code.starts_with('2') {
                             for content in &response.content {
                                 if let Some(schema) = &content.schema {
-                                    if schema.schema_type.as_deref() == Some("array") {
+                                    if Self::schema_contains_array(schema) {
                                         returns_array = true;
-                                    }
-                                    // or object wrapping array (e.g. { data: [...] }) - simplified check for now
-                                    // Check properties for array
-                                    for prop in &schema.properties {
-                                        if prop.schema.schema_type.as_deref() == Some("array") {
-                                            returns_array = true;
-                                        }
                                     }
                                 }
                             }
-
-                            // Check for rate limit headers in 2xx or 429 response
                             // Check for rate limit headers in 2xx or 429 response
                             if response
                                 .headers
