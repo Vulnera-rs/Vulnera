@@ -46,14 +46,21 @@ pub struct SandboxExecutor {
     backend: Arc<dyn SandboxBackend>,
     /// Path to the worker binary (auto-discovered or configured)
     worker_path: Option<String>,
+    strict_mode: bool,
 }
 
 impl SandboxExecutor {
     /// Create a new executor with the specified backend
     pub fn new(backend: Arc<dyn SandboxBackend>) -> Self {
+        Self::with_options(backend, false)
+    }
+
+    /// Create a new executor with explicit strict-mode option
+    pub fn with_options(backend: Arc<dyn SandboxBackend>, strict_mode: bool) -> Self {
         Self {
             backend,
             worker_path: Self::discover_worker_path(),
+            strict_mode,
         }
     }
 
@@ -93,6 +100,11 @@ impl SandboxExecutor {
     /// Get the name of the active backend
     pub fn backend_name(&self) -> &'static str {
         self.backend.name()
+    }
+
+    /// Check if strict fail-closed mode is enabled.
+    pub fn strict_mode(&self) -> bool {
+        self.strict_mode
     }
 
     /// Check if the backend is available
@@ -176,6 +188,8 @@ impl SandboxExecutor {
 
         let mut command = Command::new(worker_path);
         command
+            .arg("--sandbox-backend")
+            .arg(self.backend.name())
             .arg("--module")
             .arg(&module_type)
             .arg("--source-uri")
@@ -191,6 +205,10 @@ impl SandboxExecutor {
 
         if self.backend.name() == "noop" {
             command.arg("--no-sandbox");
+        }
+
+        if self.strict_mode {
+            command.arg("--sandbox-strict");
         }
 
         let child = command
@@ -253,7 +271,7 @@ impl SandboxExecutor {
         })?;
 
         // Parse the inner result as ModuleResult
-        let result: ModuleResult =
+        let mut result: ModuleResult =
             serde_json::from_value(module_result).unwrap_or_else(|_| ModuleResult {
                 job_id: config.job_id,
                 module_type: module.module_type(),
@@ -261,6 +279,41 @@ impl SandboxExecutor {
                 metadata: Default::default(),
                 error: None,
             });
+
+        result.metadata.additional_info.insert(
+            "sandbox.backend_requested".to_string(),
+            self.backend.name().to_string(),
+        );
+        result.metadata.additional_info.insert(
+            "sandbox.strict_mode".to_string(),
+            self.strict_mode.to_string(),
+        );
+
+        if let Some(ref backend) = worker_result.sandbox_backend {
+            result.metadata.additional_info.insert(
+                "sandbox.worker_backend".to_string(),
+                backend.clone(),
+            );
+        }
+
+        if let Some(applied) = worker_result.sandbox_applied {
+            result.metadata.additional_info.insert(
+                "sandbox.applied".to_string(),
+                applied.to_string(),
+            );
+        }
+
+        if let Some(ref setup_error) = worker_result.sandbox_setup_error {
+            result.metadata.additional_info.insert(
+                "sandbox.setup_error".to_string(),
+                setup_error.clone(),
+            );
+        }
+
+        result.metadata.additional_info.insert(
+            "sandbox.worker_version".to_string(),
+            worker_result.worker_version.clone(),
+        );
 
         Ok(result)
     }
@@ -276,7 +329,25 @@ impl SandboxExecutor {
         // as that would affect the orchestrator. This is a compatibility fallback.
 
         match tokio::time::timeout(policy.timeout, module.execute(config)).await {
-            Ok(Ok(result)) => Ok(result),
+            Ok(Ok(mut result)) => {
+                result.metadata.additional_info.insert(
+                    "sandbox.backend_requested".to_string(),
+                    self.backend.name().to_string(),
+                );
+                result.metadata.additional_info.insert(
+                    "sandbox.strict_mode".to_string(),
+                    self.strict_mode.to_string(),
+                );
+                result.metadata.additional_info.insert(
+                    "sandbox.execution_mode".to_string(),
+                    "in_process_fallback".to_string(),
+                );
+                result.metadata.additional_info.insert(
+                    "sandbox.applied".to_string(),
+                    "false".to_string(),
+                );
+                Ok(result)
+            }
             Ok(Err(e)) => Err(SandboxedExecutionError::ModuleFailed(e)),
             Err(_) => Err(SandboxedExecutionError::Timeout(policy.timeout)),
         }
@@ -295,8 +366,16 @@ struct WorkerResult {
     success: bool,
     result: Option<serde_json::Value>,
     error: Option<String>,
+    #[serde(default)]
+    sandbox_backend: Option<String>,
+    #[serde(default)]
+    sandbox_applied: Option<bool>,
+    #[serde(default)]
+    sandbox_setup_error: Option<String>,
     #[allow(dead_code)]
     execution_time_ms: u64,
+    #[serde(default)]
+    worker_version: String,
 }
 
 /// Error type for sandboxed execution
@@ -331,6 +410,7 @@ mod tests {
     fn test_default_executor() {
         let executor = SandboxExecutor::default();
         assert!(executor.is_available());
+        assert!(!executor.strict_mode);
     }
 
     #[test]

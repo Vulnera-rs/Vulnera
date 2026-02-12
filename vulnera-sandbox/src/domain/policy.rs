@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// Predefined policy profiles for analysis modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxPolicyProfile {
+    /// No network access; filesystem-only analysis.
+    ReadOnlyAnalysis,
+    /// Dependency resolution profile with outbound HTTP(S) and optional Redis/Dragonfly.
+    DependencyResolution { include_cache_port: bool },
+}
+
 /// Sandbox policy defining allowed operations for module execution
 ///
 /// # Security Model
@@ -184,6 +193,27 @@ impl SandboxPolicy {
         policy
     }
 
+    /// Create an analysis policy with a predefined profile.
+    pub fn for_profile(source_path: impl Into<PathBuf>, profile: SandboxPolicyProfile) -> Self {
+        Self::for_analysis(source_path).with_profile(profile)
+    }
+
+    /// Apply a predefined profile to this policy.
+    pub fn with_profile(mut self, profile: SandboxPolicyProfile) -> Self {
+        match profile {
+            SandboxPolicyProfile::ReadOnlyAnalysis => {
+                self.allowed_ports.clear();
+            }
+            SandboxPolicyProfile::DependencyResolution { include_cache_port } => {
+                self = self.with_http_access();
+                if include_cache_port {
+                    self = self.with_port(6379);
+                }
+            }
+        }
+        self
+    }
+
     /// Add a read-only path (chainable)
     pub fn with_readonly_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.readonly_paths.push(path.into());
@@ -283,5 +313,27 @@ mod tests {
 
         assert_eq!(policy.readonly_paths.len(), 2);
         assert_eq!(policy.timeout, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_read_only_profile_blocks_network() {
+        let policy = SandboxPolicy::default()
+            .with_http_access()
+            .with_profile(SandboxPolicyProfile::ReadOnlyAnalysis);
+
+        assert!(policy.allowed_ports.is_empty());
+    }
+
+    #[test]
+    fn test_dependency_profile_adds_required_ports() {
+        let policy = SandboxPolicy::default().with_profile(
+            SandboxPolicyProfile::DependencyResolution {
+                include_cache_port: true,
+            },
+        );
+
+        assert!(policy.allowed_ports.contains(&80));
+        assert!(policy.allowed_ports.contains(&443));
+        assert!(policy.allowed_ports.contains(&6379));
     }
 }

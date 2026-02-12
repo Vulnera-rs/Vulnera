@@ -36,6 +36,14 @@ use vulnera_secrets::module::SecretDetectionModule;
 #[command(name = "vulnera-worker")]
 #[command(about = "Sandboxed worker for Vulnera analysis modules")]
 struct Args {
+    /// Sandbox backend selected by orchestrator (landlock, process, wasm, noop, auto)
+    #[arg(long, default_value = "auto")]
+    sandbox_backend: String,
+
+    /// Fail closed if sandbox setup cannot be fully applied
+    #[arg(long)]
+    sandbox_strict: bool,
+
     /// Module type to execute (e.g., "SAST", "SecretDetection", "ApiSecurity")
     #[arg(long)]
     module: String,
@@ -117,6 +125,15 @@ struct WorkerResult {
     execution_time_ms: u64,
     /// Worker version
     worker_version: String,
+    /// Backend used by worker
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox_backend: Option<String>,
+    /// Whether sandbox restrictions were successfully applied
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox_applied: Option<bool>,
+    /// Sandbox setup error message for degraded (best-effort) runs
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sandbox_setup_error: Option<String>,
 }
 
 #[tokio::main]
@@ -155,14 +172,40 @@ async fn main() {
     );
 
     // Apply sandbox restrictions BEFORE executing any module code
+    let sandbox_applied: bool;
+    let mut sandbox_setup_error: Option<String> = None;
+
     #[cfg(target_os = "linux")]
     if !args.no_sandbox {
-        if let Err(e) = apply_sandbox_restrictions(&policy) {
-            // Log but don't fail - sandbox is optional enhancement
-            warn!("Sandbox restrictions not fully applied: {}", e);
+        if let Err(e) = apply_sandbox_restrictions(&policy, &args.sandbox_backend) {
+            if args.sandbox_strict {
+                output_error_with_code(
+                    &format!(
+                        "Sandbox setup failed in strict mode (backend={}): {}",
+                        args.sandbox_backend, e
+                    ),
+                    WorkerErrorCode::SandboxSetupFailed,
+                );
+                std::process::exit(1);
+            }
+
+            sandbox_applied = false;
+            sandbox_setup_error = Some(e.clone());
+            warn!(
+                "Sandbox restrictions not fully applied (backend={}): {}",
+                args.sandbox_backend, e
+            );
+        } else {
+            sandbox_applied = true;
         }
     } else {
+        sandbox_applied = false;
         warn!("Sandbox disabled via --no-sandbox flag - running without restrictions");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        sandbox_applied = false;
     }
 
     info!("Sandbox restrictions applied, executing module");
@@ -182,6 +225,9 @@ async fn main() {
                 error_code: None,
                 execution_time_ms,
                 worker_version: WORKER_VERSION.to_string(),
+                sandbox_backend: Some(args.sandbox_backend.clone()),
+                sandbox_applied: Some(sandbox_applied),
+                sandbox_setup_error,
             },
             Err(e) => WorkerResult {
                 success: false,
@@ -190,6 +236,9 @@ async fn main() {
                 error_code: Some(WorkerErrorCode::SerializationFailed),
                 execution_time_ms,
                 worker_version: WORKER_VERSION.to_string(),
+                sandbox_backend: Some(args.sandbox_backend.clone()),
+                sandbox_applied: Some(sandbox_applied),
+                sandbox_setup_error,
             },
         },
         Err(e) => WorkerResult {
@@ -199,6 +248,9 @@ async fn main() {
             error_code: Some(WorkerErrorCode::ModuleExecutionFailed),
             execution_time_ms,
             worker_version: WORKER_VERSION.to_string(),
+            sandbox_backend: Some(args.sandbox_backend.clone()),
+            sandbox_applied: Some(sandbox_applied),
+            sandbox_setup_error,
         },
     };
 
@@ -225,27 +277,41 @@ fn parse_policy(args: &Args) -> Result<SandboxPolicy, String> {
 
 /// Apply Landlock + seccomp + rlimit restrictions
 #[cfg(target_os = "linux")]
-fn apply_sandbox_restrictions(policy: &SandboxPolicy) -> Result<(), String> {
+fn apply_sandbox_restrictions(policy: &SandboxPolicy, backend_name: &str) -> Result<(), String> {
     use vulnera_sandbox::infrastructure::{
         landlock::apply_landlock_restrictions,
         seccomp::{apply_seccomp_filter, create_analysis_config},
     };
 
-    // Layer 1: Landlock (filesystem + network restrictions)
-    apply_landlock_restrictions(policy).map_err(|e| format!("Landlock: {}", e))?;
+    match backend_name.to_lowercase().as_str() {
+        "landlock" | "auto" => {
+            // Layer 1: Landlock (filesystem + network restrictions)
+            apply_landlock_restrictions(policy).map_err(|e| format!("Landlock: {}", e))?;
+            debug!("Landlock restrictions applied");
 
-    debug!("Landlock restrictions applied");
+            // Layer 2: Seccomp (syscall filtering)
+            let seccomp_config = create_analysis_config(policy);
+            apply_seccomp_filter(&seccomp_config).map_err(|e| format!("Seccomp: {}", e))?;
+            debug!("Seccomp filter applied");
 
-    // Layer 2: Seccomp (syscall filtering)
-    let seccomp_config = create_analysis_config(policy);
-    apply_seccomp_filter(&seccomp_config).map_err(|e| format!("Seccomp: {}", e))?;
-
-    debug!("Seccomp filter applied");
-
-    // Layer 3: Resource limits
-    apply_rlimits(policy)?;
-
-    debug!("Resource limits applied");
+            // Layer 3: Resource limits
+            apply_rlimits(policy)?;
+            debug!("Resource limits applied");
+        }
+        "process" => {
+            apply_rlimits(policy)?;
+            debug!("Process backend selected; applied rlimits only");
+        }
+        "noop" => {
+            debug!("Noop backend selected; no sandbox restrictions applied");
+        }
+        "wasm" => {
+            debug!("WASM backend selected on Linux worker; no native restrictions applied");
+        }
+        other => {
+            return Err(format!("Unsupported sandbox backend: {}", other));
+        }
+    }
 
     Ok(())
 }
@@ -414,6 +480,9 @@ fn output_error_with_code(message: &str, error_code: WorkerErrorCode) {
         error_code: Some(error_code),
         execution_time_ms: 0,
         worker_version: WORKER_VERSION.to_string(),
+        sandbox_backend: None,
+        sandbox_applied: None,
+        sandbox_setup_error: None,
     };
     output_result(&result);
 }

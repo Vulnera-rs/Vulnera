@@ -1197,6 +1197,37 @@ impl Default for AnalyticsConfig {
 /// Sandbox configuration for module execution isolation
 ///
 /// enabled with Landlock/seccomp on Linux 5.13+, provides kernel-level isolation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxBackendPreference {
+    #[default]
+    Landlock,
+    Auto,
+    Process,
+    Noop,
+    Wasm,
+}
+
+impl SandboxBackendPreference {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Landlock => "landlock",
+            Self::Auto => "auto",
+            Self::Process => "process",
+            Self::Noop => "noop",
+            Self::Wasm => "wasm",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxFailureMode {
+    #[default]
+    BestEffort,
+    FailClosed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SandboxConfig {
@@ -1205,8 +1236,10 @@ pub struct SandboxConfig {
     /// When enabled on Linux, uses Landlock + seccomp for kernel-level isolation.
     /// Enable only after thorough testing with your specific workloads.
     pub enabled: bool,
-    /// Sandbox backend preference: "noop", "auto", "landlock", "process"
-    pub backend: String,
+    /// Sandbox backend preference.
+    pub backend: SandboxBackendPreference,
+    /// How to handle sandbox setup failures.
+    pub failure_mode: SandboxFailureMode,
     /// Base timeout per module in milliseconds (dynamically adjusted based on source size)
     pub timeout_ms: u64,
     /// Base memory limit per module in bytes (dynamically adjusted based on source size)
@@ -1227,7 +1260,8 @@ impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
             enabled: true,               // Enabled by default - for_analysis() provides safe paths
-            backend: "auto".to_string(), // Auto-select best backend (Landlock on Linux)
+            backend: SandboxBackendPreference::Landlock,
+            failure_mode: SandboxFailureMode::BestEffort,
             timeout_ms: 120_000,         // 2 minutes base timeout
             max_memory_bytes: 2 * 1024 * 1024 * 1024, // 2GB base
             allow_network: true,         // DependencyAnalyzer needs network

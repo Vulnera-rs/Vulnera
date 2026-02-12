@@ -5,8 +5,8 @@
 //!
 //! # Default Behavior
 //!
-//! **By default, sandboxing is DISABLED (noop mode)** for maximum compatibility.
-//! Enable it explicitly in production after testing with your specific workloads.
+//! **By default, sandboxing is enabled with Landlock on Linux**.
+//! If unavailable, runtime behavior depends on configured fallback mode.
 //!
 //! # Architecture
 //!
@@ -16,7 +16,7 @@
 //! |----------|-----------------|----------|
 //! | Linux 5.13+ | Landlock + seccomp | Process isolation |
 //! | Older Linux | Process isolation | - |
-//! | All platforms | NoOp (default) | - |
+//! | Non-Linux | WASM | NoOp |
 //!
 //! # Performance
 //!
@@ -34,7 +34,7 @@
 //!     .with_readonly_path("/path/to/scan")
 //!     .with_timeout_secs(30);
 //!
-//! // Auto-select best backend (noop by default)
+//! // Auto-select best backend (Landlock on Linux)
 //! let executor = SandboxExecutor::auto();
 //!
 //! // Execute module in sandbox
@@ -48,7 +48,7 @@ pub mod infrastructure;
 pub use application::executor::{SandboxExecutor, SandboxedExecutionError};
 pub use application::selector::SandboxSelector;
 pub use domain::limits::{ResourceLimits, calculate_limits};
-pub use domain::policy::{SandboxPolicy, SandboxPolicyBuilder};
+pub use domain::policy::{SandboxPolicy, SandboxPolicyBuilder, SandboxPolicyProfile};
 pub use domain::traits::{SandboxBackend, SandboxError, SandboxResult, SandboxStats};
 
 // Re-export platform-specific backends
