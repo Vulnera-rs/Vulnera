@@ -33,16 +33,7 @@ impl VulneraRegistryAdapter {
 
     /// Convert our domain Ecosystem enum to the string format expected .
     fn ecosystem_to_string(ecosystem: &Ecosystem) -> &'static str {
-        match ecosystem {
-            Ecosystem::Npm => "npm",
-            Ecosystem::PyPI => "pypi",
-            Ecosystem::Maven => "maven",
-            Ecosystem::Cargo => "cargo",
-            Ecosystem::Go => "go",
-            Ecosystem::Packagist => "composer",
-            Ecosystem::RubyGems => "rubygems",
-            Ecosystem::NuGet => "nuget",
-        }
+        ecosystem.registry_name()
     }
 }
 
