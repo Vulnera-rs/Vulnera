@@ -24,7 +24,9 @@ pub fn get_regex(pattern: &str) -> Result<Regex, regex::Error> {
 
     let compiled = Regex::new(pattern)?;
     if let Ok(mut guard) = REGEX_CACHE.write() {
-        guard.entry(pattern.to_string()).or_insert_with(|| compiled.clone());
+        guard
+            .entry(pattern.to_string())
+            .or_insert_with(|| compiled.clone());
     }
 
     Ok(compiled)

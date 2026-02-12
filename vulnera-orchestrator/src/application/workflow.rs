@@ -71,10 +71,21 @@ impl JobWorkflow {
         callback_url: Option<String>,
         invocation_context: Option<JobInvocationContext>,
     ) -> Result<(), WorkflowError> {
-        job.transition(JobStatus::Queued, Some("Enqueued for background processing".into()))?;
+        job.transition(
+            JobStatus::Queued,
+            Some("Enqueued for background processing".into()),
+        )?;
 
-        self.persist(job, project, &[], None, None, callback_url, invocation_context)
-            .await?;
+        self.persist(
+            job,
+            project,
+            &[],
+            None,
+            None,
+            callback_url,
+            invocation_context,
+        )
+        .await?;
 
         info!(job_id = %job.job_id, "Job transitioned to Queued");
         Ok(())
@@ -90,8 +101,16 @@ impl JobWorkflow {
     ) -> Result<(), WorkflowError> {
         job.transition(JobStatus::Running, Some("Worker started execution".into()))?;
 
-        self.persist(job, project, &[], None, None, callback_url, invocation_context)
-            .await?;
+        self.persist(
+            job,
+            project,
+            &[],
+            None,
+            None,
+            callback_url,
+            invocation_context,
+        )
+        .await?;
 
         info!(job_id = %job.job_id, "Job transitioned to Running");
         Ok(())
@@ -145,8 +164,16 @@ impl JobWorkflow {
             Some(format!("Execution failed: {}", error)),
         )?;
 
-        self.persist(job, project, &[], None, None, callback_url, invocation_context)
-            .await?;
+        self.persist(
+            job,
+            project,
+            &[],
+            None,
+            None,
+            callback_url,
+            invocation_context,
+        )
+        .await?;
 
         warn!(job_id = %job.job_id, error, "Job transitioned to Failed");
         Ok(())
@@ -159,10 +186,7 @@ impl JobWorkflow {
         project: &Project,
         reason: &str,
     ) -> Result<(), WorkflowError> {
-        job.transition(
-            JobStatus::Cancelled,
-            Some(format!("Cancelled: {}", reason)),
-        )?;
+        job.transition(JobStatus::Cancelled, Some(format!("Cancelled: {}", reason)))?;
 
         self.persist(job, project, &[], None, None, None, None)
             .await?;

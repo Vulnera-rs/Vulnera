@@ -137,15 +137,27 @@ impl AccuracyReport {
 
 impl fmt::Display for AccuracyReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "╔══════════════════════════════════════════════════════════════════════╗")?;
-        writeln!(f, "║                    SAST Accuracy Report                             ║")?;
-        writeln!(f, "╠══════════════════════════════════════════════════════════════════════╣")?;
+        writeln!(
+            f,
+            "╔══════════════════════════════════════════════════════════════════════╗"
+        )?;
+        writeln!(
+            f,
+            "║                    SAST Accuracy Report                             ║"
+        )?;
+        writeln!(
+            f,
+            "╠══════════════════════════════════════════════════════════════════════╣"
+        )?;
         writeln!(
             f,
             "║ {:<12} | {:<24} | {:<24} ║",
             "Language", "TP  TN  FP  FN", "P     R     F1"
         )?;
-        writeln!(f, "╠══════════════════════════════════════════════════════════════════════╣")?;
+        writeln!(
+            f,
+            "╠══════════════════════════════════════════════════════════════════════╣"
+        )?;
 
         let mut languages: Vec<_> = self.per_language.keys().collect();
         languages.sort();
@@ -166,7 +178,10 @@ impl fmt::Display for AccuracyReport {
             )?;
         }
 
-        writeln!(f, "╠══════════════════════════════════════════════════════════════════════╣")?;
+        writeln!(
+            f,
+            "╠══════════════════════════════════════════════════════════════════════╣"
+        )?;
         let agg = self.aggregate();
         writeln!(
             f,
@@ -180,15 +195,18 @@ impl fmt::Display for AccuracyReport {
             agg.recall().unwrap_or(0.0),
             agg.f1().unwrap_or(0.0),
         )?;
-        writeln!(f, "╚══════════════════════════════════════════════════════════════════════╝")?;
+        writeln!(
+            f,
+            "╚══════════════════════════════════════════════════════════════════════╝"
+        )?;
 
         Ok(())
     }
 }
 
 #[cfg(test)]
-
 mod tests {
+    #[allow(unused_imports)]
     use super::LanguageMetrics;
 
     #[test]

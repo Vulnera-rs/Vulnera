@@ -383,11 +383,16 @@ fn load_taint_file(toml_str: &str, label: &str) -> BuiltinTaintFile {
 // Lazy-initialized taint pattern sets (parsed once, reused across calls)
 // =============================================================================
 
-static PYTHON_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(PYTHON_TAINT_TOML, "python"));
-static JAVASCRIPT_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript"));
-static GO_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(GO_TAINT_TOML, "go"));
-static RUST_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(RUST_TAINT_TOML, "rust"));
-static C_CPP_TAINT: LazyLock<BuiltinTaintFile> = LazyLock::new(|| load_taint_file(C_CPP_TAINT_TOML, "c_cpp"));
+static PYTHON_TAINT: LazyLock<BuiltinTaintFile> =
+    LazyLock::new(|| load_taint_file(PYTHON_TAINT_TOML, "python"));
+static JAVASCRIPT_TAINT: LazyLock<BuiltinTaintFile> =
+    LazyLock::new(|| load_taint_file(JAVASCRIPT_TAINT_TOML, "javascript"));
+static GO_TAINT: LazyLock<BuiltinTaintFile> =
+    LazyLock::new(|| load_taint_file(GO_TAINT_TOML, "go"));
+static RUST_TAINT: LazyLock<BuiltinTaintFile> =
+    LazyLock::new(|| load_taint_file(RUST_TAINT_TOML, "rust"));
+static C_CPP_TAINT: LazyLock<BuiltinTaintFile> =
+    LazyLock::new(|| load_taint_file(C_CPP_TAINT_TOML, "c_cpp"));
 
 // =============================================================================
 // TaintLoader trait + BuiltinTaintLoader
@@ -446,25 +451,55 @@ impl TaintLoader for BuiltinTaintLoader {
 }
 
 /// Get built-in source patterns for a language (convenience wrappers).
-pub fn python_source_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sources.clone() }
-pub fn python_sink_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sinks.clone() }
-pub fn python_sanitizer_queries() -> Vec<TaintPattern> { PYTHON_TAINT.sanitizers.clone() }
+pub fn python_source_queries() -> Vec<TaintPattern> {
+    PYTHON_TAINT.sources.clone()
+}
+pub fn python_sink_queries() -> Vec<TaintPattern> {
+    PYTHON_TAINT.sinks.clone()
+}
+pub fn python_sanitizer_queries() -> Vec<TaintPattern> {
+    PYTHON_TAINT.sanitizers.clone()
+}
 
-pub fn javascript_source_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sources.clone() }
-pub fn javascript_sink_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sinks.clone() }
-pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> { JAVASCRIPT_TAINT.sanitizers.clone() }
+pub fn javascript_source_queries() -> Vec<TaintPattern> {
+    JAVASCRIPT_TAINT.sources.clone()
+}
+pub fn javascript_sink_queries() -> Vec<TaintPattern> {
+    JAVASCRIPT_TAINT.sinks.clone()
+}
+pub fn javascript_sanitizer_queries() -> Vec<TaintPattern> {
+    JAVASCRIPT_TAINT.sanitizers.clone()
+}
 
-pub fn go_source_queries() -> Vec<TaintPattern> { GO_TAINT.sources.clone() }
-pub fn go_sink_queries() -> Vec<TaintPattern> { GO_TAINT.sinks.clone() }
-pub fn go_sanitizer_queries() -> Vec<TaintPattern> { GO_TAINT.sanitizers.clone() }
+pub fn go_source_queries() -> Vec<TaintPattern> {
+    GO_TAINT.sources.clone()
+}
+pub fn go_sink_queries() -> Vec<TaintPattern> {
+    GO_TAINT.sinks.clone()
+}
+pub fn go_sanitizer_queries() -> Vec<TaintPattern> {
+    GO_TAINT.sanitizers.clone()
+}
 
-pub fn rust_source_queries() -> Vec<TaintPattern> { RUST_TAINT.sources.clone() }
-pub fn rust_sink_queries() -> Vec<TaintPattern> { RUST_TAINT.sinks.clone() }
-pub fn rust_sanitizer_queries() -> Vec<TaintPattern> { RUST_TAINT.sanitizers.clone() }
+pub fn rust_source_queries() -> Vec<TaintPattern> {
+    RUST_TAINT.sources.clone()
+}
+pub fn rust_sink_queries() -> Vec<TaintPattern> {
+    RUST_TAINT.sinks.clone()
+}
+pub fn rust_sanitizer_queries() -> Vec<TaintPattern> {
+    RUST_TAINT.sanitizers.clone()
+}
 
-pub fn c_source_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sources.clone() }
-pub fn c_sink_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sinks.clone() }
-pub fn c_sanitizer_queries() -> Vec<TaintPattern> { C_CPP_TAINT.sanitizers.clone() }
+pub fn c_source_queries() -> Vec<TaintPattern> {
+    C_CPP_TAINT.sources.clone()
+}
+pub fn c_sink_queries() -> Vec<TaintPattern> {
+    C_CPP_TAINT.sinks.clone()
+}
+pub fn c_sanitizer_queries() -> Vec<TaintPattern> {
+    C_CPP_TAINT.sanitizers.clone()
+}
 
 // =============================================================================
 // Query Provider

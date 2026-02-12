@@ -49,12 +49,18 @@ pub struct FixtureResult {
 impl FixtureResult {
     /// Count of passed test cases.
     pub fn passed(&self) -> usize {
-        self.case_results.iter().filter(|r| r.failure.is_none()).count()
+        self.case_results
+            .iter()
+            .filter(|r| r.failure.is_none())
+            .count()
     }
 
     /// Count of failed test cases.
     pub fn failed(&self) -> usize {
-        self.case_results.iter().filter(|r| r.failure.is_some()).count()
+        self.case_results
+            .iter()
+            .filter(|r| r.failure.is_some())
+            .count()
     }
 
     /// Accumulate metrics into a `LanguageMetrics`.
@@ -169,8 +175,7 @@ fn classify_outcome(
             if unmatched.is_empty() {
                 (CaseOutcome::TruePositive, None)
             } else {
-                let found_ids: Vec<&str> =
-                    findings.iter().map(|f| f.rule_id.as_str()).collect();
+                let found_ids: Vec<&str> = findings.iter().map(|f| f.rule_id.as_str()).collect();
                 let msg = format!(
                     "MISS: '{}' — expected rule(s) [{}] but found {:?}",
                     test_case.name,
@@ -273,6 +278,7 @@ fn rule_id_matches(expected: &str, actual: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[allow(unused_imports)]
     use super::rule_id_matches;
 
     #[test]
@@ -292,7 +298,10 @@ mod tests {
         assert!(rule_id_matches("ssrf", "data-flow-ssrf")); // Data flow findings
         assert!(rule_id_matches("deserialization", "unsafe-deserialization"));
         assert!(rule_id_matches("ssti", "js-ssti"));
-        assert!(rule_id_matches("path_traversal", "data-flow-path_traversal"));
+        assert!(rule_id_matches(
+            "path_traversal",
+            "data-flow-path_traversal"
+        ));
     }
 
     #[test]

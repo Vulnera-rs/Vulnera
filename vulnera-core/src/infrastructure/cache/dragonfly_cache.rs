@@ -99,14 +99,16 @@ impl DragonflyCache {
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).map_err(|e| {
-            ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                format!("Compression error: {}", e),
-            )))
+            ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                "Compression error: {}",
+                e
+            ))))
         })?;
         encoder.finish().map_err(|e| {
-            ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                format!("Compression finish error: {}", e),
-            )))
+            ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                "Compression finish error: {}",
+                e
+            ))))
         })
     }
 
@@ -148,9 +150,10 @@ impl DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to LPUSH to key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis LPUSH error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis LPUSH error: {}",
+                    e
+                ))))
             })?;
 
         Ok(())
@@ -175,9 +178,10 @@ impl DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to BRPOP from key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis BRPOP error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis BRPOP error: {}",
+                    e
+                ))))
             })?;
 
         match result {
@@ -205,9 +209,10 @@ impl DragonflyCache {
                     });
                 }
                 error!("Failed to get cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis GET error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis GET error: {}",
+                    e
+                ))))
             })?;
 
         Ok(value)
@@ -231,9 +236,10 @@ impl DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to set cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis SET error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis SET error: {}",
+                    e
+                ))))
             })?;
 
         Ok(())
@@ -249,9 +255,10 @@ impl DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to delete cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis DEL error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis DEL error: {}",
+                    e
+                ))))
             })?;
 
         Ok(deleted > 0)
@@ -286,9 +293,10 @@ impl DragonflyCache {
                 .await
                 .map_err(|e| {
                     error!("Failed to SCAN for pattern {}: {}", pattern, e);
-                    ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                        format!("Redis SCAN error: {}", e),
-                    )))
+                    ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                        "Redis SCAN error: {}",
+                        e
+                    ))))
                 })?;
 
             // Delete found keys in batch
@@ -299,9 +307,10 @@ impl DragonflyCache {
                     .await
                     .map_err(|e| {
                         error!("Failed to DEL keys: {}", e);
-                        ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                            format!("Redis DEL error: {}", e),
-                        )))
+                        ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                            "Redis DEL error: {}",
+                            e
+                        ))))
                     })?;
 
                 total_deleted += deleted as usize;
@@ -348,9 +357,10 @@ impl CacheService for DragonflyCache {
                     });
                 }
                 error!("Failed to get cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis GET error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis GET error: {}",
+                    e
+                ))))
             })?;
 
         let value = match value {
@@ -384,9 +394,10 @@ impl CacheService for DragonflyCache {
                 .await
                 .map_err(|e| {
                     warn!("Failed to delete expired key {}: {}", key, e);
-                    ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                        format!("Redis DEL error: {}", e),
-                    )))
+                    ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                        "Redis DEL error: {}",
+                        e
+                    ))))
                 })?;
             debug!("Cache entry expired for key: {}", key);
             return Ok(None);
@@ -448,9 +459,10 @@ impl CacheService for DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to set cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis SET error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis SET error: {}",
+                    e
+                ))))
             })?;
 
         debug!(
@@ -469,9 +481,10 @@ impl CacheService for DragonflyCache {
             .await
             .map_err(|e| {
                 error!("Failed to invalidate cache key {}: {}", key, e);
-                ApplicationError::Cache(CacheError::Io(std::io::Error::other(
-                    format!("Redis DEL error: {}", e),
-                )))
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis DEL error: {}",
+                    e
+                ))))
             })?;
 
         if deleted > 0 {

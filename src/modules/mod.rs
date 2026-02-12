@@ -14,8 +14,8 @@ use vulnera_core::infrastructure::cache::CacheServiceImpl;
 use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_deps::DependencyAnalyzerModule;
 use vulnera_orchestrator::infrastructure::ModuleRegistry;
-use vulnera_sast::{AstCacheService, DragonflyAstCache, SastModule};
 use vulnera_sast::application::use_cases::AnalysisConfig;
+use vulnera_sast::{AstCacheService, DragonflyAstCache, SastModule};
 use vulnera_secrets::SecretDetectionModule;
 
 /// Collection of initialized analysis modules

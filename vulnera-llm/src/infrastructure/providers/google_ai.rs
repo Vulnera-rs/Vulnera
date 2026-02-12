@@ -480,13 +480,34 @@ mod tests {
 
     #[test]
     fn test_detect_mime_from_extension() {
-        assert_eq!(detect_image_mime_type("https://example.com/img.png"), "image/png");
-        assert_eq!(detect_image_mime_type("https://example.com/img.gif"), "image/gif");
-        assert_eq!(detect_image_mime_type("https://example.com/img.webp"), "image/webp");
-        assert_eq!(detect_image_mime_type("https://example.com/img.svg"), "image/svg+xml");
-        assert_eq!(detect_image_mime_type("https://example.com/img.jpg"), "image/jpeg");
-        assert_eq!(detect_image_mime_type("https://example.com/img.jpeg"), "image/jpeg");
-        assert_eq!(detect_image_mime_type("https://example.com/img.avif"), "image/avif");
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.png"),
+            "image/png"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.gif"),
+            "image/gif"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.webp"),
+            "image/webp"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.svg"),
+            "image/svg+xml"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.jpg"),
+            "image/jpeg"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.jpeg"),
+            "image/jpeg"
+        );
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img.avif"),
+            "image/avif"
+        );
     }
 
     #[test]
@@ -511,7 +532,10 @@ mod tests {
 
     #[test]
     fn test_detect_mime_unknown_defaults_to_jpeg() {
-        assert_eq!(detect_image_mime_type("https://example.com/img"), "image/jpeg");
+        assert_eq!(
+            detect_image_mime_type("https://example.com/img"),
+            "image/jpeg"
+        );
         assert_eq!(detect_image_mime_type("binary_data_blob"), "image/jpeg");
     }
 }

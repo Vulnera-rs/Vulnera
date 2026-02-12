@@ -82,8 +82,8 @@ impl Default for ModuleRegistry {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use vulnera_core::domain::module::{ModuleConfig, ModuleExecutionError, ModuleResult};
     use vulnera_core::domain::module::ModuleResultMetadata;
+    use vulnera_core::domain::module::{ModuleConfig, ModuleExecutionError, ModuleResult};
 
     /// Minimal stub for testing registry behavior
     struct StubModule(ModuleType);
@@ -112,9 +112,11 @@ mod tests {
         let mut registry = ModuleRegistry::new();
         registry.register(Arc::new(StubModule(ModuleType::SAST)));
 
-        assert!(registry
-            .get_module_entitled(&ModuleType::SAST, false)
-            .is_some());
+        assert!(
+            registry
+                .get_module_entitled(&ModuleType::SAST, false)
+                .is_some()
+        );
     }
 
     #[test]
@@ -122,9 +124,11 @@ mod tests {
         let mut registry = ModuleRegistry::new();
         registry.register(Arc::new(StubModule(ModuleType::DAST)));
 
-        assert!(registry
-            .get_module_entitled(&ModuleType::DAST, false)
-            .is_none());
+        assert!(
+            registry
+                .get_module_entitled(&ModuleType::DAST, false)
+                .is_none()
+        );
     }
 
     #[test]
@@ -132,9 +136,11 @@ mod tests {
         let mut registry = ModuleRegistry::new();
         registry.register(Arc::new(StubModule(ModuleType::DAST)));
 
-        assert!(registry
-            .get_module_entitled(&ModuleType::DAST, true)
-            .is_some());
+        assert!(
+            registry
+                .get_module_entitled(&ModuleType::DAST, true)
+                .is_some()
+        );
     }
 
     #[test]

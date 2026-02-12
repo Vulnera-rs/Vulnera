@@ -321,7 +321,12 @@ async fn test_c_strcpy_detected() {
 #[tokio::test]
 async fn test_c_safe_code_no_findings() {
     let dir = tempfile::tempdir().unwrap();
-    create_source_file(&dir, "safe.c", "int add(int a, int b) {\n    return a + b;\n}\n").await;
+    create_source_file(
+        &dir,
+        "safe.c",
+        "int add(int a, int b) {\n    return a + b;\n}\n",
+    )
+    .await;
     let result = scan_dir(&dir).await;
     assert!(
         result.findings.is_empty(),
@@ -411,8 +416,5 @@ async fn test_binary_file_skipped() {
     let bin_path = dir.path().join("binary.dat");
     std::fs::write(&bin_path, &[0u8, 1, 2, 3, 255, 254]).unwrap();
     let result = scan_dir(&dir).await;
-    assert!(
-        result.findings.is_empty(),
-        "Binary files should be skipped"
-    );
+    assert!(result.findings.is_empty(), "Binary files should be skipped");
 }

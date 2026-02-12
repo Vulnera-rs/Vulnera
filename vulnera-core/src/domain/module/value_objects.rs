@@ -60,10 +60,9 @@ impl ModuleType {
     /// Enterprise modules require a valid license key.
     pub fn tier(&self) -> ModuleTier {
         match self {
-            Self::DependencyAnalyzer
-            | Self::SAST
-            | Self::SecretDetection
-            | Self::ApiSecurity => ModuleTier::Community,
+            Self::DependencyAnalyzer | Self::SAST | Self::SecretDetection | Self::ApiSecurity => {
+                ModuleTier::Community
+            }
 
             Self::MaliciousPackageDetection
             | Self::LicenseCompliance

@@ -156,8 +156,9 @@ pub struct SarifReport {
 impl Default for SarifReport {
     fn default() -> Self {
         Self {
-            schema: "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json"
-                .to_string(),
+            schema:
+                "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json"
+                    .to_string(),
             version: "2.1.0".to_string(),
             runs: vec![],
         }

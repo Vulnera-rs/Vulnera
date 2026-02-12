@@ -203,12 +203,16 @@ async fn process_job(
     }
 
     // ── Workflow: Pending → Running ──────────────────────────────────
-    if let Err(e) = ctx.workflow.start_job(
-        &mut payload.job,
-        &payload.project,
-        payload.callback_url.clone(),
-        payload.invocation_context.clone(),
-    ).await {
+    if let Err(e) = ctx
+        .workflow
+        .start_job(
+            &mut payload.job,
+            &payload.project,
+            payload.callback_url.clone(),
+            payload.invocation_context.clone(),
+        )
+        .await
+    {
         error!(job_id = %job_id, error = %e, "Failed to transition job to Running");
         return Err(JobProcessingError::Workflow(e));
     }
@@ -225,14 +229,18 @@ async fn process_job(
                 .execute(&payload.job, module_results.clone());
 
             // ── Workflow: Running → Completed ────────────────────────
-            if let Err(e) = ctx.workflow.complete_job(
-                &mut payload.job,
-                &payload.project,
-                &module_results,
-                &report,
-                payload.callback_url.clone(),
-                payload.invocation_context.clone(),
-            ).await {
+            if let Err(e) = ctx
+                .workflow
+                .complete_job(
+                    &mut payload.job,
+                    &payload.project,
+                    &module_results,
+                    &report,
+                    payload.callback_url.clone(),
+                    payload.invocation_context.clone(),
+                )
+                .await
+            {
                 error!(job_id = %job_id, error = %e, "Failed to transition job to Completed");
                 return Err(JobProcessingError::Workflow(e));
             }
@@ -280,13 +288,17 @@ async fn process_job(
         }
         Err(err) => {
             // ── Workflow: Running → Failed ───────────────────────────
-            if let Err(e) = ctx.workflow.fail_job(
-                &mut payload.job,
-                &payload.project,
-                &err.to_string(),
-                payload.callback_url.clone(),
-                payload.invocation_context.clone(),
-            ).await {
+            if let Err(e) = ctx
+                .workflow
+                .fail_job(
+                    &mut payload.job,
+                    &payload.project,
+                    &err.to_string(),
+                    payload.callback_url.clone(),
+                    payload.invocation_context.clone(),
+                )
+                .await
+            {
                 error!(job_id = %job_id, error = %e, "Failed to transition job to Failed");
                 return Err(JobProcessingError::Workflow(e));
             }
