@@ -333,6 +333,51 @@ impl DragonflyCache {
         );
         Ok(total_deleted)
     }
+
+    /// Return the total number of keys in the selected database.
+    pub async fn db_size(&self) -> Result<u64, ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+        let size: u64 = redis::cmd("DBSIZE")
+            .query_async::<u64>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to query DBSIZE: {}", e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis DBSIZE error: {}",
+                    e
+                ))))
+            })?;
+        Ok(size)
+    }
+
+    /// Return parsed Redis INFO STATS metrics as key/value pairs.
+    pub async fn info_stats(&self) -> Result<std::collections::HashMap<String, String>, ApplicationError> {
+        let mut conn = (*self.connection_manager).clone();
+        let raw: String = redis::cmd("INFO")
+            .arg("STATS")
+            .query_async::<String>(&mut conn)
+            .await
+            .map_err(|e| {
+                error!("Failed to query INFO STATS: {}", e);
+                ApplicationError::Cache(CacheError::Io(std::io::Error::other(format!(
+                    "Redis INFO STATS error: {}",
+                    e
+                ))))
+            })?;
+
+        let mut metrics = std::collections::HashMap::new();
+        for line in raw.lines() {
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some((key, value)) = line.split_once(':') {
+                metrics.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+
+        Ok(metrics)
+    }
 }
 
 #[async_trait]
