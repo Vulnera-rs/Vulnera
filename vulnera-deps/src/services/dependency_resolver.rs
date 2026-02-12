@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
+use tracing::warn;
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::vulnerability::entities::Package;
 use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
@@ -78,8 +79,19 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
             }
 
             // Create constraint from requirement string
-            let constraint =
-                VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+            let constraint = match VersionConstraint::parse(&dep.requirement) {
+                Ok(constraint) => constraint,
+                Err(error) => {
+                    warn!(
+                        requirement = %dep.requirement,
+                        from = %dep.from.identifier(),
+                        to = %dep.to.identifier(),
+                        error = %error,
+                        "Invalid dependency constraint; defaulting to wildcard"
+                    );
+                    VersionConstraint::Any
+                }
+            };
 
             let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
             graph.add_edge(edge);
@@ -180,8 +192,19 @@ pub async fn build_graph_from_lockfile(
         let from_id = PackageId::from_package(&dep.from);
         let to_id = PackageId::from_package(&dep.to);
 
-        let constraint =
-            VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+        let constraint = match VersionConstraint::parse(&dep.requirement) {
+            Ok(constraint) => constraint,
+            Err(error) => {
+                warn!(
+                    requirement = %dep.requirement,
+                    from = %dep.from.identifier(),
+                    to = %dep.to.identifier(),
+                    error = %error,
+                    "Invalid lockfile dependency constraint; defaulting to wildcard"
+                );
+                VersionConstraint::Any
+            }
+        };
 
         let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
         graph.add_edge(edge);
@@ -228,8 +251,19 @@ pub async fn build_graph_from_manifest(
         let from_id = PackageId::from_package(&dep.from);
         let to_id = PackageId::from_package(&dep.to);
 
-        let constraint =
-            VersionConstraint::parse(&dep.requirement).unwrap_or(VersionConstraint::Any);
+        let constraint = match VersionConstraint::parse(&dep.requirement) {
+            Ok(constraint) => constraint,
+            Err(error) => {
+                warn!(
+                    requirement = %dep.requirement,
+                    from = %dep.from.identifier(),
+                    to = %dep.to.identifier(),
+                    error = %error,
+                    "Invalid manifest dependency constraint; defaulting to wildcard"
+                );
+                VersionConstraint::Any
+            }
+        };
 
         let edge = DependencyEdge::new(from_id, to_id, constraint, dep.is_transitive);
         graph.add_edge(edge);

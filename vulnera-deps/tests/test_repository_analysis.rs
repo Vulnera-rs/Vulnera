@@ -357,3 +357,80 @@ async fn test_analyze_repository_max_files_truncation() {
     assert_eq!(result.total_files_scanned, 3);
     assert!(result.truncated);
 }
+
+#[tokio::test]
+async fn test_analyze_repository_excludes_lockfiles_when_disabled() {
+    let mock_client = MockRepositorySourceClient::new();
+    let mock_vuln_repo = Arc::new(MockVulnerabilityRepository);
+    let config = Arc::new(Config::default());
+    let parser_factory = Arc::new(ParserFactory::default());
+
+    let owner = "test-owner";
+    let repo = "test-repo";
+
+    mock_client.add_repo(
+        owner,
+        repo,
+        vec![
+            RepositoryFile {
+                path: "Cargo.toml".to_string(),
+                size: 100,
+                is_text: true,
+            },
+            RepositoryFile {
+                path: "Cargo.lock".to_string(),
+                size: 120,
+                is_text: true,
+            },
+        ],
+    );
+
+    mock_client.add_content(
+        "Cargo.toml",
+        r#"
+        [package]
+        name = "test-pkg"
+        version = "0.1.0"
+
+        [dependencies]
+        serde = "1.0"
+    "#,
+    );
+    mock_client.add_content(
+        "Cargo.lock",
+        r#"
+        version = 3
+
+        [[package]]
+        name = "serde"
+        version = "1.0.228"
+    "#,
+    );
+
+    let service = RepositoryAnalysisServiceImpl::new(
+        Arc::new(mock_client),
+        mock_vuln_repo,
+        parser_factory,
+        config,
+    );
+
+    let input = RepositoryAnalysisInput {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        requested_ref: None,
+        include_paths: None,
+        exclude_paths: None,
+        max_files: 100,
+        include_lockfiles: false,
+        return_packages: true,
+    };
+
+    let result = service
+        .analyze_repository(input)
+        .await
+        .expect("Analysis failed");
+
+    assert_eq!(result.analyzed_files, 1);
+    assert_eq!(result.files.len(), 1);
+    assert_eq!(result.files[0].path, "Cargo.toml");
+}

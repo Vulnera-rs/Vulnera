@@ -220,23 +220,162 @@ impl VersionConstraint {
 
     /// Intersect two constraints (find versions that satisfy both)
     pub fn intersect(&self, other: &Self) -> Option<Self> {
-        // Simplified intersection - in practice, this could be more complex
-        // For now, return the more restrictive constraint
-        match (self, other) {
-            (VersionConstraint::Any, c) | (c, VersionConstraint::Any) => Some(c.clone()),
-            (VersionConstraint::Exact(v1), VersionConstraint::Exact(v2)) => {
-                if v1 == v2 {
-                    Some(VersionConstraint::Exact(v1.clone()))
+        let lower = match (self.lower_bound(), other.lower_bound()) {
+            (None, None) => None,
+            (Some(bound), None) | (None, Some(bound)) => Some(bound),
+            (Some(left), Some(right)) => Some(max_lower_bound(left, right)),
+        };
+
+        let upper = match (self.upper_bound(), other.upper_bound()) {
+            (None, None) => None,
+            (Some(bound), None) | (None, Some(bound)) => Some(bound),
+            (Some(left), Some(right)) => Some(min_upper_bound(left, right)),
+        };
+
+        match (lower, upper) {
+            (Some(low), Some(high)) => {
+                if low.version > high.version {
+                    return None;
+                }
+
+                if low.version == high.version {
+                    if low.inclusive && high.inclusive {
+                        return Some(VersionConstraint::Exact(low.version));
+                    }
+                    return None;
+                }
+
+                Some(VersionConstraint::Range {
+                    min: low.version,
+                    max: high.version,
+                    min_inclusive: low.inclusive,
+                    max_inclusive: high.inclusive,
+                })
+            }
+            (Some(low), None) => {
+                if low.inclusive {
+                    Some(VersionConstraint::GreaterOrEqual(low.version))
                 } else {
-                    None
+                    Some(VersionConstraint::GreaterThan(low.version))
                 }
             }
-            _ => {
-                // For complex cases, return None (no intersection)
-                // A full implementation would compute the actual intersection
-                None
+            (None, Some(high)) => {
+                if high.inclusive {
+                    Some(VersionConstraint::LessOrEqual(high.version))
+                } else {
+                    Some(VersionConstraint::LessThan(high.version))
+                }
             }
+            (None, None) => Some(VersionConstraint::Any),
         }
+    }
+
+    fn lower_bound(&self) -> Option<VersionBound> {
+        match self {
+            VersionConstraint::Any => None,
+            VersionConstraint::Exact(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::Caret(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::Tilde(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::GreaterOrEqual(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::GreaterThan(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: false,
+            }),
+            VersionConstraint::LessOrEqual(_) | VersionConstraint::LessThan(_) => None,
+            VersionConstraint::Range {
+                min, min_inclusive, ..
+            } => Some(VersionBound {
+                version: min.clone(),
+                inclusive: *min_inclusive,
+            }),
+        }
+    }
+
+    fn upper_bound(&self) -> Option<VersionBound> {
+        match self {
+            VersionConstraint::Any => None,
+            VersionConstraint::Exact(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::Caret(v) => Some(VersionBound {
+                version: caret_upper_bound(v),
+                inclusive: false,
+            }),
+            VersionConstraint::Tilde(v) => Some(VersionBound {
+                version: Version::new(v.0.major, v.0.minor + 1, 0),
+                inclusive: false,
+            }),
+            VersionConstraint::GreaterOrEqual(_) | VersionConstraint::GreaterThan(_) => None,
+            VersionConstraint::LessOrEqual(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: true,
+            }),
+            VersionConstraint::LessThan(v) => Some(VersionBound {
+                version: v.clone(),
+                inclusive: false,
+            }),
+            VersionConstraint::Range {
+                max, max_inclusive, ..
+            } => Some(VersionBound {
+                version: max.clone(),
+                inclusive: *max_inclusive,
+            }),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct VersionBound {
+    version: Version,
+    inclusive: bool,
+}
+
+fn max_lower_bound(left: VersionBound, right: VersionBound) -> VersionBound {
+    if left.version > right.version {
+        left
+    } else if right.version > left.version {
+        right
+    } else {
+        VersionBound {
+            version: left.version,
+            inclusive: left.inclusive && right.inclusive,
+        }
+    }
+}
+
+fn min_upper_bound(left: VersionBound, right: VersionBound) -> VersionBound {
+    if left.version < right.version {
+        left
+    } else if right.version < left.version {
+        right
+    } else {
+        VersionBound {
+            version: left.version,
+            inclusive: left.inclusive && right.inclusive,
+        }
+    }
+}
+
+fn caret_upper_bound(version: &Version) -> Version {
+    if version.0.major > 0 {
+        Version::new(version.0.major + 1, 0, 0)
+    } else if version.0.minor > 0 {
+        Version::new(0, version.0.minor + 1, 0)
+    } else {
+        Version::new(0, 0, version.0.patch + 1)
     }
 }
 
@@ -309,5 +448,32 @@ mod tests {
         assert!(matches!(c, VersionConstraint::Any));
         assert!(c.satisfies(&Version::parse("1.0.0").unwrap()));
         assert!(c.satisfies(&Version::parse("999.999.999").unwrap()));
+    }
+
+    #[test]
+    fn test_intersect_lower_and_upper_bounds() {
+        let ge = VersionConstraint::parse(">=1.2.0").unwrap();
+        let lt = VersionConstraint::parse("<2.0.0").unwrap();
+
+        let intersection = ge.intersect(&lt).unwrap();
+        assert!(intersection.satisfies(&Version::parse("1.5.0").unwrap()));
+        assert!(!intersection.satisfies(&Version::parse("2.0.0").unwrap()));
+        assert!(!intersection.satisfies(&Version::parse("1.1.9").unwrap()));
+    }
+
+    #[test]
+    fn test_intersect_exact_conflict() {
+        let first = VersionConstraint::parse("==1.2.3").unwrap();
+        let second = VersionConstraint::parse("==1.2.4").unwrap();
+        assert!(first.intersect(&second).is_none());
+    }
+
+    #[test]
+    fn test_intersect_exact_in_range() {
+        let exact = VersionConstraint::parse("==1.2.3").unwrap();
+        let range = VersionConstraint::parse(">=1.0.0,<2.0.0").unwrap();
+
+        let intersection = exact.intersect(&range).unwrap();
+        assert_eq!(intersection, VersionConstraint::Exact(Version::parse("1.2.3").unwrap()));
     }
 }

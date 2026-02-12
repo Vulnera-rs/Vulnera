@@ -41,18 +41,26 @@ impl BacktrackingResolver {
         // This is a simplified version - a full implementation would use proper backtracking
         for (package_id, node) in &graph.nodes {
             if let Some(versions) = available_versions.get(package_id) {
+                let incoming_constraints: Vec<VersionConstraint> = graph
+                    .edges
+                    .iter()
+                    .filter(|edge| edge.to == *package_id)
+                    .map(|edge| edge.constraint.clone())
+                    .collect();
+
                 // Find a version that satisfies all constraints
                 if let Some(version) = Self::find_compatible_version(
                     package_id,
                     &node.direct_dependencies,
                     versions,
                     graph,
+                    &incoming_constraints,
                 ) {
                     resolved.insert(package_id.clone(), version);
                 } else {
                     conflicts.push(ResolutionConflict {
                         package: package_id.clone(),
-                        conflicting_constraints: Vec::new(), // Would be populated in full impl
+                        conflicting_constraints: incoming_constraints,
                         message: format!("No compatible version found for {}", package_id),
                     });
                 }
@@ -78,10 +86,20 @@ impl BacktrackingResolver {
         _dependencies: &[PackageId],
         versions: &[Version],
         _graph: &DependencyGraph,
+        constraints: &[VersionConstraint],
     ) -> Option<Version> {
-        // Simplified: return the latest version
-        // A full implementation would check constraints
-        versions.last().cloned()
+        let combined_constraint = constraints
+            .iter()
+            .cloned()
+            .try_fold(VersionConstraint::Any, |acc, current| {
+                acc.intersect(&current)
+            })?;
+
+        versions
+            .iter()
+            .filter(|version| combined_constraint.satisfies(version))
+            .max()
+            .cloned()
     }
 }
 
@@ -145,6 +163,18 @@ impl LexicographicOptimizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{DependencyEdge, DependencyGraph, PackageNode};
+    use vulnera_core::domain::vulnerability::entities::Package;
+    use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
+
+    fn test_package(name: &str, version: &str) -> Package {
+        Package::new(
+            name.to_string(),
+            Version::parse(version).unwrap(),
+            Ecosystem::Npm,
+        )
+        .unwrap()
+    }
 
     #[test]
     fn test_lexicographic_optimizer() {
@@ -169,5 +199,93 @@ mod tests {
 
         let selected = LexicographicOptimizer::select_version(Some(&current), &candidates);
         assert_eq!(selected, Some(Version::parse("1.3.0").unwrap())); // Should prefer minor
+    }
+
+    #[test]
+    fn test_backtracking_resolver_respects_intersection() {
+        let mut graph = DependencyGraph::new();
+
+        let root = test_package("root", "1.0.0");
+        let dep = test_package("dep", "1.0.0");
+
+        let root_id = crate::domain::PackageId::from_package(&root);
+        let dep_id = crate::domain::PackageId::from_package(&dep);
+
+        graph.add_node(PackageNode::new(root));
+        graph.add_node(PackageNode::new(dep));
+
+        graph.add_edge(DependencyEdge::new(
+            root_id.clone(),
+            dep_id.clone(),
+            VersionConstraint::parse(">=1.2.0").unwrap(),
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            root_id.clone(),
+            dep_id.clone(),
+            VersionConstraint::parse("<2.0.0").unwrap(),
+            false,
+        ));
+
+        let mut available_versions = HashMap::new();
+        available_versions.insert(root_id.clone(), vec![Version::parse("1.0.0").unwrap()]);
+        available_versions.insert(
+            dep_id.clone(),
+            vec![
+                Version::parse("1.1.0").unwrap(),
+                Version::parse("1.5.0").unwrap(),
+                Version::parse("2.0.0").unwrap(),
+            ],
+        );
+
+        let result = BacktrackingResolver::resolve(&graph, &available_versions);
+        assert!(result.conflicts.is_empty());
+        assert_eq!(
+            result.resolved.get(&dep_id),
+            Some(&Version::parse("1.5.0").unwrap())
+        );
+    }
+
+    #[test]
+    fn test_backtracking_resolver_reports_conflicts() {
+        let mut graph = DependencyGraph::new();
+
+        let root = test_package("root", "1.0.0");
+        let dep = test_package("dep", "1.0.0");
+
+        let root_id = crate::domain::PackageId::from_package(&root);
+        let dep_id = crate::domain::PackageId::from_package(&dep);
+
+        graph.add_node(PackageNode::new(root));
+        graph.add_node(PackageNode::new(dep));
+
+        graph.add_edge(DependencyEdge::new(
+            root_id.clone(),
+            dep_id.clone(),
+            VersionConstraint::parse(">=2.0.0").unwrap(),
+            false,
+        ));
+        graph.add_edge(DependencyEdge::new(
+            root_id.clone(),
+            dep_id.clone(),
+            VersionConstraint::parse("<2.0.0").unwrap(),
+            false,
+        ));
+
+        let mut available_versions = HashMap::new();
+        available_versions.insert(root_id.clone(), vec![Version::parse("1.0.0").unwrap()]);
+        available_versions.insert(
+            dep_id.clone(),
+            vec![Version::parse("1.5.0").unwrap(), Version::parse("2.1.0").unwrap()],
+        );
+
+        let result = BacktrackingResolver::resolve(&graph, &available_versions);
+        let conflict = result
+            .conflicts
+            .iter()
+            .find(|conflict| conflict.package == dep_id)
+            .expect("expected conflict for dep package");
+
+        assert_eq!(conflict.conflicting_constraints.len(), 2);
     }
 }
