@@ -37,69 +37,233 @@ impl BacktrackingResolver {
         let mut resolved = HashMap::new();
         let mut conflicts = Vec::new();
 
-        // Simple resolution: try to satisfy all constraints
-        // This is a simplified version - a full implementation would use proper backtracking
-        for (package_id, node) in &graph.nodes {
-            if let Some(versions) = available_versions.get(package_id) {
-                let incoming_constraints: Vec<VersionConstraint> = graph
-                    .edges
-                    .iter()
-                    .filter(|edge| edge.to == *package_id)
-                    .map(|edge| edge.constraint.clone())
-                    .collect();
+        let constraints_by_package = Self::constraints_by_package(graph);
 
-                // Find a version that satisfies all constraints
-                if let Some(version) = Self::find_compatible_version(
-                    package_id,
-                    &node.direct_dependencies,
-                    versions,
-                    graph,
-                    &incoming_constraints,
-                ) {
-                    resolved.insert(package_id.clone(), version);
-                } else {
-                    conflicts.push(ResolutionConflict {
-                        package: package_id.clone(),
-                        conflicting_constraints: incoming_constraints,
-                        message: format!("No compatible version found for {}", package_id),
-                    });
-                }
-            } else {
-                // No versions available for this package
+        let mut resolvable_packages = Vec::new();
+        for package_id in graph.nodes.keys() {
+            let constraints = constraints_by_package
+                .get(package_id)
+                .cloned()
+                .unwrap_or_default();
+
+            let Some(versions) = available_versions.get(package_id) else {
                 conflicts.push(ResolutionConflict {
                     package: package_id.clone(),
-                    conflicting_constraints: Vec::new(),
+                    conflicting_constraints: constraints,
                     message: format!("No versions available for {}", package_id),
                 });
+                continue;
+            };
+
+            let candidates = Self::compatible_versions(versions, &constraints);
+            if candidates.is_empty() {
+                conflicts.push(ResolutionConflict {
+                    package: package_id.clone(),
+                    conflicting_constraints: constraints,
+                    message: format!("No compatible version found for {}", package_id),
+                });
+                continue;
+            }
+
+            resolvable_packages.push(package_id.clone());
+        }
+
+        let search_order = Self::ordered_packages(
+            &resolvable_packages,
+            available_versions,
+            &constraints_by_package,
+            graph,
+        );
+
+        let solved = Self::backtrack(
+            &search_order,
+            0,
+            available_versions,
+            &constraints_by_package,
+            &mut resolved,
+            &mut conflicts,
+        );
+
+        if !solved {
+            // Keep any partial assignments found, and return collected conflicts.
+            // Conflicts are already captured during the search.
+        }
+
+        ResolutionResult { resolved, conflicts }
+    }
+
+    fn constraints_by_package(graph: &DependencyGraph) -> HashMap<PackageId, Vec<VersionConstraint>> {
+        let mut constraints: HashMap<PackageId, Vec<VersionConstraint>> = HashMap::new();
+        for edge in &graph.edges {
+            constraints
+                .entry(edge.to.clone())
+                .or_default()
+                .push(edge.constraint.clone());
+        }
+        constraints
+    }
+
+    fn ordered_packages(
+        packages: &[PackageId],
+        available_versions: &HashMap<PackageId, Vec<Version>>,
+        constraints_by_package: &HashMap<PackageId, Vec<VersionConstraint>>,
+        graph: &DependencyGraph,
+    ) -> Vec<PackageId> {
+        let mut ordered = packages.to_vec();
+        ordered.sort_by(|left, right| {
+            let left_constraints = constraints_by_package
+                .get(left)
+                .cloned()
+                .unwrap_or_default();
+            let right_constraints = constraints_by_package
+                .get(right)
+                .cloned()
+                .unwrap_or_default();
+
+            let left_candidates = available_versions
+                .get(left)
+                .map(|v| Self::compatible_versions(v, &left_constraints).len())
+                .unwrap_or(0);
+            let right_candidates = available_versions
+                .get(right)
+                .map(|v| Self::compatible_versions(v, &right_constraints).len())
+                .unwrap_or(0);
+
+            left_candidates
+                .cmp(&right_candidates)
+                .then_with(|| {
+                    let left_degree = graph
+                        .nodes
+                        .get(left)
+                        .map(|node| node.dependents.len() + node.direct_dependencies.len())
+                        .unwrap_or(0);
+                    let right_degree = graph
+                        .nodes
+                        .get(right)
+                        .map(|node| node.dependents.len() + node.direct_dependencies.len())
+                        .unwrap_or(0);
+
+                    right_degree.cmp(&left_degree)
+                })
+                .then_with(|| left.to_string().cmp(&right.to_string()))
+        });
+        ordered
+    }
+
+    fn backtrack(
+        order: &[PackageId],
+        index: usize,
+        available_versions: &HashMap<PackageId, Vec<Version>>,
+        constraints_by_package: &HashMap<PackageId, Vec<VersionConstraint>>,
+        assignments: &mut HashMap<PackageId, Version>,
+        conflicts: &mut Vec<ResolutionConflict>,
+    ) -> bool {
+        if index >= order.len() {
+            return true;
+        }
+
+        let package_id = &order[index];
+        let constraints = constraints_by_package
+            .get(package_id)
+            .cloned()
+            .unwrap_or_default();
+
+        let Some(versions) = available_versions.get(package_id) else {
+            conflicts.push(ResolutionConflict {
+                package: package_id.clone(),
+                conflicting_constraints: constraints,
+                message: format!("No versions available for {}", package_id),
+            });
+            return false;
+        };
+
+        let candidates = Self::compatible_versions(versions, &constraints);
+        if candidates.is_empty() {
+            conflicts.push(ResolutionConflict {
+                package: package_id.clone(),
+                conflicting_constraints: constraints,
+                message: format!("No compatible version found for {}", package_id),
+            });
+            return false;
+        }
+
+        for candidate in candidates {
+            assignments.insert(package_id.clone(), candidate.clone());
+
+            if Self::forward_check(order, index + 1, available_versions, constraints_by_package) {
+                if Self::backtrack(
+                    order,
+                    index + 1,
+                    available_versions,
+                    constraints_by_package,
+                    assignments,
+                    conflicts,
+                ) {
+                    return true;
+                }
+            }
+
+            assignments.remove(package_id);
+        }
+
+        conflicts.push(ResolutionConflict {
+            package: package_id.clone(),
+            conflicting_constraints: constraints,
+            message: format!(
+                "Backtracking exhausted all candidate versions for {}",
+                package_id
+            ),
+        });
+        false
+    }
+
+    fn forward_check(
+        order: &[PackageId],
+        next_index: usize,
+        available_versions: &HashMap<PackageId, Vec<Version>>,
+        constraints_by_package: &HashMap<PackageId, Vec<VersionConstraint>>,
+    ) -> bool {
+        for package_id in &order[next_index..] {
+            let constraints = constraints_by_package
+                .get(package_id)
+                .cloned()
+                .unwrap_or_default();
+
+            let Some(versions) = available_versions.get(package_id) else {
+                return false;
+            };
+
+            if Self::compatible_versions(versions, &constraints).is_empty() {
+                return false;
             }
         }
 
-        ResolutionResult {
-            resolved,
-            conflicts,
-        }
+        true
     }
 
-    /// Find a compatible version for a package
-    fn find_compatible_version(
-        _package_id: &PackageId,
-        _dependencies: &[PackageId],
+    fn compatible_versions(
         versions: &[Version],
-        _graph: &DependencyGraph,
         constraints: &[VersionConstraint],
-    ) -> Option<Version> {
+    ) -> Vec<Version> {
         let combined_constraint = constraints
             .iter()
             .cloned()
             .try_fold(VersionConstraint::Any, |acc, current| {
                 acc.intersect(&current)
-            })?;
+            });
 
-        versions
+        let Some(combined_constraint) = combined_constraint else {
+            return Vec::new();
+        };
+
+        let mut candidates: Vec<Version> = versions
             .iter()
             .filter(|version| combined_constraint.satisfies(version))
-            .max()
             .cloned()
+            .collect();
+        candidates.sort();
+        candidates.reverse();
+        candidates
     }
 }
 
