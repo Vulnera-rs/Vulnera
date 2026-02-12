@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
@@ -175,26 +176,10 @@ impl AnalysisModule for DependencyAnalyzerModule {
             }
         };
 
-        let ecosystem = match ecosystem_str.to_lowercase().as_str() {
-            "npm" => vulnera_core::domain::vulnerability::value_objects::Ecosystem::Npm,
-            "pypi" | "pip" | "python" => {
-                vulnera_core::domain::vulnerability::value_objects::Ecosystem::PyPI
-            }
-            "maven" => vulnera_core::domain::vulnerability::value_objects::Ecosystem::Maven,
-            "cargo" | "rust" => {
-                vulnera_core::domain::vulnerability::value_objects::Ecosystem::Cargo
-            }
-            "go" => vulnera_core::domain::vulnerability::value_objects::Ecosystem::Go,
-            "packagist" | "composer" | "php" => {
-                vulnera_core::domain::vulnerability::value_objects::Ecosystem::Packagist
-            }
-            _ => {
-                return Err(ModuleExecutionError::InvalidConfig(format!(
-                    "Invalid ecosystem: {}",
-                    ecosystem_str
-                )));
-            }
-        };
+        let ecosystem = vulnera_core::domain::vulnerability::value_objects::Ecosystem::from_str(
+            ecosystem_str,
+        )
+        .map_err(ModuleExecutionError::InvalidConfig)?;
 
         let filename = config.config.get("filename").and_then(|v| v.as_str());
 
@@ -207,34 +192,13 @@ impl AnalysisModule for DependencyAnalyzerModule {
         let (analysis_report, _dependency_graph) = match analysis_result {
             Ok(result) => result,
             Err(e) => {
-                // Analysis failed but we return a result with a warning instead of failing the module
-                let duration = start_time.elapsed();
                 let error_message = e.to_string();
                 tracing::warn!(
                     error = %error_message,
                     ecosystem = %ecosystem_str,
-                    "Dependency analysis failed, returning partial result"
+                    "Dependency analysis failed"
                 );
-                return Ok(ModuleResult {
-                    job_id: config.job_id,
-                    module_type: ModuleType::DependencyAnalyzer,
-                    findings: Vec::new(),
-                    metadata: ModuleResultMetadata {
-                        files_scanned: 0,
-                        duration_ms: duration.as_millis() as u64,
-                        additional_info: {
-                            let mut info = std::collections::HashMap::new();
-                            info.insert(
-                                "skip_reason".to_string(),
-                                "Dependency manifest could not be parsed".to_string(),
-                            );
-                            info.insert("analysis_error".to_string(), error_message.clone());
-                            info.insert("ecosystem".to_string(), ecosystem_str.to_string());
-                            info
-                        },
-                    },
-                    error: None,
-                });
+                return Err(ModuleExecutionError::ExecutionFailed(error_message));
             }
         };
 
