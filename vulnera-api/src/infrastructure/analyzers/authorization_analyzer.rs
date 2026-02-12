@@ -2,6 +2,7 @@
 
 use crate::domain::entities::{ApiFinding, ApiLocation, FindingSeverity};
 use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec};
+use tracing::error;
 
 /// Analyzer for authorization issues
 pub struct AuthorizationAnalyzer;
@@ -9,6 +10,16 @@ pub struct AuthorizationAnalyzer;
 impl AuthorizationAnalyzer {
     pub fn analyze(spec: &OpenApiSpec) -> Vec<ApiFinding> {
         let mut findings = Vec::new();
+        let id_pattern = match regex::Regex::new(r"\{[a-zA-Z]*[Ii]d\}") {
+            Ok(regex) => Some(regex),
+            Err(error) => {
+                error!(
+                    "Failed to compile ID path regex for authorization analyzer: {}",
+                    error
+                );
+                None
+            }
+        };
 
         // Check for missing authorization (all endpoints have same access)
         for path in &spec.paths {
@@ -44,39 +55,40 @@ impl AuthorizationAnalyzer {
                 }
 
                 // BOLA Detection: ID in path but generic or missing scopes
-                let id_pattern = regex::Regex::new(r"\{[a-zA-Z]*[Ii]d\}").unwrap();
-                if id_pattern.is_match(&path.path) {
-                    let is_bola_prone = if !has_scopes {
-                        true
-                    } else {
-                        // Check if scopes are generic
-                        let generic_scopes = ["read", "write", "user", "access"];
-                        operation.security.iter().any(|req| {
-                            req.scopes
-                                .iter()
-                                .any(|s| generic_scopes.contains(&s.as_str()))
-                        })
-                    };
+                if let Some(id_pattern) = &id_pattern {
+                    if id_pattern.is_match(&path.path) {
+                        let is_bola_prone = if !has_scopes {
+                            true
+                        } else {
+                            // Check if scopes are generic
+                            let generic_scopes = ["read", "write", "user", "access"];
+                            operation.security.iter().any(|req| {
+                                req.scopes
+                                    .iter()
+                                    .any(|s| generic_scopes.contains(&s.as_str()))
+                            })
+                        };
 
-                    if is_bola_prone {
-                        findings.push(ApiFinding {
-                            id: format!("bola-risk-{}-{}", path.path, operation.method),
-                            vulnerability_type: ApiVulnerabilityType::BolaRisk,
-                            location: ApiLocation {
-                                file_path: "openapi.yaml".to_string(),
-                                line: None,
+                        if is_bola_prone {
+                            findings.push(ApiFinding {
+                                id: format!("bola-risk-{}-{}", path.path, operation.method),
+                                vulnerability_type: ApiVulnerabilityType::BolaRisk,
+                                location: ApiLocation {
+                                    file_path: "openapi.yaml".to_string(),
+                                    line: None,
+                                    path: Some(path.path.clone()),
+                                    operation: Some(operation.method.clone()),
+                                },
+                                severity: FindingSeverity::High,
+                                description: format!(
+                                    "Endpoint {} {} contains ID in path but uses generic/no scopes, indicating BOLA risk",
+                                    operation.method, path.path
+                                ),
+                                recommendation: "Use resource-specific scopes (e.g., 'read:orders') or implement fine-grained owner checks".to_string(),
                                 path: Some(path.path.clone()),
-                                operation: Some(operation.method.clone()),
-                            },
-                            severity: FindingSeverity::High,
-                            description: format!(
-                                "Endpoint {} {} contains ID in path but uses generic/no scopes, indicating BOLA risk",
-                                operation.method, path.path
-                            ),
-                            recommendation: "Use resource-specific scopes (e.g., 'read:orders') or implement fine-grained owner checks".to_string(),
-                            path: Some(path.path.clone()),
-                            method: Some(operation.method.clone()),
-                        });
+                                method: Some(operation.method.clone()),
+                            });
+                        }
                     }
                 }
             }

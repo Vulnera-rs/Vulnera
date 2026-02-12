@@ -8,6 +8,7 @@ use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tokio_util::sync::CancellationToken;
 
+use vulnera_core::config::validation::Validate;
 use vulnera_rust::{Config, create_app, init_tracing};
 
 #[tokio::main]
@@ -28,11 +29,16 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Load configuration
-    let config = Config::load().unwrap_or_else(|e| {
-        eprintln!("Failed to load configuration: {}", e);
-        eprintln!("Using default configuration");
-        Config::default()
-    });
+    let config = Config::load().map_err(|e| {
+        std::io::Error::other(format!(
+            "Failed to load configuration. Check DATABASE_URL and VULNERA__* env vars: {}",
+            e
+        ))
+    })?;
+
+    config
+        .validate()
+        .map_err(|e| std::io::Error::other(format!("Configuration validation failed: {}", e)))?;
 
     // Initialize tracing (after config is loaded so we can use logging config)
     init_tracing(&config.logging)?;
@@ -80,17 +86,21 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
 /// Handle graceful shutdown signals and cancel background tasks
 async fn shutdown_signal(shutdown_token: CancellationToken, timeout: Duration) {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!("Failed to install Ctrl+C handler: {}", e);
+        }
     };
 
     #[cfg(unix)]
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to install SIGTERM handler: {}", e);
+            }
+        }
     };
 
     #[cfg(not(unix))]

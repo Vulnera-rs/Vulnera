@@ -169,20 +169,20 @@ pub async fn create_app(
     let persisted_job_repository: Arc<dyn IPersistedJobResultRepository> =
         Arc::new(SqlxPersistedJobResultRepository::new(infra.db_pool.clone()));
 
+    let organization_member_repository = auth
+        .auth_state
+        .organization_member_repository
+        .clone()
+        .ok_or_else(|| std::io::Error::other("Organization member repository not initialized"))?;
+
     let create_organization_use_case = Arc::new(CreateOrganizationUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
         subscription_limits_repository.clone(),
     ));
     let get_organization_use_case = Arc::new(GetOrganizationUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
     let update_organization_use_case = Arc::new(UpdateOrganizationNameUseCase::new(
         organization_repository.clone(),
@@ -193,38 +193,23 @@ pub async fn create_app(
     ));
     let list_organizations_use_case = Arc::new(ListUserOrganizationsUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
     let invite_member_use_case = Arc::new(InviteMemberUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
     let remove_member_use_case = Arc::new(RemoveMemberUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
     let leave_organization_use_case = Arc::new(LeaveOrganizationUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
     let transfer_ownership_use_case = Arc::new(TransferOwnershipUseCase::new(
         organization_repository.clone(),
-        auth.auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository.clone(),
     ));
 
     // 9. Initialize Analytics Use Cases
@@ -251,9 +236,14 @@ pub async fn create_app(
     };
     let octocrab = octocrab_builder
         .base_uri(&config.apis.github.base_url)
-        .unwrap_or_else(|_| octocrab::OctocrabBuilder::new())
+        .map_err(|e| {
+            std::io::Error::other(format!(
+                "Invalid GitHub base_url '{}': {}",
+                config.apis.github.base_url, e
+            ))
+        })?
         .build()
-        .unwrap_or_else(|_| octocrab::Octocrab::default());
+        .map_err(|e| std::io::Error::other(format!("Failed to build GitHub client: {}", e)))?;
     let github_client = Arc::new(GitHubRepositoryClient::new(
         octocrab,
         config.apis.github.base_url.clone(),
@@ -352,11 +342,7 @@ pub async fn create_app(
         auth_state: auth.auth_state.clone(),
 
         // Organization repositories
-        organization_member_repository: auth
-            .auth_state
-            .organization_member_repository
-            .clone()
-            .unwrap(),
+        organization_member_repository: organization_member_repository.clone(),
 
         // Organization use cases
         create_organization_use_case,
