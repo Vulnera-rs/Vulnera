@@ -16,7 +16,11 @@ use vulnera_orchestrator::infrastructure::{
     DragonflyJobStore, FileSystemProjectDetector, JobQueueHandle, JobWorkerContext,
     RuleBasedModuleSelector, spawn_job_worker_pool,
 };
-use vulnera_orchestrator::presentation::controllers::OrchestratorState;
+use vulnera_orchestrator::presentation::controllers::{
+    AnalyticsServices, AuthServices as OrchestratorAuthServices, DependencyServices,
+    InfrastructureServices, LlmServices, OrchestratorServices, OrchestratorState,
+    OrganizationServices,
+};
 use vulnera_orchestrator::presentation::routes::create_router;
 
 use vulnera_core::application::analytics::AnalyticsAggregationService;
@@ -296,8 +300,7 @@ pub async fn create_app(
     // 13. Build Orchestrator State
     let job_queue_handle = JobQueueHandle::new(cache_service.clone());
     let workflow = Arc::new(JobWorkflow::new(job_store.clone()));
-    let orchestrator_state = OrchestratorState {
-        // Orchestrator use cases
+    let orchestrator_services = Arc::new(OrchestratorServices {
         create_job_use_case,
         execute_job_use_case,
         aggregate_results_use_case,
@@ -305,24 +308,30 @@ pub async fn create_app(
         job_store: job_store.clone(),
         job_queue: job_queue_handle.clone(),
         workflow: workflow.clone(),
+        db_pool: infra.db_pool.clone(),
+    });
 
-        // Services
+    let infrastructure_services = Arc::new(InfrastructureServices {
         cache_service: cache_service.clone(),
         report_service,
         vulnerability_repository: vulnerability_repository.clone(),
+        rate_limiter_service,
+    });
 
-        // Dependency analysis
+    let dependency_services = Arc::new(DependencyServices {
         dependency_analysis_use_case,
         repository_analysis_service,
         version_resolution_service,
+    });
 
-        // LLM use cases
+    let llm_services = Arc::new(LlmServices {
         generate_code_fix_use_case,
         explain_vulnerability_use_case,
         natural_language_query_use_case,
         enrich_findings_use_case,
+    });
 
-        // Auth-related state
+    let auth_services = Arc::new(OrchestratorAuthServices {
         db_pool: infra.db_pool.clone(),
         user_repository: auth.auth_state.user_repository.clone(),
         api_key_repository: auth.auth_state.api_key_repository.clone(),
@@ -340,11 +349,10 @@ pub async fn create_app(
         validate_api_key_use_case: auth.validate_api_key_use_case.clone(),
         token_blacklist: auth.token_blacklist.clone(),
         auth_state: auth.auth_state.clone(),
+    });
 
-        // Organization repositories
+    let organization_services = Arc::new(OrganizationServices {
         organization_member_repository: organization_member_repository.clone(),
-
-        // Organization use cases
         create_organization_use_case,
         get_organization_use_case,
         list_user_organizations_use_case: list_organizations_use_case,
@@ -354,19 +362,23 @@ pub async fn create_app(
         transfer_ownership_use_case,
         delete_organization_use_case,
         update_organization_name_use_case: update_organization_use_case,
+    });
 
-        // Analytics use cases
+    let analytics_services = Arc::new(AnalyticsServices {
         get_dashboard_overview_use_case,
         get_monthly_analytics_use_case,
         check_quota_use_case,
-
-        // Analytics service
         analytics_service: analytics_service.clone(),
+    });
 
-        // Rate limiting
-        rate_limiter_service,
-
-        // Config and metadata
+    let orchestrator_state = OrchestratorState {
+        orchestrator: orchestrator_services,
+        infrastructure: infrastructure_services,
+        dependencies: dependency_services,
+        llm: llm_services,
+        auth: auth_services,
+        organization: organization_services,
+        analytics: analytics_services,
         config: config_arc.clone(),
         startup_time,
     };
@@ -383,8 +395,11 @@ pub async fn create_app(
     spawn_analytics_cleanup_worker(analytics_service.clone(), &config, shutdown_token.clone());
 
     let worker_context = JobWorkerContext {
-        execute_job_use_case: orchestrator_state.execute_job_use_case.clone(),
-        aggregate_results_use_case: orchestrator_state.aggregate_results_use_case.clone(),
+        execute_job_use_case: orchestrator_state.orchestrator.execute_job_use_case.clone(),
+        aggregate_results_use_case: orchestrator_state
+            .orchestrator
+            .aggregate_results_use_case
+            .clone(),
         workflow: workflow.clone(),
         job_store: job_store.clone(),
         git_service: infra.git_service.clone(),

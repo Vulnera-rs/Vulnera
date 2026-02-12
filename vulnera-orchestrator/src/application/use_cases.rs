@@ -35,6 +35,10 @@ impl CreateAnalysisJobUseCase {
         }
     }
 
+    #[instrument(
+        skip(self, source_uri, aws_credentials),
+        fields(source_type = ?source_type, analysis_depth = ?analysis_depth, source_uri = %source_uri)
+    )]
     pub async fn execute(
         &self,
         source_type: SourceType,
@@ -42,16 +46,36 @@ impl CreateAnalysisJobUseCase {
         analysis_depth: AnalysisDepth,
         aws_credentials: Option<&crate::domain::value_objects::AwsCredentials>,
     ) -> Result<(AnalysisJob, Project), ProjectDetectionError> {
+        let start_time = std::time::Instant::now();
+
         // Detect project characteristics
         let project = self
             .project_detector
             .detect_project(&source_type, &source_uri, aws_credentials)
-            .await?;
+            .await
+            .map_err(|error| {
+                error!(
+                    source_type = ?source_type,
+                    source_uri = %source_uri,
+                    error = %error,
+                    "Project detection failed"
+                );
+                error
+            })?;
 
         // Select modules to run
         let modules_to_run = self
             .module_selector
             .select_modules(&project, &analysis_depth);
+
+        info!(
+            project_id = %project.id,
+            source_type = ?source_type,
+            analysis_depth = ?analysis_depth,
+            selected_modules = modules_to_run.len(),
+            duration_ms = start_time.elapsed().as_millis(),
+            "Created analysis job plan"
+        );
 
         // Create job
         let job = AnalysisJob::new(project.id.clone(), modules_to_run, analysis_depth);
@@ -75,8 +99,16 @@ impl ExecuteAnalysisJobUseCase {
             )))
         } else {
             // Select backend based on config (auto, landlock, process, wasm)
-            let backend = SandboxSelector::select_by_name(&config.backend)
-                .unwrap_or_else(|| SandboxSelector::select());
+            let backend = match SandboxSelector::select_by_name(&config.backend) {
+                Some(backend) => backend,
+                None => {
+                    warn!(
+                        backend = %config.backend,
+                        "Requested sandbox backend unavailable, falling back to automatic selection"
+                    );
+                    SandboxSelector::select()
+                }
+            };
             Arc::new(SandboxExecutor::new(backend))
         };
 
@@ -100,6 +132,13 @@ impl ExecuteAnalysisJobUseCase {
             .root_path
             .clone()
             .unwrap_or_else(|| project.source_uri.clone());
+
+        debug!(
+            job_id = %job.job_id,
+            project_id = %project.id,
+            source_uri = %effective_source_uri,
+            "Resolved effective source URI for module execution"
+        );
 
         info!(
             job_id = %job.job_id,

@@ -15,6 +15,15 @@ use vulnera_core::domain::organization::value_objects::OrganizationId;
 
 use crate::presentation::middleware::application_error_to_response;
 
+fn build_master_email() -> Result<Email, AuthErrorResponse> {
+    Email::new("master@vulnera.local".to_string()).map_err(|e| AuthErrorResponse {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        error: ApplicationError::Configuration {
+            message: format!("Invalid built-in master email: {}", e),
+        },
+    })
+}
+
 /// Authenticated user information from JWT token (cookie-based)
 #[derive(Debug, Clone)]
 pub struct AuthUser {
@@ -166,8 +175,7 @@ where
         if vulnera_core::infrastructure::auth::is_master_key(&api_key) {
             // Create a synthetic master user with admin privileges
             let master_user_id = UserId::generate();
-            let master_email = Email::new("master@vulnera.local".to_string())
-                .unwrap_or_else(|_| Email::new("master@local".to_string()).unwrap());
+            let master_email = build_master_email()?;
             let master_api_key_id = ApiKeyId::generate();
 
             tracing::info!("Master API key authenticated from {:?}", parts.uri);
@@ -277,15 +285,7 @@ where
             if vulnera_core::infrastructure::auth::is_master_key(api_key) {
                 // Create a synthetic master user with admin privileges
                 let master_user_id = vulnera_core::domain::auth::value_objects::UserId::generate();
-                let master_email = vulnera_core::domain::auth::value_objects::Email::new(
-                    "master@vulnera.local".to_string(),
-                )
-                .unwrap_or_else(|_| {
-                    vulnera_core::domain::auth::value_objects::Email::new(
-                        "master@local".to_string(),
-                    )
-                    .unwrap()
-                });
+                let master_email = build_master_email()?;
 
                 tracing::info!("Master API key authenticated from {:?}", parts.uri);
 
@@ -401,8 +401,7 @@ where
         if vulnera_core::infrastructure::auth::is_master_key(api_key) {
             // Create a synthetic master user with admin privileges
             let master_user_id = UserId::generate();
-            let master_email = Email::new("master@vulnera.local".to_string())
-                .unwrap_or_else(|_| Email::new("master@local".to_string()).unwrap());
+            let master_email = build_master_email()?;
             let master_api_key_id = ApiKeyId::generate();
 
             tracing::info!("Master API key authenticated from {:?}", parts.uri);

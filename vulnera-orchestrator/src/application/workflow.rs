@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use tracing::{info, warn};
+use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
 use vulnera_core::domain::module::ModuleResult;
@@ -64,6 +64,7 @@ impl JobWorkflow {
     // ── Transition helpers ───────────────────────────────────────────
 
     /// Transition a job to [`JobStatus::Queued`] and persist an initial snapshot.
+    #[instrument(skip(self, job, project, invocation_context), fields(job_id = %job.job_id, project_id = %project.id))]
     pub async fn enqueue_job(
         &self,
         job: &mut AnalysisJob,
@@ -92,6 +93,7 @@ impl JobWorkflow {
     }
 
     /// Transition a job to [`JobStatus::Running`] and persist.
+    #[instrument(skip(self, job, project, invocation_context), fields(job_id = %job.job_id, project_id = %project.id))]
     pub async fn start_job(
         &self,
         job: &mut AnalysisJob,
@@ -117,6 +119,7 @@ impl JobWorkflow {
     }
 
     /// Transition a job to [`JobStatus::Completed`] with full results and persist.
+    #[instrument(skip(self, job, project, module_results, report, invocation_context), fields(job_id = %job.job_id, project_id = %project.id))]
     pub async fn complete_job(
         &self,
         job: &mut AnalysisJob,
@@ -150,6 +153,7 @@ impl JobWorkflow {
     }
 
     /// Transition a job to [`JobStatus::Failed`] with an error message and persist.
+    #[instrument(skip(self, job, project, invocation_context), fields(job_id = %job.job_id, project_id = %project.id))]
     pub async fn fail_job(
         &self,
         job: &mut AnalysisJob,
@@ -180,6 +184,7 @@ impl JobWorkflow {
     }
 
     /// Transition a job to [`JobStatus::Cancelled`] and persist.
+    #[instrument(skip(self, job, project), fields(job_id = %job.job_id, project_id = %project.id))]
     pub async fn cancel_job(
         &self,
         job: &mut AnalysisJob,
@@ -196,6 +201,7 @@ impl JobWorkflow {
     }
 
     /// Retrieve a job snapshot by ID (delegates to store).
+    #[instrument(skip(self), fields(job_id = %job_id))]
     pub async fn get_job(&self, job_id: Uuid) -> Result<Option<JobSnapshot>, JobStoreError> {
         self.job_store.get_snapshot(job_id).await
     }
@@ -212,6 +218,8 @@ impl JobWorkflow {
         callback_url: Option<String>,
         invocation_context: Option<JobInvocationContext>,
     ) -> Result<(), JobStoreError> {
+        let start_time = std::time::Instant::now();
+
         self.job_store
             .save_snapshot(JobSnapshot {
                 job_id: job.job_id,
@@ -231,6 +239,15 @@ impl JobWorkflow {
                 findings_by_type,
                 transitions: job.transitions.clone(),
             })
-            .await
+            .await?;
+
+        info!(
+            job_id = %job.job_id,
+            status = ?job.status,
+            duration_ms = start_time.elapsed().as_millis(),
+            "Persisted job snapshot"
+        );
+
+        Ok(())
     }
 }

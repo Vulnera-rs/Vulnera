@@ -39,6 +39,13 @@ If you'd like to financially support the project, you can do so via [GitHub Spon
    cargo nextest run --workspace
    ```
 
+5. Run repository guardrails locally before opening a PR:
+
+   ```bash
+   cargo clippy --no-deps -p vulnera-orchestrator -p vulnera-sandbox -p vulnera-llm -p vulnera-advisor -- -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
+   bash .github/scripts/sql_query_safety_audit.sh
+   ```
+
 ## Development Workflow
 
 - **Format and lint** before every commit: `cargo fmt --all && cargo clippy --workspace`
@@ -97,6 +104,9 @@ cargo test --test datatest_*
 - **Update OpenAPI annotations** (`utoipa`) when API shapes change.
 - **Update documentation** in `docs/` when behavior changes.
 - **All CI checks must pass** before merge (clippy, fmt, tests, coverage).
+- **Guardrails are enforced in CI**:
+  - panic primitives in production code are blocked via clippy (`unwrap/expect/panic`)
+  - non-macro SQLx query function forms are blocked in production paths
 
 ## Code of Conduct
 

@@ -56,6 +56,7 @@ pub async fn get_dashboard_stats(
 
     // Verify user is a member
     let _ = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -65,6 +66,7 @@ pub async fn get_dashboard_stats(
         })?;
 
     let overview = state
+        .analytics
         .get_dashboard_overview_use_case
         .execute(org_id)
         .await
@@ -148,6 +150,7 @@ pub async fn get_usage(
 
     // Verify user is a member
     let _ = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -168,6 +171,7 @@ pub async fn get_usage(
     let start_month = format!("{:04}-{:02}", start_date.year(), start_date.month());
 
     let analytics = state
+        .analytics
         .get_monthly_analytics_use_case
         .execute(org_id, &start_month, &end_month)
         .await
@@ -229,6 +233,7 @@ pub async fn get_quota(
 
     // Verify user is a member
     let details = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -238,6 +243,7 @@ pub async fn get_quota(
         })?;
 
     let quota = state
+        .analytics
         .check_quota_use_case
         .get_quota_status(org_id)
         .await
@@ -309,6 +315,7 @@ pub async fn get_personal_dashboard_stats(
 
     // Get current month stats
     let current_stats = state
+        .analytics
         .analytics_service
         .get_personal_stats_for_range(auth.user_id, &current_month, &current_month)
         .await
@@ -319,6 +326,7 @@ pub async fn get_personal_dashboard_stats(
 
     // Get previous month for trend calculation
     let prev_stats = state
+        .analytics
         .analytics_service
         .get_personal_stats_for_range(auth.user_id, &prev_month, &prev_month)
         .await
@@ -418,6 +426,7 @@ pub async fn get_personal_usage(
     let start_month = format!("{:04}-{:02}", start_date.year(), start_date.month());
 
     let stats = state
+        .analytics
         .analytics_service
         .get_personal_stats_for_range(auth.user_id, &start_month, &end_month)
         .await

@@ -45,7 +45,12 @@ pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<Strin
     ));
 
     // Add cache metrics if available
-    if let Ok(cache_stats) = app_state.cache_service.get_cache_statistics().await {
+    if let Ok(cache_stats) = app_state
+        .infrastructure
+        .cache_service
+        .get_cache_statistics()
+        .await
+    {
         metrics.push_str("# HELP vulnera_cache_hits_total Total number of cache hits\n");
         metrics.push_str("# TYPE vulnera_cache_hits_total counter\n");
         metrics.push_str(&format!("vulnera_cache_hits_total {}\n", cache_stats.hits));
@@ -86,8 +91,8 @@ pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<Strin
     metrics.push_str(&format!("vulnera_uptime_seconds {}\n", uptime_seconds));
 
     // Add database pool metrics
-    let pool_size = app_state.db_pool.size();
-    let pool_idle = app_state.db_pool.num_idle();
+    let pool_size = app_state.orchestrator.db_pool.size();
+    let pool_idle = app_state.orchestrator.db_pool.num_idle();
 
     metrics.push_str("# HELP vulnera_db_pool_size Current number of connections in the pool\n");
     metrics.push_str("# TYPE vulnera_db_pool_size gauge\n");
