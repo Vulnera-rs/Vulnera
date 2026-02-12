@@ -649,7 +649,6 @@ impl OpenApiParser {
                     all_of,
                     one_of,
                     any_of,
-                    ..Default::default()
                 }
             }
             oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {

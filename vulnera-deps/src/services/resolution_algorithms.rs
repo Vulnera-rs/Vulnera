@@ -190,8 +190,8 @@ impl BacktrackingResolver {
         for candidate in candidates {
             assignments.insert(package_id.clone(), candidate.clone());
 
-            if Self::forward_check(order, index + 1, available_versions, constraints_by_package) {
-                if Self::backtrack(
+            if Self::forward_check(order, index + 1, available_versions, constraints_by_package)
+                && Self::backtrack(
                     order,
                     index + 1,
                     available_versions,
@@ -201,7 +201,6 @@ impl BacktrackingResolver {
                 ) {
                     return true;
                 }
-            }
 
             assignments.remove(package_id);
         }

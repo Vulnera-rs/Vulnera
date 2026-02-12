@@ -108,8 +108,8 @@ impl DataExposureAnalyzer {
                             &operation.method,
                             &format!("param:{}", param.name),
                             &mut findings,
-                            &jwt_pattern,
-                            &private_key_pattern,
+                            jwt_pattern,
+                            private_key_pattern,
                         );
                     }
                 }
