@@ -19,6 +19,7 @@ use crate::domain::vulnerability::{
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use std::collections::HashMap;
 
 static RE_BASE_VERSION: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b(\d+(?:\.\d+){0,3})\b").unwrap());
@@ -200,6 +201,7 @@ impl GemfileLockParser {
     fn parse_gemfile_lock_content(&self, content: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
+        let mut pending_dependencies: Vec<(Package, String, String)> = Vec::new();
 
         // We only parse the "GEM -> specs" section. Lines look like:
         // "    some_gem (1.2.3)"
@@ -275,18 +277,40 @@ impl GemfileLockParser {
                     let dep_req = caps.get(2).map(|m| m.as_str()).unwrap_or("*").trim();
 
                     if !dep_name.is_empty() {
-                        // Create a placeholder package for the dependency target
-                        let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                        if let Ok(dep_pkg) =
-                            Package::new(dep_name.to_string(), dep_pkg_version, Ecosystem::RubyGems)
-                        {
-                            dependencies.push(Dependency::new(
-                                pkg.clone(),
-                                dep_pkg,
-                                dep_req.to_string(),
-                                false,
-                            ));
-                        }
+                        pending_dependencies.push((
+                            pkg.clone(),
+                            dep_name.to_string(),
+                            dep_req.to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        let mut package_by_name: HashMap<String, Package> = HashMap::new();
+        for package in &packages {
+            package_by_name
+                .entry(package.name.clone())
+                .and_modify(|current| {
+                    if package.version > current.version {
+                        *current = package.clone();
+                    }
+                })
+                .or_insert_with(|| package.clone());
+        }
+
+        for (from, dep_name, dep_req) in pending_dependencies {
+            if let Some(target) = package_by_name.get(&dep_name) {
+                dependencies.push(Dependency::new(from, target.clone(), dep_req, false));
+                continue;
+            }
+
+            if let Some(base_version) = extract_base_version(&dep_req) {
+                if let Ok(version) = parse_version_lenient(&base_version) {
+                    if let Ok(inferred_target) =
+                        Package::new(dep_name, version, Ecosystem::RubyGems)
+                    {
+                        dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
                     }
                 }
             }

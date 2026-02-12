@@ -222,6 +222,33 @@ impl PackageLockParser {
         Self
     }
 
+    fn resolve_dependency_target(
+        packages: &[Package],
+        dep_name: &str,
+        dep_req: &str,
+    ) -> Option<Package> {
+        let matching: Vec<&Package> = packages.iter().filter(|pkg| pkg.name == dep_name).collect();
+        if matching.is_empty() {
+            return None;
+        }
+
+        if let Ok(req) = semver::VersionReq::parse(dep_req) {
+            let best = matching
+                .iter()
+                .filter(|pkg| req.matches(&pkg.version.0))
+                .max_by(|left, right| left.version.cmp(&right.version));
+
+            if let Some(package) = best {
+                return Some((*package).clone());
+            }
+        }
+
+        matching
+            .iter()
+            .max_by(|left, right| left.version.cmp(&right.version))
+            .map(|package| (*package).clone())
+    }
+
     /// Extract packages and dependencies from lockfile
     ///
     /// # Arguments
@@ -233,6 +260,7 @@ impl PackageLockParser {
     ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
+        let mut pending_dependencies: Vec<(Package, String, String)> = Vec::new();
 
         if let Some(deps_obj) = deps.as_object() {
             for (key, dep_info) in deps_obj {
@@ -290,26 +318,11 @@ impl PackageLockParser {
                         if let Some(reqs) = dep_info.get(key).and_then(|r| r.as_object()) {
                             for (dep_name, dep_ver_val) in reqs {
                                 if let Some(dep_req) = dep_ver_val.as_str() {
-                                    // This is a logical dependency edge
-                                    // We create a dependency edge. The 'to' package version is not fully known here
-                                    // without resolving it against the whole tree, but we can create a placeholder
-                                    // or just use the requirement.
-                                    // For now, we'll use 0.0.0 as a placeholder for the 'to' package version if it's a range,
-                                    // effectively saying "depends on package X with requirement Y".
-
-                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                                    if let Ok(dep_pkg) = Package::new(
+                                    pending_dependencies.push((
+                                        package.clone(),
                                         dep_name.clone(),
-                                        dep_pkg_version,
-                                        Ecosystem::Npm,
-                                    ) {
-                                        dependencies.push(Dependency::new(
-                                            package.clone(),
-                                            dep_pkg,
-                                            dep_req.to_string(),
-                                            false,
-                                        ));
-                                    }
+                                        dep_req.to_string(),
+                                    ));
                                 }
                             }
                         }
@@ -323,20 +336,11 @@ impl PackageLockParser {
                             // Instead of checking only the first value, iterate over all values.
                             for (dep_name, dep_ver_val) in deps_obj {
                                 if let Some(dep_req) = dep_ver_val.as_str() {
-                                    // This is a logical dependency edge
-                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                                    if let Ok(dep_pkg) = Package::new(
+                                    pending_dependencies.push((
+                                        package.clone(),
                                         dep_name.clone(),
-                                        dep_pkg_version,
-                                        Ecosystem::Npm,
-                                    ) {
-                                        dependencies.push(Dependency::new(
-                                            package.clone(),
-                                            dep_pkg,
-                                            dep_req.to_string(),
-                                            false,
-                                        ));
-                                    }
+                                        dep_req.to_string(),
+                                    ));
                                 }
                             }
                         }
@@ -360,6 +364,12 @@ impl PackageLockParser {
                         }
                     }
                 }
+            }
+        }
+
+        for (from, dep_name, dep_req) in pending_dependencies {
+            if let Some(target) = Self::resolve_dependency_target(&packages, &dep_name, &dep_req) {
+                dependencies.push(Dependency::new(from, target, dep_req, false));
             }
         }
 
@@ -424,6 +434,7 @@ impl YarnLockParser {
     fn parse_yarn_lock(&self, content: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
+        let mut pending_dependencies: Vec<(Package, String, String)> = Vec::new();
 
         let mut current_package_names: Vec<String> = Vec::new();
         let mut current_version: Option<String> = None;
@@ -463,19 +474,11 @@ impl YarnLockParser {
 
                                 // Add dependencies
                                 for (dep_name, dep_req) in &current_dependencies {
-                                    let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                                    if let Ok(dep_pkg) = Package::new(
+                                    pending_dependencies.push((
+                                        package.clone(),
                                         dep_name.clone(),
-                                        dep_pkg_version,
-                                        Ecosystem::Npm,
-                                    ) {
-                                        dependencies.push(Dependency::new(
-                                            package.clone(),
-                                            dep_pkg,
-                                            dep_req.clone(),
-                                            false,
-                                        ));
-                                    }
+                                        dep_req.clone(),
+                                    ));
                                 }
                             }
                         }
@@ -534,20 +537,22 @@ impl YarnLockParser {
                     {
                         packages.push(package.clone());
                         for (dep_name, dep_req) in &current_dependencies {
-                            let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                            if let Ok(dep_pkg) =
-                                Package::new(dep_name.clone(), dep_pkg_version, Ecosystem::Npm)
-                            {
-                                dependencies.push(Dependency::new(
-                                    package.clone(),
-                                    dep_pkg,
-                                    dep_req.clone(),
-                                    false,
-                                ));
-                            }
+                            pending_dependencies.push((
+                                package.clone(),
+                                dep_name.clone(),
+                                dep_req.clone(),
+                            ));
                         }
                     }
                 }
+            }
+        }
+
+        for (from, dep_name, dep_req) in pending_dependencies {
+            if let Some(target) =
+                PackageLockParser::resolve_dependency_target(&packages, &dep_name, &dep_req)
+            {
+                dependencies.push(Dependency::new(from, target, dep_req, false));
             }
         }
 

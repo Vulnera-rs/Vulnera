@@ -4,13 +4,14 @@
 //! and building complete dependency graphs from manifest and lockfiles.
 
 use async_trait::async_trait;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
-use tracing::warn;
+use tracing::{debug, warn};
 use vulnera_core::application::errors::ApplicationError;
 use vulnera_core::domain::vulnerability::entities::Package;
 use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
 use vulnera_core::infrastructure::parsers::ParserFactory;
-use vulnera_core::infrastructure::registries::PackageRegistryClient;
+use vulnera_core::infrastructure::registries::{PackageRegistryClient, RegistryError, VersionInfo};
 
 use crate::domain::{
     DependencyEdge, DependencyGraph, PackageId, PackageMetadata, PackageNode,
@@ -46,6 +47,49 @@ impl DependencyResolverServiceImpl {
         Self {
             _parser_factory: parser_factory,
         }
+    }
+
+    fn package_key(package: &Package) -> String {
+        format!(
+            "{}:{}@{}",
+            package.ecosystem.canonical_name(),
+            package.name,
+            package.version
+        )
+    }
+
+    fn map_registry_error(error: RegistryError, resource: &str) -> ApplicationError {
+        match error {
+            RegistryError::RateLimited => ApplicationError::RateLimited {
+                message: format!("Registry rate-limited request for {resource}"),
+            },
+            RegistryError::NotFound => ApplicationError::NotFound {
+                resource: "package".to_string(),
+                id: resource.to_string(),
+            },
+            RegistryError::UnsupportedEcosystem(ecosystem) => ApplicationError::InvalidEcosystem {
+                ecosystem: ecosystem.to_string(),
+            },
+            RegistryError::Parse(message) => ApplicationError::Configuration { message },
+            RegistryError::Http { message, .. } | RegistryError::Other(message) => {
+                ApplicationError::Configuration {
+                    message: format!("Registry request failed for {resource}: {message}"),
+                }
+            }
+        }
+    }
+
+    fn select_best_version(
+        versions: Vec<VersionInfo>,
+        requirement: &str,
+    ) -> Option<vulnera_core::domain::vulnerability::value_objects::Version> {
+        let constraint = VersionConstraint::parse(requirement).unwrap_or(VersionConstraint::Any);
+
+        versions
+            .into_iter()
+            .map(|v| v.version)
+            .filter(|version| constraint.satisfies(version))
+            .max()
     }
 }
 
@@ -105,45 +149,103 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
         package: &Package,
         registry: Arc<dyn PackageRegistryClient>,
     ) -> Result<Vec<Package>, ApplicationError> {
-        // Note: Most package registries don't expose dependency information directly
-        // through their APIs. To properly resolve transitive dependencies, we would need to:
-        // 1. Fetch the package manifest/metadata for the specific version
-        // 2. Parse dependencies from the manifest (package.json, Cargo.toml, etc.)
-        // 3. Recursively resolve those dependencies
-        //
-        // This is ecosystem-specific and complex. For now, we return an empty vector.
-        // In practice, transitive dependencies are best resolved from lockfiles
-        // (package-lock.json, Cargo.lock, etc.) which contain the complete resolved tree.
-        //
-        // Future enhancement: Implement ecosystem-specific manifest fetching and parsing
-        // for registries that support it (e.g., npm registry API, crates.io API)
-
-        tracing::debug!(
-            "Transitive dependency resolution requested for {}:{} (not yet implemented - use lockfiles for complete dependency trees)",
-            package.name,
-            package.version
+        debug!(
+            "Resolving transitive dependencies for {}:{}",
+            package.name, package.version
         );
 
-        // Attempt to verify the package exists in the registry
-        // This at least validates that the package is available
-        match registry
-            .list_versions(package.ecosystem.clone(), &package.name)
-            .await
-        {
-            Ok(_versions) => {
-                // Package exists, but we can't get dependencies without fetching manifests
-                Ok(Vec::new())
+        let mut queue = VecDeque::new();
+        queue.push_back(package.clone());
+
+        let mut visited = HashSet::new();
+        let mut discovered: HashMap<String, Package> = HashMap::new();
+
+        while let Some(current) = queue.pop_front() {
+            let current_key = Self::package_key(&current);
+            if !visited.insert(current_key) {
+                continue;
             }
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to verify package {} in registry: {}",
-                    package.name,
-                    e
-                );
-                // Return empty rather than error, as this is a best-effort operation
-                Ok(Vec::new())
+
+            let metadata = match registry
+                .fetch_metadata(current.ecosystem.clone(), &current.name, &current.version)
+                .await
+            {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    if current.name == package.name && current.version == package.version {
+                        return Err(Self::map_registry_error(
+                            error,
+                            &format!("{}@{}", current.name, current.version),
+                        ));
+                    }
+
+                    warn!(
+                        package = %current.identifier(),
+                        "Failed to fetch metadata for transitive package: {}",
+                        error
+                    );
+                    continue;
+                }
+            };
+
+            for dependency in metadata.dependencies {
+                if dependency.is_dev || dependency.is_optional {
+                    continue;
+                }
+
+                let versions = match registry
+                    .list_versions(current.ecosystem.clone(), &dependency.name)
+                    .await
+                {
+                    Ok(versions) => versions,
+                    Err(error) => {
+                        warn!(
+                            dependency = %dependency.name,
+                            requirement = %dependency.requirement,
+                            "Failed to list versions for dependency: {}",
+                            error
+                        );
+                        continue;
+                    }
+                };
+
+                let Some(version) = Self::select_best_version(versions, &dependency.requirement)
+                else {
+                    warn!(
+                        dependency = %dependency.name,
+                        requirement = %dependency.requirement,
+                        "No compatible version found for dependency requirement"
+                    );
+                    continue;
+                };
+
+                let transitive_package = match Package::new(
+                    dependency.name.clone(),
+                    version,
+                    current.ecosystem.clone(),
+                ) {
+                    Ok(package) => package,
+                    Err(error) => {
+                        warn!(
+                            dependency = %dependency.name,
+                            "Failed to build transitive package model: {}",
+                            error
+                        );
+                        continue;
+                    }
+                };
+
+                let key = Self::package_key(&transitive_package);
+                if discovered.contains_key(&key) {
+                    continue;
+                }
+
+                discovered.insert(key, transitive_package.clone());
+                queue.push_back(transitive_package);
             }
         }
+
+        Ok(discovered.into_values().collect())
     }
 }
 
@@ -317,6 +419,89 @@ pub async fn build_graph_from_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+    use vulnera_core::domain::vulnerability::value_objects::Version;
+    use vulnera_core::infrastructure::registries::{
+        RegistryDependency, RegistryPackageMetadata, VersionInfo,
+    };
+
+    #[derive(Default)]
+    struct MockRegistryClient {
+        versions: Mutex<HashMap<String, Vec<VersionInfo>>>,
+        metadata: Mutex<HashMap<String, RegistryPackageMetadata>>,
+    }
+
+    impl MockRegistryClient {
+        fn key(ecosystem: Ecosystem, name: &str) -> String {
+            format!("{}:{}", ecosystem.canonical_name(), name)
+        }
+
+        fn metadata_key(ecosystem: Ecosystem, name: &str, version: &str) -> String {
+            format!("{}:{}@{}", ecosystem.canonical_name(), name, version)
+        }
+
+        fn add_versions(&self, ecosystem: Ecosystem, name: &str, versions: Vec<&str>) {
+            let infos = versions
+                .into_iter()
+                .map(|v| VersionInfo::new(Version::parse(v).unwrap(), false, None))
+                .collect();
+            self.versions
+                .lock()
+                .unwrap()
+                .insert(Self::key(ecosystem, name), infos);
+        }
+
+        fn add_metadata(
+            &self,
+            ecosystem: Ecosystem,
+            name: &str,
+            version: &str,
+            dependencies: Vec<RegistryDependency>,
+        ) {
+            let metadata = RegistryPackageMetadata {
+                name: name.to_string(),
+                version: Version::parse(version).unwrap(),
+                dependencies,
+                project_url: None,
+                license: None,
+            };
+            self.metadata.lock().unwrap().insert(
+                Self::metadata_key(ecosystem, name, version),
+                metadata,
+            );
+        }
+    }
+
+    #[async_trait]
+    impl PackageRegistryClient for MockRegistryClient {
+        async fn list_versions(
+            &self,
+            ecosystem: Ecosystem,
+            name: &str,
+        ) -> Result<Vec<VersionInfo>, RegistryError> {
+            Ok(self
+                .versions
+                .lock()
+                .unwrap()
+                .get(&Self::key(ecosystem, name))
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        async fn fetch_metadata(
+            &self,
+            ecosystem: Ecosystem,
+            name: &str,
+            version: &Version,
+        ) -> Result<RegistryPackageMetadata, RegistryError> {
+            self.metadata
+                .lock()
+                .unwrap()
+                .get(&Self::metadata_key(ecosystem, name, &version.to_string()))
+                .cloned()
+                .ok_or(RegistryError::NotFound)
+        }
+    }
 
     #[tokio::test]
     async fn test_build_graph_from_manifest() {
@@ -340,5 +525,104 @@ mod tests {
 
         assert_eq!(graph.package_count(), 1);
         assert_eq!(graph.root_packages.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_transitive_resolves_nested_dependencies() {
+        let parser_factory = Arc::new(ParserFactory::new());
+        let resolver = DependencyResolverServiceImpl::new(parser_factory);
+
+        let root = Package::new(
+            "root".to_string(),
+            Version::parse("1.0.0").unwrap(),
+            Ecosystem::Npm,
+        )
+        .unwrap();
+
+        let registry = Arc::new(MockRegistryClient::default());
+
+        registry.add_versions(Ecosystem::Npm, "dep-a", vec!["1.0.0", "1.2.0"]);
+        registry.add_versions(Ecosystem::Npm, "dep-b", vec!["2.0.0"]);
+
+        registry.add_metadata(
+            Ecosystem::Npm,
+            "root",
+            "1.0.0",
+            vec![RegistryDependency {
+                name: "dep-a".to_string(),
+                requirement: ">=1.1.0".to_string(),
+                is_dev: false,
+                is_optional: false,
+            }],
+        );
+
+        registry.add_metadata(
+            Ecosystem::Npm,
+            "dep-a",
+            "1.2.0",
+            vec![RegistryDependency {
+                name: "dep-b".to_string(),
+                requirement: "^2.0.0".to_string(),
+                is_dev: false,
+                is_optional: false,
+            }],
+        );
+
+        registry.add_metadata(Ecosystem::Npm, "dep-b", "2.0.0", vec![]);
+
+        let resolved = resolver
+            .resolve_transitive(&root, registry)
+            .await
+            .expect("transitive resolution should succeed");
+
+        assert!(resolved.iter().any(|pkg| pkg.name == "dep-a" && pkg.version == Version::parse("1.2.0").unwrap()));
+        assert!(resolved.iter().any(|pkg| pkg.name == "dep-b" && pkg.version == Version::parse("2.0.0").unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_transitive_skips_dev_and_optional_dependencies() {
+        let parser_factory = Arc::new(ParserFactory::new());
+        let resolver = DependencyResolverServiceImpl::new(parser_factory);
+
+        let root = Package::new(
+            "root".to_string(),
+            Version::parse("1.0.0").unwrap(),
+            Ecosystem::Npm,
+        )
+        .unwrap();
+
+        let registry = Arc::new(MockRegistryClient::default());
+        registry.add_versions(Ecosystem::Npm, "prod-dep", vec!["1.0.0"]);
+        registry.add_versions(Ecosystem::Npm, "dev-dep", vec!["1.0.0"]);
+
+        registry.add_metadata(
+            Ecosystem::Npm,
+            "root",
+            "1.0.0",
+            vec![
+                RegistryDependency {
+                    name: "prod-dep".to_string(),
+                    requirement: "*".to_string(),
+                    is_dev: false,
+                    is_optional: false,
+                },
+                RegistryDependency {
+                    name: "dev-dep".to_string(),
+                    requirement: "*".to_string(),
+                    is_dev: true,
+                    is_optional: false,
+                },
+            ],
+        );
+
+        registry.add_metadata(Ecosystem::Npm, "prod-dep", "1.0.0", vec![]);
+
+        let resolved = resolver
+            .resolve_transitive(&root, registry)
+            .await
+            .expect("transitive resolution should succeed");
+
+        assert!(resolved.iter().any(|pkg| pkg.name == "prod-dep"));
+        assert!(!resolved.iter().any(|pkg| pkg.name == "dev-dep"));
     }
 }

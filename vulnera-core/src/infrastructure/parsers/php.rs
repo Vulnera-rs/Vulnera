@@ -8,6 +8,7 @@ use crate::domain::vulnerability::{
 };
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Parser for composer.json files
 pub struct ComposerParser;
@@ -103,7 +104,7 @@ impl ComposerParser {
             cleaned
         };
 
-        // Handle stability flags (remove -dev, -alpha, etc. for now)
+        // Handle stability flags (remove -dev, -alpha, etc.)
         let cleaned = if let Some(dash_pos) = cleaned.find('-') {
             let base_part = &cleaned[..dash_pos];
             // Only keep the base if it looks like a version
@@ -186,10 +187,34 @@ impl ComposerLockParser {
         Self
     }
 
+    fn infer_dependency_version(requirement: &str) -> Option<Version> {
+        let req = requirement.trim();
+        if req.is_empty() || req == "*" {
+            return None;
+        }
+
+        let cleaned = req
+            .trim_start_matches('^')
+            .trim_start_matches('~')
+            .trim_start_matches("<=")
+            .trim_start_matches(">=")
+            .trim_start_matches('<')
+            .trim_start_matches('>')
+            .trim_start_matches('=')
+            .split(['|', ','])
+            .next()
+            .unwrap_or(req)
+            .trim();
+
+        let cleaned = cleaned.strip_prefix('v').unwrap_or(cleaned);
+        Version::parse(cleaned).ok()
+    }
+
     /// Extract packages and dependencies from composer.lock
     fn extract_lock_data(&self, json: &Value, section: &str) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
+        let mut pending_dependencies: Vec<(Package, String, String)> = Vec::new();
 
         if let Some(packages_array) = json.get(section).and_then(|p| p.as_array()) {
             for package_info in packages_array {
@@ -232,23 +257,46 @@ impl ComposerLockParser {
                             }
 
                             if let Some(dep_req) = dep_req_val.as_str() {
-                                // Create a placeholder package for the dependency target
-                                let dep_pkg_version = Version::parse("0.0.0").unwrap();
-                                if let Ok(dep_pkg) = Package::new(
+                                pending_dependencies.push((
+                                    package.clone(),
                                     dep_name.to_string(),
-                                    dep_pkg_version,
-                                    Ecosystem::Packagist,
-                                ) {
-                                    dependencies.push(Dependency::new(
-                                        package.clone(),
-                                        dep_pkg,
-                                        dep_req.to_string(),
-                                        false,
-                                    ));
-                                }
+                                    dep_req.to_string(),
+                                ));
                             }
                         }
                     }
+                }
+            }
+        }
+
+        let mut package_by_name: HashMap<String, Package> = HashMap::new();
+        for package in &packages {
+            package_by_name
+                .entry(package.name.clone())
+                .and_modify(|current| {
+                    if package.version > current.version {
+                        *current = package.clone();
+                    }
+                })
+                .or_insert_with(|| package.clone());
+        }
+
+        for (from, dep_name, dep_req) in pending_dependencies {
+            if let Some(existing_target) = package_by_name.get(&dep_name) {
+                dependencies.push(Dependency::new(
+                    from,
+                    existing_target.clone(),
+                    dep_req,
+                    false,
+                ));
+                continue;
+            }
+
+            if let Some(inferred_version) = Self::infer_dependency_version(&dep_req) {
+                if let Ok(inferred_target) =
+                    Package::new(dep_name, inferred_version, Ecosystem::Packagist)
+                {
+                    dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
                 }
             }
         }
