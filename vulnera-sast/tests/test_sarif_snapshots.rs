@@ -153,10 +153,7 @@ async fn sarif_schema_structure() {
         obj.contains_key("$schema") || obj.contains_key("schema"),
         "SARIF should contain schema reference"
     );
-    assert!(
-        obj.contains_key("version"),
-        "SARIF should contain version"
-    );
+    assert!(obj.contains_key("version"), "SARIF should contain version");
     assert!(obj.contains_key("runs"), "SARIF should contain runs array");
 
     let runs = obj["runs"].as_array().expect("runs should be array");

@@ -248,9 +248,6 @@ fn valid_c_programs_always_parse() {
         "void foo(int *p) { *p = 42; }",
     ];
     for code in programs {
-        assert!(
-            try_parse(Language::C, code),
-            "Valid C should parse: {code}"
-        );
+        assert!(try_parse(Language::C, code), "Valid C should parse: {code}");
     }
 }

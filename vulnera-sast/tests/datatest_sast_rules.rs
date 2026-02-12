@@ -14,9 +14,8 @@ use common::fixture_types::CveFixture;
 use std::path::Path;
 
 fn test_cve_fixture(path: &Path) -> datatest_stable::Result<()> {
-    let fixture = CveFixture::from_file(path).map_err(|e| {
-        format!("Failed to parse fixture {}: {e}", path.display())
-    })?;
+    let fixture = CveFixture::from_file(path)
+        .map_err(|e| format!("Failed to parse fixture {}: {e}", path.display()))?;
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

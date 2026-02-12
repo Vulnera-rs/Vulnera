@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::domain::{LlmError, LlmProvider};
 use crate::infrastructure::providers::{
-    GoogleAIProvider, OpenAIProvider, ResilientProvider, ResilienceConfig,
+    GoogleAIProvider, OpenAIProvider, ResilienceConfig, ResilientProvider,
 };
 
 /// Provider type identifier
@@ -228,20 +228,14 @@ impl ProviderRegistry {
                     .azure_api_version
                     .unwrap_or_else(|| "2024-02-15-preview".to_string());
 
-                let provider = OpenAIProvider::azure(
-                    endpoint,
-                    &config.api_key,
-                    deployment,
-                    api_version,
-                );
+                let provider =
+                    OpenAIProvider::azure(endpoint, &config.api_key, deployment, api_version);
                 Ok(wrap_with_resilience(provider, resilience))
             }
-            ProviderType::Custom(name) => {
-                Err(LlmError::ProviderNotFound(format!(
-                    "Unknown provider type: {}",
-                    name
-                )))
-            }
+            ProviderType::Custom(name) => Err(LlmError::ProviderNotFound(format!(
+                "Unknown provider type: {}",
+                name
+            ))),
         }
     }
 

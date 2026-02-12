@@ -675,8 +675,8 @@ pub async fn analyze_dependencies(
                 .await
             {
                 Ok((report, dependency_graph)) => {
-                    let was_cached = report.metadata.analysis_duration
-                        < std::time::Duration::from_millis(50);
+                    let was_cached =
+                        report.metadata.analysis_duration < std::time::Duration::from_millis(50);
                     let mut result = convert_analysis_report_to_response(
                         &report,
                         filename_for_response,

@@ -45,7 +45,9 @@ async fn scan_files(files: &[(&str, &str)]) -> vulnera_core::domain::module::Mod
 #[tokio::test]
 async fn test_python_cross_function_taint_source_to_sink() {
     // Taint originates in get_input(), flows into process() which calls eval()
-    let result = scan_files(&[("app.py", r#"
+    let result = scan_files(&[(
+        "app.py",
+        r#"
 import os
 
 def get_input():
@@ -56,7 +58,8 @@ def process(data):
 
 user = get_input()
 process(user)
-"#)])
+"#,
+    )])
     .await;
 
     // We expect at least 1 finding for eval() with tainted data
@@ -85,7 +88,9 @@ process(user)
 #[tokio::test]
 async fn test_python_sanitizer_blocks_cross_function_taint() {
     // Taint originates in get_input(), but sanitize() clears it before sink
-    let result = scan_files(&[("app.py", r#"
+    let result = scan_files(&[(
+        "app.py",
+        r#"
 import os
 import html
 
@@ -98,7 +103,8 @@ def sanitize(data):
 user = get_input()
 safe = sanitize(user)
 eval(safe)
-"#)])
+"#,
+    )])
     .await;
 
     // html.escape is a known sanitizer pattern — the eval(safe) should ideally
@@ -132,7 +138,9 @@ eval(safe)
 
 #[tokio::test]
 async fn test_js_cross_function_taint_source_to_sink() {
-    let result = scan_files(&[("app.js", r#"
+    let result = scan_files(&[(
+        "app.js",
+        r#"
 const child_process = require('child_process');
 
 function getUserInput() {
@@ -145,7 +153,8 @@ function runCommand(cmd) {
 
 const input = getUserInput();
 runCommand(input);
-"#)])
+"#,
+    )])
     .await;
 
     // Expect a finding for child_process.exec() with tainted data

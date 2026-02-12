@@ -9,8 +9,8 @@
 use crate::domain::finding::{Finding, Severity};
 use crate::domain::pattern_types::PatternRule;
 use crate::domain::rule::{
-    SarifArtifactChange, SarifArtifactLocation, SarifCodeFlow, SarifDefaultConfiguration,
-    SarifFix, SarifInsertedContent, SarifInvocation, SarifLevel, SarifLocation, SarifMessage,
+    SarifArtifactChange, SarifArtifactLocation, SarifCodeFlow, SarifDefaultConfiguration, SarifFix,
+    SarifInsertedContent, SarifInvocation, SarifLevel, SarifLocation, SarifMessage,
     SarifPhysicalLocation, SarifRegion, SarifReplacement, SarifReport, SarifResult, SarifRule,
     SarifRuleProperties, SarifRun, SarifSnippet, SarifThreadFlow, SarifThreadFlowLocation,
     SarifTool, SarifToolDriver,
@@ -69,7 +69,8 @@ impl SarifExporter {
     /// Export findings to SARIF report
     #[instrument(skip(self, findings, rules), fields(finding_count = findings.len()))]
     pub fn export(&self, findings: &[Finding], rules: &[PatternRule]) -> SarifReport {
-        let rule_map: HashMap<&str, &PatternRule> = rules.iter().map(|r| (r.id.as_str(), r)).collect();
+        let rule_map: HashMap<&str, &PatternRule> =
+            rules.iter().map(|r| (r.id.as_str(), r)).collect();
 
         // Build SARIF rules from our rules
         let sarif_rules: Vec<SarifRule> = rules.iter().map(|r| self.rule_to_sarif(r)).collect();
@@ -146,7 +147,11 @@ impl SarifExporter {
     }
 
     /// Convert a Finding to SarifResult
-    fn finding_to_sarif_result(&self, finding: &Finding, rule: Option<&PatternRule>) -> SarifResult {
+    fn finding_to_sarif_result(
+        &self,
+        finding: &Finding,
+        rule: Option<&PatternRule>,
+    ) -> SarifResult {
         let snippet = if self.config.include_snippets {
             // Use the snippet from finding if available, otherwise extract from description
             finding
@@ -366,6 +371,7 @@ mod tests {
             message: None,
             fix: None,
             metavariable_constraints: Vec::new(),
+            semantic: None,
         }
     }
 

@@ -100,9 +100,15 @@ impl ModuleSelector for RuleBasedModuleSelector {
                 modules.push(ModuleType::SBOM);
 
                 // IaC security if infrastructure files are present
-                if project.metadata.frameworks.contains(&"terraform".to_string())
+                if project
+                    .metadata
+                    .frameworks
+                    .contains(&"terraform".to_string())
                     || project.metadata.frameworks.contains(&"docker".to_string())
-                    || project.metadata.frameworks.contains(&"kubernetes".to_string())
+                    || project
+                        .metadata
+                        .frameworks
+                        .contains(&"kubernetes".to_string())
                 {
                     modules.push(ModuleType::IaC);
                 }

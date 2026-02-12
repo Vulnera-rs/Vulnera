@@ -437,7 +437,11 @@ fn translate_binary_expression(
         .position(|t| matches!(t, MetavarToken::Operator(_)));
 
     let (left_token, right_token) = if let Some(idx) = op_index {
-        let left = if idx > 0 { Some(filtered[idx - 1]) } else { None };
+        let left = if idx > 0 {
+            Some(filtered[idx - 1])
+        } else {
+            None
+        };
         let right = filtered.get(idx + 1).copied();
         (left, right)
     } else {
@@ -537,10 +541,9 @@ fn translate_member_access(tokens: &[MetavarToken], language: &Language) -> Opti
                 "(identifier) @object".to_string(),
                 Some(format!(r#"(#eq? @object \"{name}\")"#)),
             ),
-            Some(MetavarToken::Metavar(name)) => (
-                format!("(_) @{}", capture_name_for_metavar(name)),
-                None,
-            ),
+            Some(MetavarToken::Metavar(name)) => {
+                (format!("(_) @{}", capture_name_for_metavar(name)), None)
+            }
             _ => ("(_) @object".to_string(), None),
         };
 
@@ -550,10 +553,9 @@ fn translate_member_access(tokens: &[MetavarToken], language: &Language) -> Opti
                 "(property_identifier) @attribute".to_string(),
                 Some(format!(r#"(#eq? @attribute \"{name}\")"#)),
             ),
-            Some(MetavarToken::Metavar(name)) => (
-                format!("(_) @{}", capture_name_for_metavar(name)),
-                None,
-            ),
+            Some(MetavarToken::Metavar(name)) => {
+                (format!("(_) @{}", capture_name_for_metavar(name)), None)
+            }
             _ => ("(_) @attribute".to_string(), None),
         };
 
@@ -630,7 +632,13 @@ fn capture_name_for_metavar(name: &str) -> String {
     let raw = name.trim_start_matches('$');
     let mut normalized: String = raw
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     if normalized.is_empty() {
@@ -649,15 +657,11 @@ fn capture_name_for_metavar(name: &str) -> String {
     format!("mv_{normalized}")
 }
 
-fn operand_pattern(
-    token: Option<&MetavarToken>,
-    fallback: &str,
-) -> (String, Option<String>) {
+fn operand_pattern(token: Option<&MetavarToken>, fallback: &str) -> (String, Option<String>) {
     match token {
-        Some(MetavarToken::Metavar(name)) => (
-            format!("(_) @{}", capture_name_for_metavar(name)),
-            None,
-        ),
+        Some(MetavarToken::Metavar(name)) => {
+            (format!("(_) @{}", capture_name_for_metavar(name)), None)
+        }
         Some(MetavarToken::Identifier(name)) => (
             format!("(_) @{fallback}"),
             Some(format!(r#"(#eq? @{fallback} "{name}")"#)),

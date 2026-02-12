@@ -129,9 +129,7 @@ impl IncrementalTracker {
         let size = content.len() as u64;
 
         let self_changed = match self.previous_state.get(file_path) {
-            Some(prev_state) => {
-                prev_state.content_hash != content_hash || prev_state.size != size
-            }
+            Some(prev_state) => prev_state.content_hash != content_hash || prev_state.size != size,
             None => true, // New file
         };
 
@@ -150,7 +148,7 @@ impl IncrementalTracker {
                     match (self.previous_state.get(dep), self.current_state.get(dep)) {
                         (Some(prev), Some(curr)) => prev.content_hash != curr.content_hash,
                         (None, Some(_)) => true,  // New dependency file
-                        (Some(_), None) => false,  // Not yet processed — can't tell, skip
+                        (Some(_), None) => false, // Not yet processed — can't tell, skip
                         (None, None) => false,
                     }
                 })
