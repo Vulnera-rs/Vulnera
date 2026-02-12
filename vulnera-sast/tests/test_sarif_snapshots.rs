@@ -54,6 +54,15 @@ fn redact_dynamic_fields(value: &mut serde_json::Value) {
                 }
             }
 
+            // Redact non-deterministic fingerprints
+            if let Some(fingerprints) = map.get_mut("fingerprints") {
+                if let Some(f_map) = fingerprints.as_object_mut() {
+                    for v in f_map.values_mut() {
+                        *v = serde_json::Value::String("<REDACTED>".to_string());
+                    }
+                }
+            }
+
             // Recurse
             for v in map.values_mut() {
                 redact_dynamic_fields(v);

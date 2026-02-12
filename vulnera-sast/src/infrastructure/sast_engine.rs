@@ -338,7 +338,10 @@ impl SastEngine {
                     } else {
                         let tree = match self.parse(bound_text, language).await {
                             Ok(tree) => tree,
-                            Err(_) => return false,
+                            Err(e) => {
+                                debug!(rule_id = %rule.id, text = %bound_text, error = %e, "Failed to parse metavariable content");
+                                return false;
+                            }
                         };
                         parsed_cache.insert(bound_text.clone(), tree.clone());
                         tree
@@ -350,7 +353,10 @@ impl SastEngine {
                             .await
                         {
                             Ok(matches) => matches,
-                            Err(_) => return false,
+                            Err(e) => {
+                                debug!(rule_id = %rule.id, error = %e, "Metavariable pattern match failed");
+                                return false;
+                            }
                         };
                         if matches.is_empty() {
                             return false;
@@ -363,7 +369,10 @@ impl SastEngine {
                             .await
                         {
                             Ok(matches) => matches,
-                            Err(_) => return false,
+                            Err(e) => {
+                                debug!(rule_id = %rule.id, error = %e, "Metavariable negative pattern match failed");
+                                return false;
+                            }
                         };
                         if !matches.is_empty() {
                             return false;

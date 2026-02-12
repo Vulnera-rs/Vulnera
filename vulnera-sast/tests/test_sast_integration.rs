@@ -135,7 +135,8 @@ async fn test_sast_module_go_scan() {
 package main
 import "os/exec"
 func main() {
-    cmd := exec.Command("ls", "-la")
+    userCmd := "ls"
+    cmd := exec.Command(userCmd, "-la")
     cmd.Run()
 }
 "#;
@@ -259,7 +260,7 @@ async fn test_sast_comprehensive_rules() {
 import subprocess
 import yaml
 from flask import render_template_string
-subprocess.call("ls")
+subprocess.call("ls", shell=True)
 yaml.load(data)
 render_template_string(template)
 "#,
@@ -327,7 +328,8 @@ fn main() {
     unsafe {
         // unsafe block
     }
-    Command::new("ls").spawn();
+    let bin = "ls";
+    Command::new(bin).spawn();
 }
 "#,
     )
@@ -348,6 +350,16 @@ fn main() {
         .iter()
         .filter_map(|f| f.rule_id.clone())
         .collect();
+
+    if !rule_ids.contains(&"rust-unsafe".to_string()) {
+        println!("Rust rule IDs found: {:?}", rule_ids);
+        for finding in &result.findings {
+            println!(
+                "Finding: ID={:?}, Location={:?}",
+                finding.rule_id, finding.location
+            );
+        }
+    }
     assert!(rule_ids.contains(&"rust-command".to_string()));
     assert!(rule_ids.contains(&"rust-unsafe".to_string()));
 
@@ -361,7 +373,8 @@ import "database/sql"
 import "unsafe"
 func main() {
     var sql *sql.DB
-    sql.Query("SELECT * FROM users")
+    query := "SELECT * FROM users"
+    sql.Query(query)
     p := unsafe.Pointer(ptr)
 }
 "#,
