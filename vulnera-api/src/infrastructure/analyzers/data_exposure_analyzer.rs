@@ -2,6 +2,7 @@
 
 use crate::domain::entities::{ApiFinding, ApiLocation, FindingSeverity};
 use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec, ParameterLocation};
+use tracing::error;
 
 /// Analyzer for sensitive data exposure
 pub struct DataExposureAnalyzer;
@@ -24,10 +25,27 @@ impl DataExposureAnalyzer {
         // Note: Using lazy_static here would be better performance-wise if this analyzer is instantiated often,
         // but for now local compilation is fine or better yet, move to lazy_static in module scope if possible.
         // Given existing structure, we'll compile locally or use a static block if we refactor.
-        // For simplicity in this function:
         let jwt_pattern =
-            regex::Regex::new(r"eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+").unwrap();
-        let private_key_pattern = regex::Regex::new(r"-----BEGIN [A-Z]+ PRIVATE KEY-----").unwrap();
+            match regex::Regex::new(r"eyJ[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+\.[a-zA-Z0-9-_]+") {
+                Ok(pattern) => pattern,
+                Err(error) => {
+                    error!(
+                        "Failed to compile JWT regex in data exposure analyzer: {}",
+                        error
+                    );
+                    return findings;
+                }
+            };
+        let private_key_pattern = match regex::Regex::new(r"-----BEGIN [A-Z]+ PRIVATE KEY-----") {
+            Ok(pattern) => pattern,
+            Err(error) => {
+                error!(
+                    "Failed to compile private key regex in data exposure analyzer: {}",
+                    error
+                );
+                return findings;
+            }
+        };
 
         for path in &spec.paths {
             for operation in &path.operations {

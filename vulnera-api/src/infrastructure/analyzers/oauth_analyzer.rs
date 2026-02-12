@@ -108,6 +108,11 @@ impl OAuthAnalyzer {
         // Single Scope Anti-Pattern
         // If API has > 5 endpoints but uses only 1 scope, it likely has poor granularity
         if endpoint_count > 5 && all_scopes.len() == 1 {
+            let scope_label = all_scopes
+                .iter()
+                .next()
+                .map(String::as_str)
+                .unwrap_or("<unknown>");
             findings.push(ApiFinding {
                 id: "single-scope-anti-pattern".to_string(),
                 vulnerability_type: ApiVulnerabilityType::IneffectiveScopeHierarchy, // Need to ensure this enum variant exists or use similar
@@ -120,7 +125,7 @@ impl OAuthAnalyzer {
                 severity: FindingSeverity::Medium,
                 description: format!(
                     "API contains {} endpoints but uses only 1 OAuth scope ('{}'). This indicates ineffective authorization granularity.",
-                    endpoint_count, all_scopes.iter().next().unwrap()
+                    endpoint_count, scope_label
                 ),
                 recommendation: "Define granular scopes (e.g., read:users, write:orders) to follow Least Privilege principle".to_string(),
                 path: None,
