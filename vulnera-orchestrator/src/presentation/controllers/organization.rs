@@ -45,6 +45,7 @@ pub async fn create_organization(
 ) -> Result<(StatusCode, Json<OrganizationResponse>), Response> {
     // Execute use case
     let result = state
+        .organization
         .create_organization_use_case
         .execute(auth.user_id, request.name)
         .await
@@ -99,6 +100,7 @@ pub async fn list_organizations(
     auth: Auth,
 ) -> Result<Json<OrganizationListResponse>, Response> {
     let organizations = state
+        .organization
         .list_user_organizations_use_case
         .execute(auth.user_id)
         .await
@@ -112,6 +114,7 @@ pub async fn list_organizations(
     for org in &organizations {
         // Get member count for each org
         let member_count = state
+            .organization
             .organization_member_repository
             .count_members(&org.id)
             .await
@@ -166,6 +169,7 @@ pub async fn get_organization(
     let org_id = OrganizationId::from(id);
 
     let details = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -222,6 +226,7 @@ pub async fn update_organization(
     let org_id = OrganizationId::from(id);
 
     let organization = state
+        .organization
         .update_organization_name_use_case
         .execute(org_id, auth.user_id, request.name)
         .await
@@ -231,6 +236,7 @@ pub async fn update_organization(
         })?;
 
     let member_count = state
+        .organization
         .organization_member_repository
         .count_members(&org_id)
         .await
@@ -279,6 +285,7 @@ pub async fn delete_organization(
     let org_id = OrganizationId::from(id);
 
     state
+        .organization
         .delete_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -322,6 +329,7 @@ pub async fn list_members(
 
     // Get organization details (includes members)
     let details = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -338,6 +346,7 @@ pub async fn list_members(
     for member in members {
         // Get user email
         let email = state
+            .auth
             .user_repository
             .find_by_id(&member.user_id)
             .await
@@ -413,6 +422,7 @@ pub async fn invite_member(
 
     // Find user by email
     let invitee = state
+        .auth
         .user_repository
         .find_by_email(&email)
         .await
@@ -432,6 +442,7 @@ pub async fn invite_member(
         })?;
 
     let member = state
+        .organization
         .invite_member_use_case
         .execute(org_id, auth.user_id, invitee.user_id)
         .await
@@ -485,6 +496,7 @@ pub async fn remove_member(
     let target_user_id = UserId::from(user_id);
 
     state
+        .organization
         .remove_member_use_case
         .execute(org_id, auth.user_id, target_user_id)
         .await
@@ -527,6 +539,7 @@ pub async fn leave_organization(
     let org_id = OrganizationId::from(id);
 
     state
+        .organization
         .leave_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -572,6 +585,7 @@ pub async fn transfer_ownership(
     let new_owner_id = UserId::from(request.new_owner_id);
 
     let organization = state
+        .organization
         .transfer_ownership_use_case
         .execute(org_id, auth.user_id, new_owner_id)
         .await
@@ -581,6 +595,7 @@ pub async fn transfer_ownership(
         })?;
 
     let member_count = state
+        .organization
         .organization_member_repository
         .count_members(&org_id)
         .await
@@ -630,6 +645,7 @@ pub async fn get_organization_stats(
 
     // First verify user is a member via get_organization
     let details = state
+        .organization
         .get_organization_use_case
         .execute(org_id, auth.user_id)
         .await
@@ -640,6 +656,7 @@ pub async fn get_organization_stats(
 
     // Get dashboard overview which includes stats
     let overview = state
+        .analytics
         .get_dashboard_overview_use_case
         .execute(org_id)
         .await

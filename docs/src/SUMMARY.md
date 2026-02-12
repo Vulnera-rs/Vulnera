@@ -45,4 +45,5 @@
 
 - [Configuration](reference/configuration.md)
 - [System Architecture](reference/architecture.md)
+- [Orchestrator Observability Architecture](reference/orchestrator-observability.md)
 - [FAQ](reference/faq.md)

@@ -465,13 +465,13 @@ async fn deliver_webhook(
     let mut last_error: Option<String> = None;
 
     for attempt in 1..=max_retries {
-        match request
-            .try_clone()
-            .expect("Request should be cloneable")
-            .body(payload_json.clone())
-            .send()
-            .await
-        {
+        let Some(cloned_request) = request.try_clone() else {
+            last_error = Some("Failed to clone webhook request for retry".to_string());
+            error!(job_id = %job_id, callback_url, "Webhook request could not be cloned");
+            break;
+        };
+
+        match cloned_request.body(payload_json.clone()).send().await {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {

@@ -37,7 +37,7 @@ pub async fn get_job(
     auth: Auth,
     Path(id): Path<Uuid>,
 ) -> Result<Json<JobStatusResponse>, StatusCode> {
-    match state.job_store.get_snapshot(id).await {
+    match state.orchestrator.job_store.get_snapshot(id).await {
         Ok(Some(snapshot)) => {
             // Validate job ownership: only the user who created the job can access it
             // Master key bypass: allow master key authentication to access any job

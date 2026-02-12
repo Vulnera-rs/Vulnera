@@ -160,6 +160,24 @@ pub fn extract_cookie(headers: &HeaderMap, cookie_name: &str) -> Option<String> 
         .map(|s| s.to_string())
 }
 
+fn internal_cookie_error(message: impl Into<String>) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            code: "COOKIE_HEADER_BUILD_FAILED".to_string(),
+            message: message.into(),
+            details: None,
+            request_id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+        }),
+    )
+}
+
+fn cookie_header_value(cookie: String) -> Result<HeaderValue, (StatusCode, Json<ErrorResponse>)> {
+    HeaderValue::from_str(&cookie)
+        .map_err(|e| internal_cookie_error(format!("Invalid Set-Cookie header value: {}", e)))
+}
+
 /// Login endpoint - sets HttpOnly cookies for tokens
 #[utoipa::path(
     post,
@@ -226,23 +244,21 @@ pub async fn login(
 
     headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )?,
     );
 
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
+        )?,
     );
 
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
+        cookie_header_value(state.build_csrf_cookie(&csrf_token, access_token_max_age))?,
     );
 
     let body = AuthResponse {
@@ -325,23 +341,21 @@ pub async fn register(
 
     headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )?,
     );
 
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
+        )?,
     );
 
     headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
+        cookie_header_value(state.build_csrf_cookie(&csrf_token, access_token_max_age))?,
     );
 
     // Get roles for response
@@ -418,24 +432,22 @@ pub async fn refresh_token(
 
     response_headers.insert(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_access_token_cookie(&result.access_token, access_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_access_token_cookie(&result.access_token, access_token_max_age),
+        )?,
     );
 
     // Set rotated refresh token cookie
     response_headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(
-            &state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
-        )
-        .unwrap(),
+        cookie_header_value(
+            state.build_refresh_token_cookie(&result.refresh_token, refresh_token_max_age),
+        )?,
     );
 
     response_headers.append(
         header::SET_COOKIE,
-        HeaderValue::from_str(&state.build_csrf_cookie(&csrf_token, access_token_max_age)).unwrap(),
+        cookie_header_value(state.build_csrf_cookie(&csrf_token, access_token_max_age))?,
     );
 
     let body = RefreshResponse {
@@ -492,7 +504,7 @@ pub async fn logout(
     let mut response_headers = HeaderMap::new();
 
     for cookie in state.build_clear_cookies() {
-        response_headers.append(header::SET_COOKIE, HeaderValue::from_str(&cookie).unwrap());
+        response_headers.append(header::SET_COOKIE, cookie_header_value(cookie)?);
     }
 
     let body = LogoutResponse {

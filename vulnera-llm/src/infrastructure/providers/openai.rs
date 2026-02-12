@@ -38,7 +38,10 @@ impl OpenAIProvider {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("Failed to build HTTP client");
+            .unwrap_or_else(|e| {
+                error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
+                Client::new()
+            });
 
         Self {
             client,
@@ -61,7 +64,10 @@ impl OpenAIProvider {
         let client = Client::builder()
             .timeout(Duration::from_secs(120))
             .build()
-            .expect("Failed to build HTTP client");
+            .unwrap_or_else(|e| {
+                error!(error = %e, "Failed to build Azure HTTP client with custom timeout, using default client");
+                Client::new()
+            });
 
         let deployment_str = deployment.into();
 

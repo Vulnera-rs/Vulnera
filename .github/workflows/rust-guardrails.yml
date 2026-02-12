@@ -1,0 +1,24 @@
+name: Rust Guardrails
+
+on:
+    pull_request:
+        branches: [main]
+    push:
+        branches: [main]
+
+jobs:
+    panic-guardrails:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Install Rust toolchain
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Enforce panic guardrails
+              run: |
+                  cargo clippy --no-deps -p vulnera-orchestrator -p vulnera-sandbox -p vulnera-llm -- \
+                    -D clippy::unwrap_used \
+                    -D clippy::expect_used \
+                    -D clippy::panic

@@ -66,8 +66,7 @@ use vulnera_deps::{
 
 /// Application state for orchestrator
 #[derive(Clone)]
-pub struct OrchestratorState {
-    // Orchestrator use cases
+pub struct OrchestratorServices {
     pub create_job_use_case: Arc<CreateAnalysisJobUseCase>,
     pub execute_job_use_case: Arc<ExecuteAnalysisJobUseCase>,
     pub aggregate_results_use_case: Arc<AggregateResultsUseCase>,
@@ -75,22 +74,26 @@ pub struct OrchestratorState {
     pub job_store: Arc<dyn JobStore>,
     pub job_queue: JobQueueHandle,
     pub workflow: Arc<JobWorkflow>,
+    pub db_pool: Arc<sqlx::PgPool>,
+}
 
-    // Services
+#[derive(Clone)]
+pub struct InfrastructureServices {
     pub cache_service: Arc<CacheServiceImpl>,
     pub report_service: Arc<ReportServiceImpl>,
     pub vulnerability_repository: Arc<dyn IVulnerabilityRepository>,
+    pub rate_limiter_service: Option<Arc<RateLimiterService>>,
+}
 
-    // Dependency analysis use case
+#[derive(Clone)]
+pub struct DependencyServices {
     pub dependency_analysis_use_case: Arc<AnalyzeDependenciesUseCase<CacheServiceImpl>>,
-
-    // Repository analysis service
     pub repository_analysis_service: Arc<dyn RepositoryAnalysisService>,
-
-    // Version resolution service
     pub version_resolution_service: Arc<dyn VersionResolutionService>,
+}
 
-    // LLM use cases
+#[derive(Clone)]
+pub struct LlmServices {
     pub generate_code_fix_use_case:
         Arc<vulnera_llm::application::use_cases::GenerateCodeFixUseCase>,
     pub explain_vulnerability_use_case:
@@ -98,8 +101,10 @@ pub struct OrchestratorState {
     pub natural_language_query_use_case:
         Arc<vulnera_llm::application::use_cases::NaturalLanguageQueryUseCase>,
     pub enrich_findings_use_case: Arc<vulnera_llm::application::use_cases::EnrichFindingsUseCase>,
+}
 
-    // Auth-related state
+#[derive(Clone)]
+pub struct AuthServices {
     pub db_pool: Arc<sqlx::PgPool>,
     pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
     pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
@@ -111,17 +116,13 @@ pub struct OrchestratorState {
     pub validate_token_use_case: Arc<ValidateTokenUseCase>,
     pub refresh_token_use_case: Arc<RefreshTokenUseCase>,
     pub validate_api_key_use_case: Arc<ValidateApiKeyUseCase>,
-
-    // Token blacklist for logout/revocation
     pub token_blacklist: Arc<dyn TokenBlacklistService>,
-
-    // Auth state (for extractors)
     pub auth_state: AuthState,
+}
 
-    // Organization-related repositories
+#[derive(Clone)]
+pub struct OrganizationServices {
     pub organization_member_repository: Arc<dyn IOrganizationMemberRepository>,
-
-    // Organization use cases
     pub create_organization_use_case: Arc<CreateOrganizationUseCase>,
     pub get_organization_use_case: Arc<GetOrganizationUseCase>,
     pub list_user_organizations_use_case: Arc<ListUserOrganizationsUseCase>,
@@ -131,19 +132,25 @@ pub struct OrchestratorState {
     pub transfer_ownership_use_case: Arc<TransferOwnershipUseCase>,
     pub delete_organization_use_case: Arc<DeleteOrganizationUseCase>,
     pub update_organization_name_use_case: Arc<UpdateOrganizationNameUseCase>,
+}
 
-    // Analytics use cases
+#[derive(Clone)]
+pub struct AnalyticsServices {
     pub get_dashboard_overview_use_case: Arc<GetDashboardOverviewUseCase>,
     pub get_monthly_analytics_use_case: Arc<GetMonthlyAnalyticsUseCase>,
     pub check_quota_use_case: Arc<CheckQuotaUseCase>,
-
-    // Analytics service (for personal analytics)
     pub analytics_service: Arc<vulnera_core::application::analytics::AnalyticsAggregationService>,
+}
 
-    // Rate limiting service
-    pub rate_limiter_service: Option<Arc<RateLimiterService>>,
-
-    // Config and metadata
+#[derive(Clone)]
+pub struct OrchestratorState {
+    pub orchestrator: Arc<OrchestratorServices>,
+    pub infrastructure: Arc<InfrastructureServices>,
+    pub dependencies: Arc<DependencyServices>,
+    pub llm: Arc<LlmServices>,
+    pub auth: Arc<AuthServices>,
+    pub organization: Arc<OrganizationServices>,
+    pub analytics: Arc<AnalyticsServices>,
     pub config: Arc<vulnera_core::Config>,
     pub startup_time: Instant,
 }
@@ -189,6 +196,7 @@ pub async fn analyze(
 
     // Create job
     let (job, project) = state
+        .orchestrator
         .create_job_use_case
         .execute(
             source_type,
@@ -210,6 +218,7 @@ pub async fn analyze(
     // Fetch user's organization for analytics tracking
     let organization_id = if !auth.is_master_key {
         state
+            .organization
             .list_user_organizations_use_case
             .execute(auth.user_id)
             .await
@@ -233,6 +242,7 @@ pub async fn analyze(
     // Transition Pending → Queued via workflow (persists snapshot + audit trail)
     let mut job = job;
     state
+        .orchestrator
         .workflow
         .enqueue_job(
             &mut job,
@@ -245,6 +255,7 @@ pub async fn analyze(
 
     // Push onto the background worker queue
     state
+        .orchestrator
         .job_queue
         .enqueue(QueuedAnalysisJob {
             job,
@@ -637,10 +648,10 @@ pub async fn analyze_dependencies(
 
     // Process files in parallel
     let mut join_set: JoinSet<Result<FileAnalysisResult, String>> = JoinSet::new();
-    let use_case = state.dependency_analysis_use_case.clone();
+    let use_case = state.dependencies.dependency_analysis_use_case.clone();
     let total_files = request.files.len();
 
-    let version_resolution_service = state.version_resolution_service.clone();
+    let version_resolution_service = state.dependencies.version_resolution_service.clone();
 
     for file_request in request.files {
         let use_case_clone = use_case.clone();

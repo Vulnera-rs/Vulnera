@@ -4,7 +4,7 @@
 //! kernel-level sandboxing is not available.
 
 use async_trait::async_trait;
-use tracing::info;
+use tracing::{error, info};
 use wasmtime::{Config, Engine};
 
 use crate::domain::policy::SandboxPolicy;
@@ -26,7 +26,13 @@ impl WasmSandbox {
         config.consume_fuel(true); // Enable fuel-based execution limiting
         config.epoch_interruption(true); // Enable epoch-based interruption
 
-        let engine = Engine::new(&config).expect("Failed to create Wasmtime engine");
+        let engine = match Engine::new(&config) {
+            Ok(engine) => engine,
+            Err(err) => {
+                error!(error = %err, "Failed to create configured Wasmtime engine; falling back to default engine");
+                Engine::default()
+            }
+        };
 
         Self { engine }
     }

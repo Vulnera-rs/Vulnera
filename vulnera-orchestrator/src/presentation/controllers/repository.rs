@@ -103,6 +103,7 @@ pub async fn analyze_repository(
     };
 
     let analysis_result = state
+        .dependencies
         .repository_analysis_service
         .analyze_repository(input)
         .await
@@ -124,7 +125,7 @@ pub async fn analyze_repository(
                 coordinates.owner, coordinates.repo
             ))
         }),
-        state.version_resolution_service.clone(),
+        state.dependencies.version_resolution_service.clone(),
         state.config.recommendations.max_version_queries_per_request,
         config_caps,
     )

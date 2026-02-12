@@ -53,6 +53,7 @@ pub async fn generate_code_fix(
     );
 
     let fix = state
+        .llm
         .generate_code_fix_use_case
         .execute(
             &request.vulnerability_id,
@@ -92,6 +93,7 @@ pub async fn explain_vulnerability(
     Json(request): Json<ExplainVulnerabilityRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let stream_result = state
+        .llm
         .explain_vulnerability_use_case
         .execute_stream(
             &request.vulnerability_id,
@@ -159,6 +161,7 @@ pub async fn natural_language_query(
         .unwrap_or_default();
 
     let answer = state
+        .llm
         .natural_language_query_use_case
         .execute(&request.query, &context_str)
         .await
@@ -207,6 +210,7 @@ pub async fn enrich_job_findings(
 
     // Fetch job snapshot
     let snapshot = state
+        .orchestrator
         .job_store
         .get_snapshot(job_id)
         .await
@@ -252,6 +256,7 @@ pub async fn enrich_job_findings(
 
     // Execute enrichment
     let enrich_response = state
+        .llm
         .enrich_findings_use_case
         .execute(enrich_request)
         .await
@@ -266,10 +271,9 @@ pub async fn enrich_job_findings(
     let enriched_findings: Vec<EnrichedFindingDto> = enrich_response
         .findings
         .into_iter()
-        .filter(|f| f.enrichment.is_some())
-        .map(|f| {
-            let enrichment = f.enrichment.unwrap();
-            EnrichedFindingDto {
+        .filter_map(|f| {
+            let enrichment = f.enrichment?;
+            Some(EnrichedFindingDto {
                 id: f.id,
                 severity: format!("{:?}", f.severity),
                 description: f.description,
@@ -284,7 +288,7 @@ pub async fn enrich_job_findings(
                 risk_summary: enrichment.risk_summary,
                 enrichment_successful: enrichment.enrichment_successful,
                 enrichment_error: enrichment.error,
-            }
+            })
         })
         .collect();
 

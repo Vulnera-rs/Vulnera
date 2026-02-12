@@ -184,7 +184,7 @@ async fn inject_auth_state_middleware(
     next: Next,
 ) -> Response {
     // Create AuthState from OrchestratorState and inject into extensions
-    let auth_state = orchestrator_state.auth_state.clone();
+    let auth_state = orchestrator_state.auth.auth_state.clone();
     request.extensions_mut().insert(auth_state);
     next.run(request).await
 }
@@ -306,14 +306,14 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
 
     // Create auth state for auth endpoints
     let auth_app_state = AuthAppState {
-        login_use_case: orchestrator_state.login_use_case.clone(),
-        register_use_case: orchestrator_state.register_use_case.clone(),
-        refresh_token_use_case: orchestrator_state.refresh_token_use_case.clone(),
-        validate_token_use_case: orchestrator_state.validate_token_use_case.clone(),
-        auth_state: orchestrator_state.auth_state.clone(),
+        login_use_case: orchestrator_state.auth.login_use_case.clone(),
+        register_use_case: orchestrator_state.auth.register_use_case.clone(),
+        refresh_token_use_case: orchestrator_state.auth.refresh_token_use_case.clone(),
+        validate_token_use_case: orchestrator_state.auth.validate_token_use_case.clone(),
+        auth_state: orchestrator_state.auth.auth_state.clone(),
         token_ttl_hours: config.auth.token_ttl_hours,
         refresh_token_ttl_hours: config.auth.refresh_token_ttl_hours,
-        token_blacklist: Some(orchestrator_state.token_blacklist.clone()),
+        token_blacklist: Some(orchestrator_state.auth.token_blacklist.clone()),
         blacklist_tokens_on_logout: config.auth.blacklist_tokens_on_logout,
         csrf_service: csrf_service.clone(),
         cookie_domain: config.auth.cookie_domain.clone(),
@@ -476,14 +476,14 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
     }
 
     // Conditionally add rate limiting middleware with early auth extraction
-    if let Some(rate_limiter_service) = &orchestrator_state.rate_limiter_service {
+    if let Some(rate_limiter_service) = &orchestrator_state.infrastructure.rate_limiter_service {
         let rate_limiter_state = Arc::new(RateLimiterState::new(Arc::clone(rate_limiter_service)));
 
         // Early auth middleware runs BEFORE rate limiting to properly identify authenticated users
         // This ensures authenticated requests get the correct rate limit tier
         let early_auth_state = Arc::new(EarlyAuthState {
-            validate_token: orchestrator_state.validate_token_use_case.clone(),
-            validate_api_key: orchestrator_state.auth_state.validate_api_key.clone(),
+            validate_token: orchestrator_state.auth.validate_token_use_case.clone(),
+            validate_api_key: orchestrator_state.auth.auth_state.validate_api_key.clone(),
         });
 
         // Layer order is reversed - rate_limit runs first, then early_auth
