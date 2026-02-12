@@ -1259,12 +1259,12 @@ pub struct SandboxConfig {
 impl Default for SandboxConfig {
     fn default() -> Self {
         Self {
-            enabled: true,               // Enabled by default - for_analysis() provides safe paths
+            enabled: true, // Enabled by default - for_analysis() provides safe paths
             backend: SandboxBackendPreference::Landlock,
             failure_mode: SandboxFailureMode::BestEffort,
-            timeout_ms: 120_000,         // 2 minutes base timeout
+            timeout_ms: 120_000,                      // 2 minutes base timeout
             max_memory_bytes: 2 * 1024 * 1024 * 1024, // 2GB base
-            allow_network: true,         // DependencyAnalyzer needs network
+            allow_network: true,                      // DependencyAnalyzer needs network
             dynamic_limits: true,
             timeout_per_mb_ms: 200,    // +200ms per MB of source
             memory_per_mb_ratio: 10.0, // 10x source size for memory overhead

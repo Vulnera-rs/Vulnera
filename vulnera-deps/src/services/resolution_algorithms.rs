@@ -89,10 +89,15 @@ impl BacktrackingResolver {
             // Conflicts are already captured during the search.
         }
 
-        ResolutionResult { resolved, conflicts }
+        ResolutionResult {
+            resolved,
+            conflicts,
+        }
     }
 
-    fn constraints_by_package(graph: &DependencyGraph) -> HashMap<PackageId, Vec<VersionConstraint>> {
+    fn constraints_by_package(
+        graph: &DependencyGraph,
+    ) -> HashMap<PackageId, Vec<VersionConstraint>> {
         let mut constraints: HashMap<PackageId, Vec<VersionConstraint>> = HashMap::new();
         for edge in &graph.edges {
             constraints
@@ -198,9 +203,10 @@ impl BacktrackingResolver {
                     constraints_by_package,
                     assignments,
                     conflicts,
-                ) {
-                    return true;
-                }
+                )
+            {
+                return true;
+            }
 
             assignments.remove(package_id);
         }
@@ -439,7 +445,10 @@ mod tests {
         available_versions.insert(root_id.clone(), vec![Version::parse("1.0.0").unwrap()]);
         available_versions.insert(
             dep_id.clone(),
-            vec![Version::parse("1.5.0").unwrap(), Version::parse("2.1.0").unwrap()],
+            vec![
+                Version::parse("1.5.0").unwrap(),
+                Version::parse("2.1.0").unwrap(),
+            ],
         );
 
         let result = BacktrackingResolver::resolve(&graph, &available_versions);

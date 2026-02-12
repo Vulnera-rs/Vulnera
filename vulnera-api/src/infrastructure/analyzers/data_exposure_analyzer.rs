@@ -226,8 +226,8 @@ impl DataExposureAnalyzer {
                 method,
                 &format!("{}.{}", context, prop.name),
                 findings,
-                                jwt_pattern,
-                                private_key_pattern,
+                jwt_pattern,
+                private_key_pattern,
             );
         }
     }

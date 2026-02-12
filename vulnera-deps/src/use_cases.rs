@@ -282,9 +282,9 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 && !final_packages
                     .iter()
                     .any(|p: &Package| p.name == pkg.name && p.version == pkg.version)
-                {
-                    final_packages.push(pkg.clone());
-                }
+            {
+                final_packages.push(pkg.clone());
+            }
         }
         packages = final_packages;
 

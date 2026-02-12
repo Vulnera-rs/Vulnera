@@ -351,7 +351,9 @@ impl DragonflyCache {
     }
 
     /// Return parsed Redis INFO STATS metrics as key/value pairs.
-    pub async fn info_stats(&self) -> Result<std::collections::HashMap<String, String>, ApplicationError> {
+    pub async fn info_stats(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, ApplicationError> {
         let mut conn = (*self.connection_manager).clone();
         let raw: String = redis::cmd("INFO")
             .arg("STATS")

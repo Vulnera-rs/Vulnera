@@ -255,8 +255,10 @@ impl YarnPestParser {
                                 // bundledDependencies can list names without versions.
                                 for dep_part in dep_item.into_inner() {
                                     if dep_part.as_rule() == Rule::dep_key {
-                                        dependency_specs
-                                            .push((Self::dequote(dep_part.as_str()), "*".to_string()));
+                                        dependency_specs.push((
+                                            Self::dequote(dep_part.as_str()),
+                                            "*".to_string(),
+                                        ));
                                     }
                                 }
                             }
@@ -569,7 +571,8 @@ impl PackageFileParser for YarnPestParser {
             };
 
             for from_name in &entry.names {
-                let Ok(from_package) = Package::new(from_name.clone(), from_version.clone(), Ecosystem::Npm)
+                let Ok(from_package) =
+                    Package::new(from_name.clone(), from_version.clone(), Ecosystem::Npm)
                 else {
                     continue;
                 };
@@ -684,9 +687,9 @@ lodash@^4.17.21:
         );
     }
 
-        #[tokio::test]
-        async fn test_yarn_lock_extracts_dependency_edges() {
-                let content = r#"
+    #[tokio::test]
+    async fn test_yarn_lock_extracts_dependency_edges() {
+        let content = r#"
 foo@^1.0.0:
     version "1.0.0"
     dependencies:
@@ -696,26 +699,27 @@ bar@^2.0.0:
     version "2.1.0"
 "#;
 
-                let parser = YarnPestParser::new();
-                let result = parser.parse_file(content).await.unwrap();
+        let parser = YarnPestParser::new();
+        let result = parser.parse_file(content).await.unwrap();
 
-                assert!(result
-                        .dependencies
-                        .iter()
-                    .any(|d| d.from.name == "foo" && d.to.name == "bar" && d.requirement == "^2.0.0"),
-                    "dependencies={:?}, packages={:?}",
-                    result
-                        .dependencies
-                        .iter()
-                        .map(|d| format!("{} -> {} ({})", d.from.name, d.to.name, d.requirement))
-                        .collect::<Vec<_>>(),
-                    result
-                        .packages
-                        .iter()
-                        .map(|p| format!("{}@{}", p.name, p.version))
-                        .collect::<Vec<_>>()
-                );
-        }
+        assert!(
+            result
+                .dependencies
+                .iter()
+                .any(|d| d.from.name == "foo" && d.to.name == "bar" && d.requirement == "^2.0.0"),
+            "dependencies={:?}, packages={:?}",
+            result
+                .dependencies
+                .iter()
+                .map(|d| format!("{} -> {} ({})", d.from.name, d.to.name, d.requirement))
+                .collect::<Vec<_>>(),
+            result
+                .packages
+                .iter()
+                .map(|p| format!("{}@{}", p.name, p.version))
+                .collect::<Vec<_>>()
+        );
+    }
 
     #[test]
     fn test_extract_name_from_key_spec() {

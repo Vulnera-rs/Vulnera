@@ -158,3 +158,4 @@ vulnera-sast/tests/snapshots/*
 curls.txt
 # Decoupled components
 /vulnera-cli/
+docs/modules.md

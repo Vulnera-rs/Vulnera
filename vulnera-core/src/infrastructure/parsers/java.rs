@@ -617,10 +617,9 @@ dependencies {
         "#;
 
         let result = parser.parse_file(content).await.unwrap();
-        assert!(result
-            .packages
-            .iter()
-            .any(|p| p.name == "org.springframework:spring-core" && p.version.to_string() == "6.1.5"));
+        assert!(result.packages.iter().any(
+            |p| p.name == "org.springframework:spring-core" && p.version.to_string() == "6.1.5"
+        ));
     }
 
     #[test]
@@ -632,20 +631,28 @@ dependencies {
             parser.clean_maven_version("5.3.21", &properties).unwrap(),
             "5.3.21"
         );
-        assert!(parser
-            .clean_maven_version("${spring.version}", &properties)
-            .is_err());
+        assert!(
+            parser
+                .clean_maven_version("${spring.version}", &properties)
+                .is_err()
+        );
         assert_eq!(
-            parser.clean_maven_version("[1.0,2.0)", &properties).unwrap(),
+            parser
+                .clean_maven_version("[1.0,2.0)", &properties)
+                .unwrap(),
             "1.0"
         );
         assert_eq!(
-            parser.clean_maven_version("(1.0,2.0]", &properties).unwrap(),
+            parser
+                .clean_maven_version("(1.0,2.0]", &properties)
+                .unwrap(),
             "1.0"
         );
-        assert!(parser
-            .clean_maven_version("${unknown.property}", &properties)
-            .is_err());
+        assert!(
+            parser
+                .clean_maven_version("${unknown.property}", &properties)
+                .is_err()
+        );
 
         let mut resolved = HashMap::new();
         resolved.insert("custom.version".to_string(), "9.8.7".to_string());
@@ -670,7 +677,10 @@ dependencies {
         assert_eq!(parser.clean_gradle_version("1.2.+").unwrap(), "1.2.0");
         assert_eq!(parser.clean_gradle_version("[1.2,2.0)").unwrap(), "1.2");
         assert_eq!(parser.clean_gradle_version("(,2.0]").unwrap(), "2.0");
-        assert_eq!(parser.clean_gradle_version("latest.release").unwrap(), "1.0.0");
+        assert_eq!(
+            parser.clean_gradle_version("latest.release").unwrap(),
+            "1.0.0"
+        );
     }
 
     #[test]

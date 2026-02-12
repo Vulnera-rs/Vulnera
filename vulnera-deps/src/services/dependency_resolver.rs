@@ -219,21 +219,19 @@ impl DependencyResolverService for DependencyResolverServiceImpl {
                     continue;
                 };
 
-                let transitive_package = match Package::new(
-                    dependency.name.clone(),
-                    version,
-                    current.ecosystem.clone(),
-                ) {
-                    Ok(package) => package,
-                    Err(error) => {
-                        warn!(
-                            dependency = %dependency.name,
-                            "Failed to build transitive package model: {}",
-                            error
-                        );
-                        continue;
-                    }
-                };
+                let transitive_package =
+                    match Package::new(dependency.name.clone(), version, current.ecosystem.clone())
+                    {
+                        Ok(package) => package,
+                        Err(error) => {
+                            warn!(
+                                dependency = %dependency.name,
+                                "Failed to build transitive package model: {}",
+                                error
+                            );
+                            continue;
+                        }
+                    };
 
                 let key = Self::package_key(&transitive_package);
                 if discovered.contains_key(&key) {
@@ -465,10 +463,10 @@ mod tests {
                 project_url: None,
                 license: None,
             };
-            self.metadata.lock().unwrap().insert(
-                Self::metadata_key(ecosystem, name, version),
-                metadata,
-            );
+            self.metadata
+                .lock()
+                .unwrap()
+                .insert(Self::metadata_key(ecosystem, name, version), metadata);
         }
     }
 
@@ -575,8 +573,16 @@ mod tests {
             .await
             .expect("transitive resolution should succeed");
 
-        assert!(resolved.iter().any(|pkg| pkg.name == "dep-a" && pkg.version == Version::parse("1.2.0").unwrap()));
-        assert!(resolved.iter().any(|pkg| pkg.name == "dep-b" && pkg.version == Version::parse("2.0.0").unwrap()));
+        assert!(
+            resolved
+                .iter()
+                .any(|pkg| pkg.name == "dep-a" && pkg.version == Version::parse("1.2.0").unwrap())
+        );
+        assert!(
+            resolved
+                .iter()
+                .any(|pkg| pkg.name == "dep-b" && pkg.version == Version::parse("2.0.0").unwrap())
+        );
     }
 
     #[tokio::test]

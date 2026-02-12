@@ -320,7 +320,8 @@ impl PackageLockParser {
                         // Recurse when v1 dependencies map contains nested package objects.
                         if let Some(deps_obj) = nested_deps.as_object() {
                             if deps_obj.values().any(Value::is_object) {
-                                let nested_result = Self::extract_lockfile_data(nested_deps, false)?;
+                                let nested_result =
+                                    Self::extract_lockfile_data(nested_deps, false)?;
                                 packages.extend(nested_result.packages);
                                 dependencies.extend(nested_result.dependencies);
                             }
@@ -975,9 +976,8 @@ lodash@~4.17.21:
 
         let result = parser.parse_file(content).await.unwrap();
 
-        assert!(result
-            .dependencies
-            .iter()
-            .any(|d| d.from.name == "express" && d.to.name == "accepts" && d.requirement == "~1.3.7"));
+        assert!(result.dependencies.iter().any(|d| d.from.name == "express"
+            && d.to.name == "accepts"
+            && d.requirement == "~1.3.7"));
     }
 }

@@ -3,9 +3,9 @@
 //! This module provides context management for analyzing dependencies across
 //! entire projects, including workspace detection and configuration management.
 
+use globset::{Glob, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use globset::{Glob, GlobSetBuilder};
 use vulnera_core::domain::vulnerability::value_objects::Ecosystem;
 
 /// Configuration for dependency analysis

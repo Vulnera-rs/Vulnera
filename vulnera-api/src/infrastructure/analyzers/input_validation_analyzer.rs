@@ -181,9 +181,9 @@ impl InputValidationAnalyzer {
         // Check for mass assignment (objects allowing additional properties)
         if schema.schema_type.as_deref() == Some("object")
             && schema.additional_properties == AdditionalProperties::Allowed
-                && (method == "POST" || method == "PUT" || method == "PATCH")
-            {
-                findings.push(ApiFinding {
+            && (method == "POST" || method == "PUT" || method == "PATCH")
+        {
+            findings.push(ApiFinding {
                     id: format!("mass-assignment-{}-{}-{}", path, method, context),
                     vulnerability_type: ApiVulnerabilityType::MassAssignmentRisk,
                     location: ApiLocation {
@@ -201,7 +201,7 @@ impl InputValidationAnalyzer {
                     path: Some(path.to_string()),
                     method: Some(method.to_string()),
                 });
-            }
+        }
 
         // Recurse into properties
         for prop in &schema.properties {

@@ -314,12 +314,8 @@ fn test_detects_missing_pagination_for_wrapped_array_response() {
     };
 
     let findings = ResourceRestrictionAnalyzer::analyze(&spec);
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.id.contains("missing-pagination")
-                && f.vulnerability_type == ApiVulnerabilityType::ResourceExhaustion)
-    );
+    assert!(findings.iter().any(|f| f.id.contains("missing-pagination")
+        && f.vulnerability_type == ApiVulnerabilityType::ResourceExhaustion));
 }
 
 // --- Security Misconfig Tests ---

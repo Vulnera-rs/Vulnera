@@ -160,8 +160,7 @@ impl Message {
 }
 
 /// Completion request to send to an LLM provider
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CompletionRequest {
     /// The conversation messages
     pub messages: Vec<Message>,
@@ -202,7 +201,6 @@ pub struct CompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 }
-
 
 impl CompletionRequest {
     /// Create a new completion request

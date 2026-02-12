@@ -326,11 +326,10 @@ mod tests {
 
     #[test]
     fn test_dependency_profile_adds_required_ports() {
-        let policy = SandboxPolicy::default().with_profile(
-            SandboxPolicyProfile::DependencyResolution {
+        let policy =
+            SandboxPolicy::default().with_profile(SandboxPolicyProfile::DependencyResolution {
                 include_cache_port: true,
-            },
-        );
+            });
 
         assert!(policy.allowed_ports.contains(&80));
         assert!(policy.allowed_ports.contains(&443));

@@ -161,12 +161,11 @@ impl OpenApiParser {
             &mut schema_resolver,
             &component_refs,
         );
-        let security_schemes =
-            Self::parse_security_schemes_with_oauth_urls(
-                &spec.components,
-                &oauth_token_urls,
-                &component_refs,
-            );
+        let security_schemes = Self::parse_security_schemes_with_oauth_urls(
+            &spec.components,
+            &oauth_token_urls,
+            &component_refs,
+        );
 
         Ok(OpenApiSpec {
             version: spec.openapi,
@@ -330,9 +329,13 @@ impl OpenApiParser {
         // Security requirements are now passed in from the raw JSON/YAML parsing
         // Operation-level security overrides path-level security (handled in parse_paths_with_security)
 
-        let parameters = Self::parse_parameters(&operation.parameters, schema_resolver, component_refs);
-        let request_body =
-            Self::parse_request_body(operation.request_body.as_ref(), schema_resolver, component_refs);
+        let parameters =
+            Self::parse_parameters(&operation.parameters, schema_resolver, component_refs);
+        let request_body = Self::parse_request_body(
+            operation.request_body.as_ref(),
+            schema_resolver,
+            component_refs,
+        );
         let responses = Self::parse_responses(
             operation
                 .responses
@@ -379,8 +382,12 @@ impl OpenApiParser {
                     });
                 }
                 oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
-                    if let Some(param_json) = Self::resolve_component_ref(ref_path, "parameters", component_refs) {
-                        if let Some(param) = Self::parse_parameter_from_json(param_json, schema_resolver) {
+                    if let Some(param_json) =
+                        Self::resolve_component_ref(ref_path, "parameters", component_refs)
+                    {
+                        if let Some(param) =
+                            Self::parse_parameter_from_json(param_json, schema_resolver)
+                        {
                             api_params.push(param);
                         }
                     } else {
@@ -407,7 +414,9 @@ impl OpenApiParser {
                 })
             }
             Some(oas3::spec::ObjectOrReference::Ref { ref_path, .. }) => {
-                if let Some(rb_json) = Self::resolve_component_ref(ref_path, "requestBodies", component_refs) {
+                if let Some(rb_json) =
+                    Self::resolve_component_ref(ref_path, "requestBodies", component_refs)
+                {
                     Self::parse_request_body_from_json(rb_json, schema_resolver)
                 } else {
                     warn!(ref_path = %ref_path, "Failed to resolve request body reference");
@@ -433,7 +442,11 @@ impl OpenApiParser {
                 oas3::spec::ObjectOrReference::Object(response) => {
                     let content =
                         Self::parse_content(&Some(response.content.clone()), schema_resolver);
-                    let headers = Self::parse_response_headers(&response.headers, schema_resolver, component_refs);
+                    let headers = Self::parse_response_headers(
+                        &response.headers,
+                        schema_resolver,
+                        component_refs,
+                    );
 
                     api_responses.push(ApiResponse {
                         status_code: status_code.clone(),
@@ -442,7 +455,9 @@ impl OpenApiParser {
                     });
                 }
                 oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
-                    if let Some(response_json) = Self::resolve_component_ref(ref_path, "responses", component_refs) {
+                    if let Some(response_json) =
+                        Self::resolve_component_ref(ref_path, "responses", component_refs)
+                    {
                         if let Some(response) = Self::parse_response_from_json(
                             status_code,
                             response_json,
@@ -513,8 +528,12 @@ impl OpenApiParser {
                     });
                 }
                 oas3::spec::ObjectOrReference::Ref { ref_path, .. } => {
-                    if let Some(header_json) = Self::resolve_component_ref(ref_path, "headers", component_refs) {
-                        if let Some(header) = Self::parse_header_from_json(name, header_json, schema_resolver) {
+                    if let Some(header_json) =
+                        Self::resolve_component_ref(ref_path, "headers", component_refs)
+                    {
+                        if let Some(header) =
+                            Self::parse_header_from_json(name, header_json, schema_resolver)
+                        {
                             api_headers.push(header);
                         }
                     } else {
@@ -592,7 +611,11 @@ impl OpenApiParser {
                         obj_schema
                             .enum_values
                             .iter()
-                            .map(|v| v.as_str().map(|s| s.to_string()).unwrap_or_else(|| v.to_string()))
+                            .map(|v| {
+                                v.as_str()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| v.to_string())
+                            })
                             .collect(),
                     )
                 };
@@ -721,9 +744,9 @@ impl OpenApiParser {
                         if let Some(scheme_json) =
                             Self::resolve_component_ref(ref_path, "securitySchemes", component_refs)
                         {
-                            if let Ok(scheme) =
-                                serde_json::from_value::<oas3::spec::SecurityScheme>(scheme_json.clone())
-                            {
+                            if let Ok(scheme) = serde_json::from_value::<oas3::spec::SecurityScheme>(
+                                scheme_json.clone(),
+                            ) {
                                 let scheme_type = match &scheme {
                                     oas3::spec::SecurityScheme::ApiKey {
                                         location,
@@ -747,8 +770,10 @@ impl OpenApiParser {
                                     } => {
                                         let scheme_token_urls =
                                             oauth_token_urls.get(name).cloned().unwrap_or_default();
-                                        let oauth_flows =
-                                            Self::parse_oauth_flows_with_urls(flows, &scheme_token_urls);
+                                        let oauth_flows = Self::parse_oauth_flows_with_urls(
+                                            flows,
+                                            &scheme_token_urls,
+                                        );
                                         SecuritySchemeType::OAuth2 { flows: oauth_flows }
                                     }
                                     oas3::spec::SecurityScheme::OpenIdConnect {
@@ -758,7 +783,9 @@ impl OpenApiParser {
                                         url: open_id_connect_url.clone(),
                                     },
                                     oas3::spec::SecurityScheme::MutualTls { description: _ } => {
-                                        warn!("MutualTLS security scheme is not supported, skipping");
+                                        warn!(
+                                            "MutualTLS security scheme is not supported, skipping"
+                                        );
                                         continue;
                                     }
                                 };
@@ -1070,8 +1097,9 @@ impl OpenApiParser {
                     .collect();
             }
 
-            if let Some(security_schemes) =
-                components.get("securitySchemes").and_then(|v| v.as_object())
+            if let Some(security_schemes) = components
+                .get("securitySchemes")
+                .and_then(|v| v.as_object())
             {
                 refs.security_schemes = security_schemes
                     .iter()
@@ -1165,7 +1193,11 @@ impl OpenApiParser {
                             if let Some(resolved) =
                                 Self::resolve_component_ref(ref_path, "headers", component_refs)
                             {
-                                return Self::parse_header_from_json(name, resolved, schema_resolver);
+                                return Self::parse_header_from_json(
+                                    name,
+                                    resolved,
+                                    schema_resolver,
+                                );
                             }
                             return None;
                         }

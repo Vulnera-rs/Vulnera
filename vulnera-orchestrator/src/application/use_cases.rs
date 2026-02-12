@@ -193,8 +193,6 @@ impl ExecuteAnalysisJobUseCase {
 
                 let executor = self.executor.clone();
                 let sandbox_config = self.config.clone();
-                let source_size_bytes = source_size_bytes;
-
                 debug!(
                     job_id = %job.job_id,
                     module = ?module_type_clone,
@@ -265,10 +263,9 @@ impl ExecuteAnalysisJobUseCase {
                     // Always return a ModuleResult (either success or error)
                     match result {
                         Ok(mut r) => {
-                            r.metadata.additional_info.insert(
-                                "sandbox.profile".to_string(),
-                                profile_name.clone(),
-                            );
+                            r.metadata
+                                .additional_info
+                                .insert("sandbox.profile".to_string(), profile_name.clone());
                             r.metadata.additional_info.insert(
                                 "sandbox.timeout_ms".to_string(),
                                 limits.timeout.as_millis().to_string(),
@@ -281,10 +278,9 @@ impl ExecuteAnalysisJobUseCase {
                                 "sandbox.backend_effective".to_string(),
                                 backend_name.clone(),
                             );
-                            r.metadata.additional_info.insert(
-                                "sandbox.strict_mode".to_string(),
-                                strict_mode.to_string(),
-                            );
+                            r.metadata
+                                .additional_info
+                                .insert("sandbox.strict_mode".to_string(), strict_mode.to_string());
                             r.metadata.additional_info.insert(
                                 "sandbox.source_size_bytes".to_string(),
                                 source_size_bytes.unwrap_or(0).to_string(),
@@ -301,10 +297,10 @@ impl ExecuteAnalysisJobUseCase {
                                 metadata: Default::default(),
                                 error: Some(e.to_string()),
                             };
-                            error_result.metadata.additional_info.insert(
-                                "sandbox.profile".to_string(),
-                                profile_name,
-                            );
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.profile".to_string(), profile_name);
                             error_result.metadata.additional_info.insert(
                                 "sandbox.timeout_ms".to_string(),
                                 limits.timeout.as_millis().to_string(),
@@ -313,14 +309,14 @@ impl ExecuteAnalysisJobUseCase {
                                 "sandbox.max_memory_bytes".to_string(),
                                 limits.max_memory.to_string(),
                             );
-                            error_result.metadata.additional_info.insert(
-                                "sandbox.backend_effective".to_string(),
-                                backend_name,
-                            );
-                            error_result.metadata.additional_info.insert(
-                                "sandbox.strict_mode".to_string(),
-                                strict_mode.to_string(),
-                            );
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.backend_effective".to_string(), backend_name);
+                            error_result
+                                .metadata
+                                .additional_info
+                                .insert("sandbox.strict_mode".to_string(), strict_mode.to_string());
                             error_result.metadata.additional_info.insert(
                                 "sandbox.source_size_bytes".to_string(),
                                 source_size_bytes.unwrap_or(0).to_string(),
@@ -417,7 +413,10 @@ impl ExecuteAnalysisJobUseCase {
     }
 }
 
-fn module_policy_profile(module_type: &ModuleType, sandbox_config: &SandboxConfig) -> SandboxPolicyProfile {
+fn module_policy_profile(
+    module_type: &ModuleType,
+    sandbox_config: &SandboxConfig,
+) -> SandboxPolicyProfile {
     match module_type {
         ModuleType::DependencyAnalyzer if sandbox_config.allow_network => {
             SandboxPolicyProfile::DependencyResolution {

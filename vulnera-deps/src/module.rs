@@ -176,10 +176,9 @@ impl AnalysisModule for DependencyAnalyzerModule {
             }
         };
 
-        let ecosystem = vulnera_core::domain::vulnerability::value_objects::Ecosystem::from_str(
-            ecosystem_str,
-        )
-        .map_err(ModuleExecutionError::InvalidConfig)?;
+        let ecosystem =
+            vulnera_core::domain::vulnerability::value_objects::Ecosystem::from_str(ecosystem_str)
+                .map_err(ModuleExecutionError::InvalidConfig)?;
 
         let filename = config.config.get("filename").and_then(|v| v.as_str());
 

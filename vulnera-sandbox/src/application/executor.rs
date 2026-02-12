@@ -290,24 +290,24 @@ impl SandboxExecutor {
         );
 
         if let Some(ref backend) = worker_result.sandbox_backend {
-            result.metadata.additional_info.insert(
-                "sandbox.worker_backend".to_string(),
-                backend.clone(),
-            );
+            result
+                .metadata
+                .additional_info
+                .insert("sandbox.worker_backend".to_string(), backend.clone());
         }
 
         if let Some(applied) = worker_result.sandbox_applied {
-            result.metadata.additional_info.insert(
-                "sandbox.applied".to_string(),
-                applied.to_string(),
-            );
+            result
+                .metadata
+                .additional_info
+                .insert("sandbox.applied".to_string(), applied.to_string());
         }
 
         if let Some(ref setup_error) = worker_result.sandbox_setup_error {
-            result.metadata.additional_info.insert(
-                "sandbox.setup_error".to_string(),
-                setup_error.clone(),
-            );
+            result
+                .metadata
+                .additional_info
+                .insert("sandbox.setup_error".to_string(), setup_error.clone());
         }
 
         result.metadata.additional_info.insert(
@@ -342,10 +342,10 @@ impl SandboxExecutor {
                     "sandbox.execution_mode".to_string(),
                     "in_process_fallback".to_string(),
                 );
-                result.metadata.additional_info.insert(
-                    "sandbox.applied".to_string(),
-                    "false".to_string(),
-                );
+                result
+                    .metadata
+                    .additional_info
+                    .insert("sandbox.applied".to_string(), "false".to_string());
                 Ok(result)
             }
             Ok(Err(e)) => Err(SandboxedExecutionError::ModuleFailed(e)),

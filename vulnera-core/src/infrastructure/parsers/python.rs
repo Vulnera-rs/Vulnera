@@ -36,10 +36,9 @@ impl RequirementsTxtParser {
         if line.starts_with("-e ") || line.starts_with("git+") || line.contains(" @ http") {
             if let Some((name, version_hint)) = self.parse_url_or_vcs_requirement(line) {
                 let normalized = self.normalize_python_version(&version_hint)?;
-                let version =
-                    Version::parse(&normalized).map_err(|_| ParseError::Version {
-                        version: version_hint.clone(),
-                    })?;
+                let version = Version::parse(&normalized).map_err(|_| ParseError::Version {
+                    version: version_hint.clone(),
+                })?;
 
                 let package = Package::new(name, version, Ecosystem::PyPI)
                     .map_err(|e| ParseError::MissingField { field: e })?;
@@ -87,8 +86,7 @@ impl RequirementsTxtParser {
         static RE_EGG_NAME: Lazy<Regex> =
             Lazy::new(|| Regex::new(r"#egg=([A-Za-z0-9_.\-]+)").unwrap());
         static RE_WHEEL_NAME_VERSION: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"([A-Za-z0-9_.\-]+)-([0-9]+(?:\.[0-9]+){0,2}(?:[ab]|rc)?[0-9]*)")
-                .unwrap()
+            Regex::new(r"([A-Za-z0-9_.\-]+)-([0-9]+(?:\.[0-9]+){0,2}(?:[ab]|rc)?[0-9]*)").unwrap()
         });
 
         let requirement = line.trim_start_matches("-e ").trim();
@@ -124,12 +122,7 @@ impl RequirementsTxtParser {
     }
 
     fn extract_version_hint_from_url(&self, url: &str) -> Option<String> {
-        let token = url
-            .split('@')
-            .next_back()?
-            .split(['#', '?'])
-            .next()?
-            .trim();
+        let token = url.split('@').next_back()?.split(['#', '?']).next()?.trim();
 
         if token.is_empty() || token.contains('/') {
             return None;
