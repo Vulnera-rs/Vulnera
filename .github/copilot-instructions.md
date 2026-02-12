@@ -34,10 +34,10 @@ vulnera-cli (standalone workspace - offline analysis + server API calls)
 | Task               | Key Files                                                                 | Pattern                                                                                   |
 | :----------------- | :------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------- |
 | **New Module**     | `vulnera-core/.../traits.rs`, `src/modules/mod.rs`                        | Implement `AnalysisModule`; register in `ModuleRegistry`                                  |
-| **Sandbox Policy** | `vulnera-sandbox/src/domain/policy.rs`, `.../application/use_cases.rs`    | Build `SandboxPolicy::for_analysis()`; module execution via `SandboxExecutor`             |
+| **Sandbox Policy** | `vulnera-sandbox/src/domain/policy.rs`, `.../application/use_cases.rs`    | Build `SandboxPolicy::for_profile(SandboxPolicyProfile::...)`; execution via `SandboxExecutor` |
 | **SAST Rules**     | `vulnera-sast/src/infrastructure/rules/`                                  | Tree-sitter queries + visitor pattern for taint/data-flow                                 |
 | **Job Lifecycle**  | `vulnera-orchestrator/src/infrastructure/job_queue.rs`                    | Dragonfly-backed queue -> worker pool -> `ExecuteAnalysisJobUseCase` -> Sandbox           |
-| **Job Storage**    | `vulnera-orchestrator/src/infrastructure/job_store/`                      | Persist snapshots (summary, findings, metadata) with optional webhook delivery            |
+| **Job Storage**    | `vulnera-orchestrator/src/infrastructure/job_store/`                      | Persist snapshots (`FindingsSummary`, metadata) with optional webhook delivery            |
 | **Module Selection** | `vulnera-orchestrator/src/infrastructure/module_selector.rs`            | `RuleBasedModuleSelector` decides modules by `AnalysisDepth` + project metadata           |
 | **Auth/API Keys**  | `vulnera-core/src/infrastructure/auth/`, `.../presentation/auth/`         | JWT + Argon2; cookie auth with CSRF; API key endpoints under `/api/v1/auth/api-keys`      |
 | **Database**       | `migrations/`, `vulnera-core/.../infrastructure/`                         | SQLx `query!` macros (compile-time checked); `IEntityRepository` traits                   |
@@ -87,7 +87,7 @@ cd vulnera-cli && cargo run -- scan .
 
 - Add handler in `vulnera-orchestrator/src/presentation/controllers/`.
 - Use `#[openapi(paths(...))]` for documentation.
-- Inject dependencies via `State<Arc<OrchestratorState>>`.
+- Inject dependencies via `State<Arc<OrchestratorServices>>`.
 
 ### 2.1 Request Pipeline & Middleware
 

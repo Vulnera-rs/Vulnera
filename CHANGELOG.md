@@ -3,6 +3,60 @@
 All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.5.1] - 2026-02-13
+
+### Added
+- **Dependency Analysis Improvements:**
+  - Precise semver interval intersection in `VersionRange::overlaps_with` for better vulnerability matching.
+  - Robust glob pattern matching for dependency ignore rules using `globset`.
+  - Resolution of dependency edges to actual package versions in npm, Ruby, PHP, Python (uv), and Rust lockfile parsers.
+  - Preserved dependency edges for git/path dependencies in Cargo parser for accurate graph analysis.
+  - JavaScript framework detection from `package.json` dependencies.
+  - Enhanced Gradle version parser to handle ranges, selectors, and property references.
+- **OpenAPI Analysis Enhancements:**
+  - Component reference resolution (parameter, request body, response, header) in OpenAPI parser.
+  - Array item schema support in OpenAPI analyzers with recursive schema walkers.
+  - Check for wildcard CORS origins in header schemas within `SecurityHeadersAnalyzer`.
+- **Infrastructure & Cache:**
+  - Integrated real-time Dragonfly cache metrics (`db_size`, `info_stats`).
+  - Ecosystem-targeted cache invalidation using key patterns.
+  - Enforced API key TTL > 0 in configuration validation.
+- **Sandbox Security:**
+  - Strongly-typed sandbox backend (`SandboxBackendPreference`) and failure modes (`best_effort`, `fail_closed`).
+  - Strict fail-closed sandbox mode: worker aborts if sandbox setup fails.
+  - `SandboxPolicyProfile` for module-specific isolation (read-only, dependency resolution).
+- **SAST Refinements:**
+  - Granular Rust unsafe rules: split into `unsafe_block`, `rust-unsafe-fn`, and `rust-unsafe-impl`.
+  - Improved `SastEngine` robustness by logging metavariable errors and preventing silent failures.
+  - Deterministic SARIF snapshots with redacted fingerprints.
+
+### Changed
+- **Orchestrator Refactor (Breaking Change):**
+  - Refactored `OrchestratorState` to `OrchestratorServices` for clearer composition-root wiring.
+  - Grouped sub-services (auth, llm, dependencies, etc.) for better modularity.
+- **Sandbox Defaults:** Updated default sandbox backend to `landlock`.
+- **CI Guardrails:**
+  - Added SQLx query safety audit script and GitHub Action to block non-macro `query()` forms.
+  - Added Rust guardrails workflow to fail on `panic!`, `unwrap()`, or `expect()` in production crates.
+- **API Consistency:**
+  - Replaced multiple primitive parameters with `FindingsSummary` in analytics events.
+  - Introduced `AnalyzerFn` and `CallUpdate` type aliases for consistent signatures.
+  - Renamed LLM helper functions and registry parser methods for consistency.
+- **Refactored Analyzers:**
+  - Simplified `InputValidationAnalyzer` logic to reduce nesting.
+  - Improved data-flow taint checks using `is_none_or`.
+  - Replaced `.map/.any` patterns with `.contains/.iter` where clearer.
+
+### Fixed
+- **Robustness:** Added resilient regex compilation in API analyzers with graceful error handling.
+- **Error Handling:** Replaced unchecked `unwrap()` calls with explicit error propagation in `app.rs`.
+- **Startup:** Added validation for loaded configuration at startup with clear diagnostics.
+- **Observability:** Instrument `CreateAnalysisJobUseCase` and workflow tasks with `tracing`.
+- **Test Stability:** Fixed file modes and non-deterministic fingerprints in test snapshots.
+
+### Dependencies Added
+- `globset` for robust glob pattern matching.
+
 ## [0.5.0] - 2026-02-11
 
 ### Added
