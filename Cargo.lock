@@ -7526,6 +7526,7 @@ dependencies = [
  "chrono",
  "criterion",
  "futures",
+ "globset",
  "petgraph 0.8.3",
  "proptest",
  "rstest",

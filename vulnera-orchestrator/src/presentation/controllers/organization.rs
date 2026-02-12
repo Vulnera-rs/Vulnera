@@ -9,7 +9,7 @@ use tracing::{error, info, instrument};
 use uuid::Uuid;
 
 use vulnera_core::domain::auth::value_objects::UserId;
-use vulnera_core::domain::organization::value_objects::OrganizationId;
+use vulnera_core::domain::organization::value_objects::{OrganizationId, SubscriptionTier};
 
 use crate::presentation::auth::Auth;
 use crate::presentation::controllers::OrchestratorState;
@@ -63,6 +63,7 @@ pub async fn create_organization(
 
     // Get member count (just the owner at creation)
     let member_count = 1;
+    let tier = resolve_org_tier(&state, organization.id).await;
 
     Ok((
         StatusCode::CREATED,
@@ -72,7 +73,7 @@ pub async fn create_organization(
             description: organization.description.clone(),
             owner_id: organization.owner_id.as_uuid(),
             member_count,
-            tier: "Free".to_string(),
+            tier,
             created_at: organization.created_at,
             updated_at: organization.updated_at,
         }),
@@ -120,13 +121,15 @@ pub async fn list_organizations(
             .await
             .unwrap_or(0) as usize;
 
+        let tier = resolve_org_tier(&state, org.id).await;
+
         org_responses.push(OrganizationResponse {
             id: org.id.as_uuid(),
             name: org.name.as_str().to_string(),
             description: org.description.clone(),
             owner_id: org.owner_id.as_uuid(),
             member_count,
-            tier: "Free".to_string(),
+            tier,
             created_at: org.created_at,
             updated_at: org.updated_at,
         });
@@ -180,6 +183,7 @@ pub async fn get_organization(
 
     let organization = details.organization;
     let member_count = details.members.len();
+    let tier = resolve_org_tier(&state, organization.id).await;
 
     Ok(Json(OrganizationResponse {
         id: organization.id.as_uuid(),
@@ -187,7 +191,7 @@ pub async fn get_organization(
         description: organization.description.clone(),
         owner_id: organization.owner_id.as_uuid(),
         member_count,
-        tier: "Free".to_string(),
+        tier,
         created_at: organization.created_at,
         updated_at: organization.updated_at,
     }))
@@ -241,6 +245,7 @@ pub async fn update_organization(
         .count_members(&org_id)
         .await
         .unwrap_or(0) as usize;
+    let tier = resolve_org_tier(&state, org_id).await;
 
     info!(org_id = %id, "Organization updated successfully");
 
@@ -250,7 +255,7 @@ pub async fn update_organization(
         description: organization.description.clone(),
         owner_id: organization.owner_id.as_uuid(),
         member_count,
-        tier: "Free".to_string(),
+        tier,
         created_at: organization.created_at,
         updated_at: organization.updated_at,
     }))
@@ -600,6 +605,7 @@ pub async fn transfer_ownership(
         .count_members(&org_id)
         .await
         .unwrap_or(0) as usize;
+    let tier = resolve_org_tier(&state, org_id).await;
 
     info!(new_owner = %request.new_owner_id, "Ownership transferred successfully");
 
@@ -609,10 +615,29 @@ pub async fn transfer_ownership(
         description: organization.description.clone(),
         owner_id: organization.owner_id.as_uuid(),
         member_count,
-        tier: "Free".to_string(),
+        tier,
         created_at: organization.created_at,
         updated_at: organization.updated_at,
     }))
+}
+
+async fn resolve_org_tier(state: &OrchestratorState, org_id: OrganizationId) -> String {
+    let tier = state
+        .analytics
+        .check_quota_use_case
+        .get_quota_status(org_id)
+        .await
+        .ok()
+        .and_then(|quota| quota.tier)
+        .unwrap_or(SubscriptionTier::Free);
+
+    match tier {
+        SubscriptionTier::Free => "Free",
+        SubscriptionTier::Starter => "Starter",
+        SubscriptionTier::Professional => "Professional",
+        SubscriptionTier::Enterprise => "Enterprise",
+    }
+    .to_string()
 }
 
 /// GET /api/v1/organizations/{id}/stats - Get organization statistics

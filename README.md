@@ -152,7 +152,8 @@ GOOGLE_AI_KEY='your-api-key'        # for Google AI
 
 # Sandbox (secure module execution)
 VULNERA__SANDBOX__ENABLED=true
-VULNERA__SANDBOX__BACKEND='auto'    # landlock, process, or auto
+VULNERA__SANDBOX__BACKEND='landlock'    # landlock, auto, process, noop
+VULNERA__SANDBOX__FAILURE_MODE='best_effort' # best_effort or fail_closed
 
 # Optional
 VULNERA__CACHE__DRAGONFLY_URL='redis://127.0.0.1:6379'

@@ -474,6 +474,9 @@ mod tests {
         let range = VersionConstraint::parse(">=1.0.0,<2.0.0").unwrap();
 
         let intersection = exact.intersect(&range).unwrap();
-        assert_eq!(intersection, VersionConstraint::Exact(Version::parse("1.2.3").unwrap()));
+        assert_eq!(
+            intersection,
+            VersionConstraint::Exact(Version::parse("1.2.3").unwrap())
+        );
     }
 }

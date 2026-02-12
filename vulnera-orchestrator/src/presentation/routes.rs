@@ -313,6 +313,7 @@ pub fn create_router(orchestrator_state: OrchestratorState, config: Arc<Config>)
         auth_state: orchestrator_state.auth.auth_state.clone(),
         token_ttl_hours: config.auth.token_ttl_hours,
         refresh_token_ttl_hours: config.auth.refresh_token_ttl_hours,
+        api_key_ttl_days: config.auth.api_key_ttl_days,
         token_blacklist: Some(orchestrator_state.auth.token_blacklist.clone()),
         blacklist_tokens_on_logout: config.auth.blacklist_tokens_on_logout,
         csrf_service: csrf_service.clone(),

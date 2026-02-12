@@ -7,6 +7,31 @@ use crate::domain::value_objects::{ApiVulnerabilityType, OpenApiSpec};
 pub struct SecurityHeadersAnalyzer;
 
 impl SecurityHeadersAnalyzer {
+    fn schema_has_wildcard_origin(schema: &crate::domain::value_objects::ApiSchema) -> bool {
+        if schema
+            .default
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| v.trim() == "*")
+        {
+            return true;
+        }
+
+        if schema
+            .example
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| v.trim() == "*")
+        {
+            return true;
+        }
+
+        schema
+            .enum_values
+            .as_ref()
+            .is_some_and(|vals| vals.iter().any(|v| v.trim() == "*"))
+    }
+
     pub fn analyze(spec: &OpenApiSpec) -> Vec<ApiFinding> {
         let mut findings = Vec::new();
 
@@ -60,14 +85,33 @@ impl SecurityHeadersAnalyzer {
                         }
                     }
 
-                    // Check for CORS headers and validate configuration
-                    // Note: CORS header values are in the header schema, not the header name
-                    // This is a simplified check - in a full implementation, we'd parse the header schema
-                    if found_headers
+                    if let Some(cors_header) = response
+                        .headers
                         .iter()
-                        .any(|h| h.eq_ignore_ascii_case("Access-Control-Allow-Origin"))
+                        .find(|h| h.name.eq_ignore_ascii_case("Access-Control-Allow-Origin"))
                     {
-                        // Flag CORS header presence for review (can't check value from spec alone)
+                        let (severity, description) = if cors_header
+                            .schema
+                            .as_ref()
+                            .is_some_and(Self::schema_has_wildcard_origin)
+                        {
+                            (
+                                FindingSeverity::High,
+                                format!(
+                                    "Endpoint {} {} allows wildcard CORS origin '*'",
+                                    operation.method, path.path
+                                ),
+                            )
+                        } else {
+                            (
+                                FindingSeverity::Low,
+                                format!(
+                                    "Endpoint {} {} defines CORS origin header; verify allowed origins are restricted",
+                                    operation.method, path.path
+                                ),
+                            )
+                        };
+
                         findings.push(ApiFinding {
                             id: format!("cors-review-{}-{}", path.path, operation.method),
                             vulnerability_type: ApiVulnerabilityType::InsecureCors,
@@ -77,12 +121,11 @@ impl SecurityHeadersAnalyzer {
                                 path: Some(path.path.clone()),
                                 operation: Some(operation.method.clone()),
                             },
-                            severity: FindingSeverity::Low,
-                            description: format!(
-                                "Endpoint {} {} has CORS header - verify it's not allowing all origins (*)",
-                                operation.method, path.path
-                            ),
-                            recommendation: "Ensure CORS is restricted to specific trusted origins, not '*'".to_string(),
+                            severity,
+                            description,
+                            recommendation:
+                                "Ensure CORS is restricted to specific trusted origins, not '*'"
+                                    .to_string(),
                             path: Some(path.path.clone()),
                             method: Some(operation.method.clone()),
                         });

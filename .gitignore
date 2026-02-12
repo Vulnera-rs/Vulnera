@@ -56,7 +56,7 @@ coverage.xml
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
-
+.copilot-memory
 # Flask stuff:
 instance/
 .webassets-cache
@@ -152,9 +152,10 @@ criterion/
 
 # Documentation
 /doc/
-
+vulnera-sast/tests/snapshots/*
 # Cache directories
 /.vulnera_data
 curls.txt
 # Decoupled components
 /vulnera-cli/
+docs/modules.md

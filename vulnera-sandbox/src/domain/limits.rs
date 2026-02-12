@@ -90,11 +90,13 @@ pub fn calculate_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vulnera_core::config::{SandboxBackendPreference, SandboxFailureMode};
 
     fn test_config() -> SandboxConfig {
         SandboxConfig {
             enabled: false,
-            backend: "noop".to_string(),
+            backend: SandboxBackendPreference::Noop,
+            failure_mode: SandboxFailureMode::BestEffort,
             timeout_ms: 60_000,
             max_memory_bytes: 1024 * 1024 * 1024,
             allow_network: true,

@@ -1,6 +1,7 @@
 //! Project detection implementations
 
 use async_trait::async_trait;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -62,9 +63,7 @@ impl FileSystemProjectDetector {
                         languages.insert("javascript".to_string());
                         dependency_files.push(file_path.clone());
                         detected_config_files.push(file_path);
-
-                        // Check for frameworks in package.json content if possible
-                        // For now, we just mark it as a config file
+                        frameworks.extend(detect_frameworks_from_package_json(entry.path()));
                     }
                     "package-lock.json" | "yarn.lock" => {
                         languages.insert("javascript".to_string());
@@ -210,6 +209,54 @@ impl FileSystemProjectDetector {
     }
 }
 
+fn detect_frameworks_from_package_json(path: &Path) -> HashSet<String> {
+    let mut frameworks = HashSet::new();
+
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return frameworks;
+    };
+
+    let Ok(json) = serde_json::from_str::<Value>(&content) else {
+        return frameworks;
+    };
+
+    let dependency_sections = [
+        "dependencies",
+        "devDependencies",
+        "peerDependencies",
+        "optionalDependencies",
+    ];
+
+    let has_dependency = |name: &str| {
+        dependency_sections.iter().any(|section| {
+            json.get(section)
+                .and_then(Value::as_object)
+                .is_some_and(|deps| deps.contains_key(name))
+        })
+    };
+
+    if has_dependency("react") || has_dependency("react-dom") {
+        frameworks.insert("react".to_string());
+    }
+    if has_dependency("next") {
+        frameworks.insert("nextjs".to_string());
+    }
+    if has_dependency("vue") {
+        frameworks.insert("vue".to_string());
+    }
+    if has_dependency("nuxt") {
+        frameworks.insert("nuxt".to_string());
+    }
+    if has_dependency("@angular/core") {
+        frameworks.insert("angular".to_string());
+    }
+    if has_dependency("svelte") || has_dependency("@sveltejs/kit") {
+        frameworks.insert("svelte".to_string());
+    }
+
+    frameworks
+}
+
 #[async_trait]
 impl ProjectDetector for FileSystemProjectDetector {
     async fn detect_project(
@@ -275,6 +322,15 @@ mod tests {
         writeln!(file, "dummy content").unwrap();
     }
 
+    fn create_file_with_content(dir: &Path, name: &str, content: &str) {
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut file = File::create(path).unwrap();
+        write!(file, "{}", content).unwrap();
+    }
+
     fn create_test_detector() -> FileSystemProjectDetector {
         let git_service = Arc::new(GitService::new(Default::default()).unwrap());
         let s3_service = Arc::new(S3Service::new());
@@ -322,7 +378,11 @@ mod tests {
     #[test]
     fn test_detect_react_project() {
         let temp_dir = TempDir::new().unwrap();
-        create_dummy_file(temp_dir.path(), "package.json");
+        create_file_with_content(
+            temp_dir.path(),
+            "package.json",
+            r#"{"dependencies":{"react":"^18.3.0","react-dom":"^18.3.0"}}"#,
+        );
         create_dummy_file(temp_dir.path(), "src/App.tsx");
 
         let detector = create_test_detector();
@@ -330,8 +390,7 @@ mod tests {
 
         assert!(metadata.languages.contains(&"typescript".to_string()));
         assert!(metadata.languages.contains(&"javascript".to_string()));
-        // React detection currently relies on filename containing "react", which is weak.
-        // But let's verify TS detection at least.
+        assert!(metadata.frameworks.contains(&"react".to_string()));
     }
 
     #[test]

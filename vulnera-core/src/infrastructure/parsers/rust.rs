@@ -41,8 +41,9 @@ impl CargoParser {
                         if let Some(version) = t.get("version").and_then(|v| v.as_str()) {
                             version.to_string()
                         } else if t.get("git").is_some() || t.get("path").is_some() {
-                            // Skip git and path dependencies for now
-                            continue;
+                            // Include git/path dependencies as unresolved-version entries
+                            // so dependency edges are preserved in analysis graphs.
+                            "0.0.0".to_string()
                         } else {
                             "0.0.0".to_string()
                         }
@@ -251,17 +252,16 @@ impl CargoLockParser {
 
                                     // If version is specified, use it. If not, we have to guess or find the only one.
                                     // Cargo.lock usually specifies version if ambiguous.
-                                    let target_pkg = if parts.len() >= 2 {
+                                    let target_pkg: Option<Package> = if parts.len() >= 2 {
                                         let dep_version = parts[1];
                                         package_map
                                             .get(&(dep_name.to_string(), dep_version.to_string()))
+                                            .cloned()
                                     } else {
-                                        // Find any package with this name (assuming unique or taking first)
-                                        // In a real implementation we should handle this better, but for now this is a reasonable fallback
                                         package_map
                                             .iter()
                                             .find(|((n, _), _)| n == dep_name)
-                                            .map(|(_, p)| p)
+                                            .map(|(_, p)| p.clone())
                                     };
 
                                     if let Some(target) = target_pkg {

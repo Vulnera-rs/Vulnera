@@ -11,6 +11,7 @@ use once_cell::sync::Lazy;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use regex::Regex;
+use std::collections::HashMap;
 
 /// Parser for Maven pom.xml files
 pub struct MavenParser;
@@ -31,6 +32,7 @@ impl MavenParser {
         &self,
         content: &str,
         root_package: &Package,
+        properties: &HashMap<String, String>,
     ) -> Result<ParseResult, ParseError> {
         let mut packages = Vec::new();
         let mut dependencies = Vec::new();
@@ -66,8 +68,22 @@ impl MavenParser {
                         if let (Some(g), Some(a)) = (group_id.as_ref(), artifact_id.as_ref()) {
                             let pkg_name = format!("{}:{}", g, a);
                             // Clean version
-                            let cleaned = self
-                                .clean_maven_version(version_str.as_deref().unwrap_or("0.0.0"))?;
+                            let cleaned = match self.clean_maven_version(
+                                version_str.as_deref().unwrap_or("0.0.0"),
+                                properties,
+                            ) {
+                                Ok(cleaned) => cleaned,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        package = %pkg_name,
+                                        version = %version_str.clone().unwrap_or_default(),
+                                        "Skipping Maven dependency with unresolved version property reference"
+                                    );
+                                    in_dependency = false;
+                                    current_tag = None;
+                                    continue;
+                                }
+                            };
                             let version =
                                 Version::parse(&cleaned).map_err(|_| ParseError::Version {
                                     version: version_str.clone().unwrap_or_default(),
@@ -76,7 +92,6 @@ impl MavenParser {
                                 .map_err(|e| ParseError::MissingField { field: e })?;
                             packages.push(package.clone());
 
-                            // Create dependency edge from root
                             dependencies.push(
                                 crate::domain::vulnerability::entities::Dependency::new(
                                     root_package.clone(),
@@ -128,7 +143,11 @@ impl MavenParser {
     }
 
     /// Extract root package information from pom.xml
-    fn extract_root_package(&self, content: &str) -> Result<Package, ParseError> {
+    fn extract_root_package(
+        &self,
+        content: &str,
+        properties: &HashMap<String, String>,
+    ) -> Result<Package, ParseError> {
         let mut reader = Reader::from_str(content);
         let mut buf = Vec::new();
         let mut depth = 0;
@@ -200,39 +219,126 @@ impl MavenParser {
         let v_str = version
             .or(parent_version)
             .unwrap_or_else(|| "0.0.0".to_string());
-        let cleaned_v = self.clean_maven_version(&v_str)?;
+        let cleaned_v = self.clean_maven_version(&v_str, properties)?;
         let v = Version::parse(&cleaned_v).unwrap_or_else(|_| Version::new(0, 0, 0));
 
         Package::new(format!("{}:{}", g, a), v, Ecosystem::Maven)
             .map_err(|e| ParseError::MissingField { field: e })
     }
 
+    fn extract_maven_properties(
+        &self,
+        content: &str,
+    ) -> Result<HashMap<String, String>, ParseError> {
+        let mut properties = HashMap::new();
+        let mut reader = Reader::from_str(content);
+        let mut buf = Vec::new();
+
+        let mut stack: Vec<String> = Vec::new();
+        let mut current_property: Option<String> = None;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(e)) => {
+                    let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                    stack.push(name.clone());
+                    if stack.len() == 3 && stack[0] == "project" && stack[1] == "properties" {
+                        current_property = Some(name);
+                    }
+                }
+                Ok(Event::Text(t)) => {
+                    let value = reader
+                        .decoder()
+                        .decode(t.as_ref())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+
+                    if let Some(property) = current_property.as_ref() {
+                        if !value.is_empty() {
+                            properties.insert(property.clone(), value.clone());
+                        }
+                    }
+
+                    if stack.len() == 2
+                        && stack[0] == "project"
+                        && stack[1] == "version"
+                        && !value.is_empty()
+                    {
+                        properties.insert("project.version".to_string(), value.clone());
+                        properties.insert("version".to_string(), value.clone());
+                    }
+
+                    if stack.len() == 3
+                        && stack[0] == "project"
+                        && stack[1] == "parent"
+                        && stack[2] == "version"
+                        && !value.is_empty()
+                    {
+                        properties.insert("project.parent.version".to_string(), value);
+                    }
+                }
+                Ok(Event::End(_)) => {
+                    if stack.len() == 3 && stack[0] == "project" && stack[1] == "properties" {
+                        current_property = None;
+                    }
+                    stack.pop();
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    return Err(ParseError::MissingField {
+                        field: format!("XML parse error: {}", e),
+                    });
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(properties)
+    }
+
     /// Clean Maven version string
-    fn clean_maven_version(&self, version_str: &str) -> Result<String, ParseError> {
+    fn clean_maven_version(
+        &self,
+        version_str: &str,
+        properties: &HashMap<String, String>,
+    ) -> Result<String, ParseError> {
         let version_str = version_str.trim();
 
         if version_str.is_empty() {
             return Ok("0.0.0".to_string());
         }
 
-        // Handle Maven property placeholders with common defaults
+        // Handle Maven property references via explicit property resolution
         if version_str.starts_with("${") && version_str.ends_with('}') {
             let property = &version_str[2..version_str.len() - 1];
-            return Ok(match property {
-                "project.version" | "version" => "1.0.0".to_string(),
-                "java.version" => "11".to_string(),
-                "maven.compiler.source" | "maven.compiler.target" => "11".to_string(),
-                "spring.version" => "5.3.0".to_string(),
-                "junit.version" => "5.8.0".to_string(),
-                "slf4j.version" => "1.7.36".to_string(),
-                "jackson.version" => "2.13.0".to_string(),
-                _ => {
-                    tracing::debug!(
-                        "Unresolved Maven property: {}, using default 1.0.0",
-                        property
-                    );
-                    "1.0.0".to_string()
+            if let Some(value) = properties.get(property) {
+                let resolved = value.trim();
+                if !resolved.is_empty() {
+                    return Ok(resolved.to_string());
                 }
+            }
+
+            if let Some(value) = properties
+                .get("project.version")
+                .or_else(|| properties.get("version"))
+                .filter(|value| !value.trim().is_empty())
+                && matches!(property, "project.version" | "version")
+            {
+                return Ok(value.trim().to_string());
+            }
+
+            if let Some(value) = properties
+                .get("project.parent.version")
+                .filter(|value| !value.trim().is_empty())
+                && property == "project.parent.version"
+            {
+                return Ok(value.trim().to_string());
+            }
+
+            return Err(ParseError::Version {
+                version: version_str.to_string(),
             });
         }
 
@@ -257,8 +363,9 @@ impl PackageFileParser for MavenParser {
     }
 
     async fn parse_file(&self, content: &str) -> Result<ParseResult, ParseError> {
-        let root_package = self.extract_root_package(content)?;
-        self.extract_maven_dependencies(content, &root_package)
+        let properties = self.extract_maven_properties(content)?;
+        let root_package = self.extract_root_package(content, &properties)?;
+        self.extract_maven_dependencies(content, &root_package, &properties)
     }
 
     fn ecosystem(&self) -> Ecosystem {
@@ -341,15 +448,46 @@ impl GradleParser {
         }
 
         // Handle Gradle version catalogs and property references
-        if version_str.starts_with("$") {
-            return Ok("0.0.0".to_string()); // Default for unresolved properties
+        if version_str.starts_with("$") || version_str.contains("${") {
+            return Ok("1.0.0".to_string());
         }
 
-        // Handle version ranges (simplified)
-        if version_str.contains('+') {
-            // Handle dynamic versions like "1.+" -> "1.0.0"
-            let base_version = version_str.replace('+', "0");
-            return Ok(base_version);
+        // Handle dynamic selectors used by Gradle/Maven metadata
+        if matches!(
+            version_str.to_ascii_lowercase().as_str(),
+            "latest.release" | "latest.integration" | "release" | "latest"
+        ) {
+            return Ok("1.0.0".to_string());
+        }
+
+        // Handle version ranges like [1.2,2.0), (1.0,], [1.0,)
+        if (version_str.starts_with('[') || version_str.starts_with('('))
+            && (version_str.ends_with(']') || version_str.ends_with(')'))
+            && version_str.contains(',')
+        {
+            let inner = &version_str[1..version_str.len() - 1];
+            let mut parts = inner.split(',').map(str::trim);
+            let lower = parts.next().unwrap_or_default();
+            let upper = parts.next().unwrap_or_default();
+
+            let chosen = if !lower.is_empty() { lower } else { upper };
+            if !chosen.is_empty() {
+                return Ok(chosen.to_string());
+            }
+        }
+
+        // Handle dynamic versions like "1.+", "1.2.+"
+        if version_str.ends_with('+') {
+            let mut parts: Vec<&str> = version_str.trim_end_matches('+').split('.').collect();
+            if matches!(parts.last(), Some(last) if last.is_empty()) {
+                parts.pop();
+            }
+
+            while parts.len() < 3 {
+                parts.push("0");
+            }
+
+            return Ok(parts[..3].join("."));
         }
 
         // Handle classifier suffixes like "-jre", "-android", etc.
@@ -456,22 +594,73 @@ dependencies {
         assert_eq!(guava_pkg.version, Version::parse("31.1").unwrap()); // -jre suffix handled
     }
 
+    #[tokio::test]
+    async fn test_maven_parser_resolves_properties_from_pom() {
+        let parser = MavenParser::new();
+        let content = r#"
+<project>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>com.example</groupId>
+    <artifactId>demo</artifactId>
+    <version>1.0.0</version>
+    <properties>
+        <spring.version>6.1.5</spring.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
+            <version>${spring.version}</version>
+        </dependency>
+    </dependencies>
+</project>
+        "#;
+
+        let result = parser.parse_file(content).await.unwrap();
+        assert!(result.packages.iter().any(
+            |p| p.name == "org.springframework:spring-core" && p.version.to_string() == "6.1.5"
+        ));
+    }
+
     #[test]
     fn test_clean_maven_version() {
         let parser = MavenParser::new();
+        let properties = HashMap::new();
 
-        assert_eq!(parser.clean_maven_version("5.3.21").unwrap(), "5.3.21");
-        // Updated expectation: ${spring.version} now returns "5.3.0" as a reasonable default
         assert_eq!(
-            parser.clean_maven_version("${spring.version}").unwrap(),
-            "5.3.0"
+            parser.clean_maven_version("5.3.21", &properties).unwrap(),
+            "5.3.21"
         );
-        assert_eq!(parser.clean_maven_version("[1.0,2.0)").unwrap(), "1.0");
-        assert_eq!(parser.clean_maven_version("(1.0,2.0]").unwrap(), "1.0");
-        // Test that unknown properties default to "1.0.0" instead of "0.0.0"
+        assert!(
+            parser
+                .clean_maven_version("${spring.version}", &properties)
+                .is_err()
+        );
         assert_eq!(
-            parser.clean_maven_version("${unknown.property}").unwrap(),
-            "1.0.0"
+            parser
+                .clean_maven_version("[1.0,2.0)", &properties)
+                .unwrap(),
+            "1.0"
+        );
+        assert_eq!(
+            parser
+                .clean_maven_version("(1.0,2.0]", &properties)
+                .unwrap(),
+            "1.0"
+        );
+        assert!(
+            parser
+                .clean_maven_version("${unknown.property}", &properties)
+                .is_err()
+        );
+
+        let mut resolved = HashMap::new();
+        resolved.insert("custom.version".to_string(), "9.8.7".to_string());
+        assert_eq!(
+            parser
+                .clean_maven_version("${custom.version}", &resolved)
+                .unwrap(),
+            "9.8.7"
         );
     }
 
@@ -482,9 +671,16 @@ dependencies {
         assert_eq!(parser.clean_gradle_version("5.3.21").unwrap(), "5.3.21");
         assert_eq!(
             parser.clean_gradle_version("$springVersion").unwrap(),
-            "0.0.0"
+            "1.0.0"
         );
-        assert_eq!(parser.clean_gradle_version("1.+").unwrap(), "1.0");
+        assert_eq!(parser.clean_gradle_version("1.+").unwrap(), "1.0.0");
+        assert_eq!(parser.clean_gradle_version("1.2.+").unwrap(), "1.2.0");
+        assert_eq!(parser.clean_gradle_version("[1.2,2.0)").unwrap(), "1.2");
+        assert_eq!(parser.clean_gradle_version("(,2.0]").unwrap(), "2.0");
+        assert_eq!(
+            parser.clean_gradle_version("latest.release").unwrap(),
+            "1.0.0"
+        );
     }
 
     #[test]
