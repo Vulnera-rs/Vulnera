@@ -167,6 +167,9 @@ where
             if f.size > self.config.apis.github.max_single_file_bytes {
                 continue; // skip oversized file
             }
+            if !input.include_lockfiles && is_lockfile_path(&f.path) {
+                continue;
+            }
             if self.parser_factory.create_parser(&f.path).is_some() {
                 if total_bytes + f.size > self.config.apis.github.max_total_bytes {
                     break; // enforce total bytes cap
@@ -321,4 +324,28 @@ where
         };
         Ok(internal)
     }
+}
+
+fn is_lockfile_path(path: &str) -> bool {
+    let file_name = path
+        .rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .to_ascii_lowercase();
+
+    matches!(
+        file_name.as_str(),
+        "package-lock.json"
+            | "yarn.lock"
+            | "pnpm-lock.yaml"
+            | "npm-shrinkwrap.json"
+            | "pipfile.lock"
+            | "poetry.lock"
+            | "cargo.lock"
+            | "go.sum"
+            | "composer.lock"
+            | "gemfile.lock"
+            | "packages.lock.json"
+            | "paket.lock"
+    )
 }

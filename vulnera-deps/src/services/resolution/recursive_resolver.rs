@@ -151,8 +151,18 @@ impl<C: CacheService> RecursiveResolver<C> {
                 }
 
                 // Add edge from current to dependency
-                let constraint = VersionConstraint::parse(&reg_dep.requirement)
-                    .unwrap_or(VersionConstraint::Any);
+                let constraint = match VersionConstraint::parse(&reg_dep.requirement) {
+                    Ok(constraint) => constraint,
+                    Err(error) => {
+                        warn!(
+                            requirement = %reg_dep.requirement,
+                            package = %reg_dep.name,
+                            error = %error,
+                            "Invalid dependency edge constraint; defaulting to wildcard"
+                        );
+                        VersionConstraint::Any
+                    }
+                };
                 let edge = DependencyEdge::new(
                     current_id.clone(),
                     dep_id.clone(),
@@ -221,7 +231,19 @@ impl<C: CacheService> RecursiveResolver<C> {
         name: &str,
         requirement: &str,
     ) -> Result<Option<Version>, ApplicationError> {
-        let constraint = VersionConstraint::parse(requirement).unwrap_or(VersionConstraint::Any);
+        let constraint = match VersionConstraint::parse(requirement) {
+            Ok(constraint) => constraint,
+            Err(error) => {
+                warn!(
+                    requirement = %requirement,
+                    package = %name,
+                    ecosystem = %ecosystem.canonical_name(),
+                    error = %error,
+                    "Invalid transitive dependency constraint; marking unresolved"
+                );
+                return Ok(None);
+            }
+        };
 
         // Fetch all available versions
         let versions = self

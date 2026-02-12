@@ -9,7 +9,7 @@ members = [
     "vulnera-llm",
     "vulnera-sandbox",
 ]
-exclude = ["vulnera-cli"]
+exclude = ["vulnera-cli","advisors","adapter"]
 
 resolver = "2"
 
