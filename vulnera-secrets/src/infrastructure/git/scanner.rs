@@ -82,11 +82,11 @@ impl GitScanner {
 
         for oid in oids {
             // Check max commits limit
-            if let Some(max) = self.max_commits {
-                if commit_count >= max {
-                    debug!("Reached max commits limit: {}", max);
-                    break;
-                }
+            if let Some(max) = self.max_commits
+                && commit_count >= max
+            {
+                debug!("Reached max commits limit: {}", max);
+                break;
             }
 
             // Extract commit data and lines to scan synchronously
@@ -286,23 +286,23 @@ impl GitScanner {
 
             // Build a scanable hunk content stream using context and added lines.
             // Removed lines are skipped because they do not exist in the new file version.
-            if line.origin() == '+' || line.origin() == ' ' {
-                if let Ok(content) = std::str::from_utf8(line.content()) {
-                    builder.content.push_str(content);
-                    if !content.ends_with('\n') {
-                        builder.content.push('\n');
-                    }
-
-                    if line.origin() == '+' {
-                        if let Some(actual_line) = line.new_lineno() {
-                            builder
-                                .added_line_map
-                                .insert(builder.snippet_line, actual_line);
-                        }
-                    }
-
-                    builder.snippet_line = builder.snippet_line.saturating_add(1);
+            if (line.origin() == '+' || line.origin() == ' ')
+                && let Ok(content) = std::str::from_utf8(line.content())
+            {
+                builder.content.push_str(content);
+                if !content.ends_with('\n') {
+                    builder.content.push('\n');
                 }
+
+                if line.origin() == '+'
+                    && let Some(actual_line) = line.new_lineno()
+                {
+                    builder
+                        .added_line_map
+                        .insert(builder.snippet_line, actual_line);
+                }
+
+                builder.snippet_line = builder.snippet_line.saturating_add(1);
             }
 
             true

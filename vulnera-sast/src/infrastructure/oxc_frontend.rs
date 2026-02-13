@@ -30,10 +30,7 @@ impl OxcFrontend {
         let parser_return = Parser::new(&allocator, source, source_type).parse();
 
         if parser_return.panicked {
-            return Err(format!(
-                "OXC parser panicked for '{}'",
-                file_path.display()
-            ));
+            return Err(format!("OXC parser panicked for '{}'", file_path.display()));
         }
 
         if parser_return.errors.is_empty() {

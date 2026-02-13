@@ -186,17 +186,17 @@ impl EnrichFindingsUseCase {
         }
 
         // Try to extract JSON from markdown code block
-        if let Some(json_content) = Self::extract_json_from_markdown(content) {
-            if let Ok(parsed) = serde_json::from_str::<EnrichmentJsonResponse>(&json_content) {
-                return Ok(FindingEnrichment {
-                    explanation: Some(parsed.explanation),
-                    remediation_suggestion: Some(parsed.remediation),
-                    risk_summary: Some(parsed.risk_summary),
-                    enrichment_successful: true,
-                    error: None,
-                    enriched_at: Some(chrono::Utc::now()),
-                });
-            }
+        if let Some(json_content) = Self::extract_json_from_markdown(content)
+            && let Ok(parsed) = serde_json::from_str::<EnrichmentJsonResponse>(&json_content)
+        {
+            return Ok(FindingEnrichment {
+                explanation: Some(parsed.explanation),
+                remediation_suggestion: Some(parsed.remediation),
+                risk_summary: Some(parsed.risk_summary),
+                enrichment_successful: true,
+                error: None,
+                enriched_at: Some(chrono::Utc::now()),
+            });
         }
 
         // Fallback: treat entire response as explanation

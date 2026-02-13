@@ -239,10 +239,10 @@ pub async fn enrich_job_findings(
     }
 
     // Filter to specific finding IDs if provided
-    if let Some(ref finding_ids) = request.finding_ids {
-        if !finding_ids.is_empty() {
-            all_findings.retain(|f| finding_ids.contains(&f.id));
-        }
+    if let Some(ref finding_ids) = request.finding_ids
+        && !finding_ids.is_empty()
+    {
+        all_findings.retain(|f| finding_ids.contains(&f.id));
     }
 
     // Build code contexts map

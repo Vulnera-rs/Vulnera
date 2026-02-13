@@ -146,15 +146,15 @@ where
         let filtered: Vec<_> = files
             .into_iter()
             .filter(|f| {
-                if let Some(ref includes) = input.include_paths {
-                    if !includes.iter().any(|p| f.path.starts_with(p)) {
-                        return false;
-                    }
+                if let Some(ref includes) = input.include_paths
+                    && !includes.iter().any(|p| f.path.starts_with(p))
+                {
+                    return false;
                 }
-                if let Some(ref excludes) = input.exclude_paths {
-                    if excludes.iter().any(|p| f.path.starts_with(p)) {
-                        return false;
-                    }
+                if let Some(ref excludes) = input.exclude_paths
+                    && excludes.iter().any(|p| f.path.starts_with(p))
+                {
+                    return false;
                 }
                 true
             })

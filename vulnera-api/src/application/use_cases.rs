@@ -128,10 +128,10 @@ impl ScanApiSpecificationUseCase {
         if !self.config.severity_overrides.is_empty() {
             for finding in &mut all_findings {
                 let vuln_type_str = format!("{:?}", finding.vulnerability_type);
-                if let Some(severity_str) = self.config.severity_overrides.get(&vuln_type_str) {
-                    if let Ok(new_severity) = Self::parse_severity(severity_str) {
-                        finding.severity = new_severity;
-                    }
+                if let Some(severity_str) = self.config.severity_overrides.get(&vuln_type_str)
+                    && let Ok(new_severity) = Self::parse_severity(severity_str)
+                {
+                    finding.severity = new_severity;
                 }
             }
         }

@@ -230,18 +230,16 @@ impl AstContextExtractor {
                         | "short_var_declaration"
                 )
             {
-                if let Some(first) = parent.named_child(0) {
-                    if first.start_byte() < node.start_byte() {
-                        lhs_variable =
-                            Some(source[first.start_byte()..first.end_byte()].to_string());
-                    }
+                if let Some(first) = parent.named_child(0)
+                    && first.start_byte() < node.start_byte()
+                {
+                    lhs_variable = Some(source[first.start_byte()..first.end_byte()].to_string());
                 }
                 if let Some(last) =
                     parent.named_child(parent.named_child_count().saturating_sub(1) as u32)
+                    && last.start_byte() >= node.start_byte()
                 {
-                    if last.start_byte() >= node.start_byte() {
-                        rhs_value = Some(source[last.start_byte()..last.end_byte()].to_string());
-                    }
+                    rhs_value = Some(source[last.start_byte()..last.end_byte()].to_string());
                 }
                 if lhs_variable.is_some() || rhs_value.is_some() {
                     break;

@@ -174,17 +174,17 @@ impl DependencyGraph {
     /// Add a dependency edge to the graph
     pub fn add_edge(&mut self, edge: DependencyEdge) {
         // Update the from node's direct dependencies
-        if let Some(from_node) = self.nodes.get_mut(&edge.from) {
-            if !from_node.direct_dependencies.contains(&edge.to) {
-                from_node.direct_dependencies.push(edge.to.clone());
-            }
+        if let Some(from_node) = self.nodes.get_mut(&edge.from)
+            && !from_node.direct_dependencies.contains(&edge.to)
+        {
+            from_node.direct_dependencies.push(edge.to.clone());
         }
 
         // Update the to node's dependents
-        if let Some(to_node) = self.nodes.get_mut(&edge.to) {
-            if !to_node.dependents.contains(&edge.from) {
-                to_node.dependents.push(edge.from.clone());
-            }
+        if let Some(to_node) = self.nodes.get_mut(&edge.to)
+            && !to_node.dependents.contains(&edge.from)
+        {
+            to_node.dependents.push(edge.from.clone());
         }
 
         self.edges.push(edge);

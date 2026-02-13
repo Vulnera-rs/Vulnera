@@ -45,10 +45,10 @@ impl GoModParser {
             }
 
             // Parse require statements
-            if line.starts_with("require ") || in_require_block {
-                if let Some(package) = self.parse_require_line(line)? {
-                    packages.push(package);
-                }
+            if (line.starts_with("require ") || in_require_block)
+                && let Some(package) = self.parse_require_line(line)?
+            {
+                packages.push(package);
             }
         }
 

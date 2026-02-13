@@ -78,7 +78,7 @@ impl Entropy {
                     || c == '-'
                     || c == '_'
             })
-            && data.len() % 4 == 0
+            && data.len().is_multiple_of(4)
     }
 
     /// Check if a string looks like hex

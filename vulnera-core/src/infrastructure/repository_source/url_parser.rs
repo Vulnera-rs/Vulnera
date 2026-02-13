@@ -41,10 +41,10 @@ pub fn parse_github_repo_url(input: &str) -> Option<ParsedRepositoryUrl> {
         return None;
     }
 
-    if let Some(pos) = parts.last().and_then(|s| s.find(['?', '#'])) {
-        if let Some(last) = parts.last_mut() {
-            *last = &last[..pos];
-        }
+    if let Some(pos) = parts.last().and_then(|s| s.find(['?', '#']))
+        && let Some(last) = parts.last_mut()
+    {
+        *last = &last[..pos];
     }
 
     let owner = parts[0];

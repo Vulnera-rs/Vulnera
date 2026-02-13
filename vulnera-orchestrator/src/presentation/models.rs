@@ -625,6 +625,10 @@ pub struct RepositoryDescriptorDto {
 /// Request for a single dependency file in batch analysis
 #[derive(Deserialize, ToSchema)]
 pub struct DependencyFileRequest {
+    /// Optional client-side correlation ID for mapping batch responses to request files
+    #[schema(example = "file:///workspace/frontend/package.json")]
+    pub file_id: Option<String>,
+
     /// The dependency file content to analyze
     #[schema(example = r#"{"dependencies": {"express": "4.17.1", "lodash": "4.17.21"}}"#)]
     pub file_content: String,
@@ -724,6 +728,10 @@ pub struct DependencyGraphDto {
 /// Result for a single file analysis
 #[derive(Serialize, ToSchema)]
 pub struct FileAnalysisResult {
+    /// Optional client-side correlation ID echoed from request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+
     /// Optional filename
     #[schema(example = "package.json")]
     pub filename: Option<String>,
@@ -762,6 +770,11 @@ pub struct FileAnalysisResult {
 /// Batch analysis metadata
 #[derive(Serialize, ToSchema)]
 pub struct BatchAnalysisMetadata {
+    /// Correlation identifier for this batch request
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "3dd8a6d0-a6f6-4622-9f9c-53d84fd0c7ad")]
+    pub request_id: Option<String>,
+
     /// Total number of files analyzed
     #[schema(example = 5)]
     pub total_files: usize,

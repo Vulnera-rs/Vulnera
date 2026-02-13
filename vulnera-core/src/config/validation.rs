@@ -407,12 +407,12 @@ impl Validate for SecretDetectionConfig {
         }
 
         // Validate max_commits_to_scan > 0 if Some
-        if let Some(max_commits) = self.max_commits_to_scan {
-            if max_commits == 0 {
-                return Err(ValidationError::secret_detection(
-                    "max_commits_to_scan must be greater than 0 if specified".to_string(),
-                ));
-            }
+        if let Some(max_commits) = self.max_commits_to_scan
+            && max_commits == 0
+        {
+            return Err(ValidationError::secret_detection(
+                "max_commits_to_scan must be greater than 0 if specified".to_string(),
+            ));
         }
 
         // Validate file_read_timeout_seconds > 0
@@ -451,12 +451,12 @@ impl Validate for SecretDetectionConfig {
         }
 
         // Validate scan_timeout_seconds > 0 if Some
-        if let Some(scan_timeout) = self.scan_timeout_seconds {
-            if scan_timeout == 0 {
-                return Err(ValidationError::secret_detection(
-                    "scan_timeout_seconds must be greater than 0 if specified".to_string(),
-                ));
-            }
+        if let Some(scan_timeout) = self.scan_timeout_seconds
+            && scan_timeout == 0
+        {
+            return Err(ValidationError::secret_detection(
+                "scan_timeout_seconds must be greater than 0 if specified".to_string(),
+            ));
         }
 
         Ok(())

@@ -391,10 +391,9 @@ fn extract_api_key_from_headers(headers: &axum::http::HeaderMap) -> Option<Strin
     if let Some(auth) = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
+        && let Some(key) = auth.strip_prefix("ApiKey ")
     {
-        if let Some(key) = auth.strip_prefix("ApiKey ") {
-            return Some(key.to_string());
-        }
+        return Some(key.to_string());
     }
 
     None
@@ -669,14 +668,14 @@ pub async fn auth_rate_limit_middleware(
 /// Returns (user_id, api_key_id, is_org_member)
 fn extract_auth_info(request: &Request) -> (Option<Uuid>, Option<Uuid>, bool) {
     // EarlyAuthInfo is set by early_auth_middleware before rate limiting.
-    if let Some(early_auth) = request.extensions().get::<EarlyAuthInfo>() {
-        if early_auth.user_id.is_some() {
-            return (
-                early_auth.user_id,
-                early_auth.api_key_id,
-                early_auth.is_org_member,
-            );
-        }
+    if let Some(early_auth) = request.extensions().get::<EarlyAuthInfo>()
+        && early_auth.user_id.is_some()
+    {
+        return (
+            early_auth.user_id,
+            early_auth.api_key_id,
+            early_auth.is_org_member,
+        );
     }
 
     // Anonymous user

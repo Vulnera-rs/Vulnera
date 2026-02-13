@@ -493,10 +493,10 @@ fn estimate_source_size_bytes(source_uri: &str) -> Option<u64> {
         })
         .filter_map(Result::ok)
     {
-        if entry.file_type().is_file() {
-            if let Ok(metadata) = entry.metadata() {
-                total = total.saturating_add(metadata.len());
-            }
+        if entry.file_type().is_file()
+            && let Ok(metadata) = entry.metadata()
+        {
+            total = total.saturating_add(metadata.len());
         }
     }
 

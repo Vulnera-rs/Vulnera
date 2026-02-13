@@ -165,13 +165,12 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error creating organization: {}", e);
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("idx_organizations_owner_name") {
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("idx_organizations_owner_name") {
                     return OrganizationError::NameAlreadyExists {
                         name: org.name.clone(),
                     };
                 }
-            }
             OrganizationError::DatabaseError {
                 message: e.to_string(),
             }
@@ -203,12 +202,12 @@ impl IOrganizationRepository for SqlxOrganizationRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error updating organization: {}", e);
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("idx_organizations_owner_name") {
-                    return OrganizationError::NameAlreadyExists {
-                        name: org.name.clone(),
-                    };
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("idx_organizations_owner_name")
+            {
+                return OrganizationError::NameAlreadyExists {
+                    name: org.name.clone(),
+                };
             }
             OrganizationError::DatabaseError {
                 message: e.to_string(),

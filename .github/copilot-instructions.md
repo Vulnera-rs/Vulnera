@@ -17,7 +17,9 @@ vulnera-rust (binary - HTTP API server)
   │  └─ vulnera-llm        [Gemini-powered explanations & auto-fixes]
   └─ vulnera-core          [domain models, shared traits, infra, config]
 
-vulnera-cli (standalone workspace - offline analysis + server API calls)
+vulnera-cli (standalone workspace and repository - offline analysis cli client + server API calls)
+vulnera-advisor (standalone workspace and repository - advisors crate + server API calls)
+vulnera-adapter (standalone workspace and repository - lsp crate + server API calls)
 ```
 
 **Composition Root**: `src/app.rs` is the **single composition root**. It delegates module setup to `src/modules/mod.rs` and wires all use cases, repositories, caches, and HTTP state. Never instantiate services (PgPool, Cache, etc.) inside crate internals—wire everything at the top level and inject via `Arc<dyn Trait>`.
@@ -31,16 +33,16 @@ vulnera-cli (standalone workspace - offline analysis + server API calls)
 
 ## Critical Files & Patterns
 
-| Task               | Key Files                                                                 | Pattern                                                                                   |
-| :----------------- | :------------------------------------------------------------------------ | :---------------------------------------------------------------------------------------- |
-| **New Module**     | `vulnera-core/.../traits.rs`, `src/modules/mod.rs`                        | Implement `AnalysisModule`; register in `ModuleRegistry`                                  |
-| **Sandbox Policy** | `vulnera-sandbox/src/domain/policy.rs`, `.../application/use_cases.rs`    | Build `SandboxPolicy::for_profile(SandboxPolicyProfile::...)`; execution via `SandboxExecutor` |
-| **SAST Rules**     | `vulnera-sast/src/infrastructure/rules/`                                  | Tree-sitter queries + visitor pattern for taint/data-flow                                 |
-| **Job Lifecycle**  | `vulnera-orchestrator/src/infrastructure/job_queue.rs`                    | Dragonfly-backed queue -> worker pool -> `ExecuteAnalysisJobUseCase` -> Sandbox           |
-| **Job Storage**    | `vulnera-orchestrator/src/infrastructure/job_store/`                      | Persist snapshots (`FindingsSummary`, metadata) with optional webhook delivery            |
-| **Module Selection** | `vulnera-orchestrator/src/infrastructure/module_selector.rs`            | `RuleBasedModuleSelector` decides modules by `AnalysisDepth` + project metadata           |
-| **Auth/API Keys**  | `vulnera-core/src/infrastructure/auth/`, `.../presentation/auth/`         | JWT + Argon2; cookie auth with CSRF; API key endpoints under `/api/v1/auth/api-keys`      |
-| **Database**       | `migrations/`, `vulnera-core/.../infrastructure/`                         | SQLx `query!` macros (compile-time checked); `IEntityRepository` traits                   |
+| Task                 | Key Files                                                              | Pattern                                                                                        |
+| :------------------- | :--------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
+| **New Module**       | `vulnera-core/.../traits.rs`, `src/modules/mod.rs`                     | Implement `AnalysisModule`; register in `ModuleRegistry`                                       |
+| **Sandbox Policy**   | `vulnera-sandbox/src/domain/policy.rs`, `.../application/use_cases.rs` | Build `SandboxPolicy::for_profile(SandboxPolicyProfile::...)`; execution via `SandboxExecutor` |
+| **SAST Rules**       | `vulnera-sast/src/infrastructure/rules/`                               | Tree-sitter queries + visitor pattern for taint/data-flow                                      |
+| **Job Lifecycle**    | `vulnera-orchestrator/src/infrastructure/job_queue.rs`                 | Dragonfly-backed queue -> worker pool -> `ExecuteAnalysisJobUseCase` -> Sandbox                |
+| **Job Storage**      | `vulnera-orchestrator/src/infrastructure/job_store/`                   | Persist snapshots (`FindingsSummary`, metadata) with optional webhook delivery                 |
+| **Module Selection** | `vulnera-orchestrator/src/infrastructure/module_selector.rs`           | `RuleBasedModuleSelector` decides modules by `AnalysisDepth` + project metadata                |
+| **Auth/API Keys**    | `vulnera-core/src/infrastructure/auth/`, `.../presentation/auth/`      | JWT + Argon2; cookie auth with CSRF; API key endpoints under `/api/v1/auth/api-keys`           |
+| **Database**         | `migrations/`, `vulnera-core/.../infrastructure/`                      | SQLx `query!` macros (compile-time checked); `IEntityRepository` traits                        |
 
 ## Analysis Capabilities
 

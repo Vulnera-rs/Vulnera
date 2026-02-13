@@ -431,10 +431,10 @@ impl SymbolTable {
     /// Get taint state by name across all scopes (ignores current scope)
     pub fn get_taint_any_scope(&self, name: &str) -> Option<&TaintState> {
         for scope in &self.scopes {
-            if let Some(symbol) = scope.resolve(name) {
-                if let Some(taint) = symbol.taint_state() {
-                    return Some(taint);
-                }
+            if let Some(symbol) = scope.resolve(name)
+                && let Some(taint) = symbol.taint_state()
+            {
+                return Some(taint);
             }
         }
         None
@@ -499,12 +499,11 @@ impl SymbolTable {
 
     /// Record a use of a symbol at a location
     pub fn record_use(&mut self, name: &str, location: Location) {
-        if let Some(scope_id) = self.find_symbol_scope(name) {
-            if let Some(scope) = self.scopes.get_mut(scope_id) {
-                if let Some(symbol) = scope.resolve_mut(name) {
-                    symbol.record_use(location);
-                }
-            }
+        if let Some(scope_id) = self.find_symbol_scope(name)
+            && let Some(scope) = self.scopes.get_mut(scope_id)
+            && let Some(symbol) = scope.resolve_mut(name)
+        {
+            symbol.record_use(location);
         }
     }
 
@@ -1366,21 +1365,21 @@ impl<'a> SymbolTableBuilder<'a> {
                 // import { a, b } from "module"
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "import_specifier" {
-                        if let Some(name_node) = child.child_by_field_name("name") {
-                            let name = self.node_text(name_node);
-                            let location = self.node_location(name_node);
+                    if child.kind() == "import_specifier"
+                        && let Some(name_node) = child.child_by_field_name("name")
+                    {
+                        let name = self.node_text(name_node);
+                        let location = self.node_location(name_node);
 
-                            let symbol = Symbol::new(
-                                name,
-                                SymbolKind::Import,
-                                self.table.current_scope_id(),
-                                location,
-                            )
-                            .with_mutable(false);
+                        let symbol = Symbol::new(
+                            name,
+                            SymbolKind::Import,
+                            self.table.current_scope_id(),
+                            location,
+                        )
+                        .with_mutable(false);
 
-                            let _ = self.table.declare(symbol);
-                        }
+                        let _ = self.table.declare(symbol);
                     }
                 }
             }
@@ -2589,13 +2588,13 @@ impl<'a> SymbolTableBuilder<'a> {
 
     fn handle_c_function_parameters(&mut self, node: Node) {
         // Extract parameter declarations from function declarator
-        if node.kind() == "function_declarator" {
-            if let Some(params) = node.child_by_field_name("parameters") {
-                let mut cursor = params.walk();
-                for child in params.children(&mut cursor) {
-                    if child.kind() == "parameter_declaration" {
-                        self.handle_c_parameter(child);
-                    }
+        if node.kind() == "function_declarator"
+            && let Some(params) = node.child_by_field_name("parameters")
+        {
+            let mut cursor = params.walk();
+            for child in params.children(&mut cursor) {
+                if child.kind() == "parameter_declaration" {
+                    self.handle_c_parameter(child);
                 }
             }
         }
@@ -2822,23 +2821,22 @@ impl<'a> SymbolTableBuilder<'a> {
         if let Some(params) = node.child_by_field_name("parameters") {
             let mut cursor = params.walk();
             for child in params.children(&mut cursor) {
-                if child.kind() == "type_parameter_declaration"
-                    || child.kind() == "parameter_declaration"
+                if (child.kind() == "type_parameter_declaration"
+                    || child.kind() == "parameter_declaration")
+                    && let Some(name_node) = child.child_by_field_name("name")
                 {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let name = self.node_text(name_node);
-                        let location = self.node_location(name_node);
+                    let name = self.node_text(name_node);
+                    let location = self.node_location(name_node);
 
-                        let symbol = Symbol::new(
-                            name,
-                            SymbolKind::TypeAlias,
-                            self.table.current_scope_id(),
-                            location,
-                        )
-                        .with_mutable(false);
+                    let symbol = Symbol::new(
+                        name,
+                        SymbolKind::TypeAlias,
+                        self.table.current_scope_id(),
+                        location,
+                    )
+                    .with_mutable(false);
 
-                        let _ = self.table.declare(symbol);
-                    }
+                    let _ = self.table.declare(symbol);
                 }
             }
         }
@@ -2906,15 +2904,15 @@ impl<'a> SymbolTableBuilder<'a> {
 
     fn handle_cpp_function_parameters(&mut self, node: Node) {
         // Extract parameter declarations
-        if node.kind() == "function_declarator" {
-            if let Some(params) = node.child_by_field_name("parameters") {
-                let mut cursor = params.walk();
-                for child in params.children(&mut cursor) {
-                    if child.kind() == "parameter_declaration"
-                        || child.kind() == "optional_parameter_declaration"
-                    {
-                        self.handle_cpp_parameter(child);
-                    }
+        if node.kind() == "function_declarator"
+            && let Some(params) = node.child_by_field_name("parameters")
+        {
+            let mut cursor = params.walk();
+            for child in params.children(&mut cursor) {
+                if child.kind() == "parameter_declaration"
+                    || child.kind() == "optional_parameter_declaration"
+                {
+                    self.handle_cpp_parameter(child);
                 }
             }
         }

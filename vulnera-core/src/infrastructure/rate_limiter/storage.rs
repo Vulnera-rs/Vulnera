@@ -261,10 +261,10 @@ impl Default for InMemoryRateLimitStorage {
 impl RateLimitStorage for InMemoryRateLimitStorage {
     async fn get_token_bucket(&self, key: &str) -> Result<Option<TokenBucketState>, String> {
         let buckets = self.token_buckets.read().await;
-        if let Some(entry) = buckets.get(key) {
-            if Self::current_time() < entry.expires_at {
-                return Ok(Some(entry.value.clone()));
-            }
+        if let Some(entry) = buckets.get(key)
+            && Self::current_time() < entry.expires_at
+        {
+            return Ok(Some(entry.value.clone()));
         }
         Ok(None)
     }
@@ -288,10 +288,10 @@ impl RateLimitStorage for InMemoryRateLimitStorage {
 
     async fn get_sliding_window(&self, key: &str) -> Result<Option<SlidingWindowState>, String> {
         let windows = self.sliding_windows.read().await;
-        if let Some(entry) = windows.get(key) {
-            if Self::current_time() < entry.expires_at {
-                return Ok(Some(entry.value.clone()));
-            }
+        if let Some(entry) = windows.get(key)
+            && Self::current_time() < entry.expires_at
+        {
+            return Ok(Some(entry.value.clone()));
         }
         Ok(None)
     }
@@ -316,10 +316,10 @@ impl RateLimitStorage for InMemoryRateLimitStorage {
     async fn get_lockout(&self, key: &str) -> Result<Option<u64>, String> {
         let lockout_key = format!("{}:lockout", key);
         let lockouts = self.lockouts.read().await;
-        if let Some(entry) = lockouts.get(&lockout_key) {
-            if Self::current_time() < entry.expires_at {
-                return Ok(Some(entry.value));
-            }
+        if let Some(entry) = lockouts.get(&lockout_key)
+            && Self::current_time() < entry.expires_at
+        {
+            return Ok(Some(entry.value));
         }
         Ok(None)
     }

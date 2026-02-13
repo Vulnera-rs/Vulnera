@@ -50,16 +50,15 @@ impl TreeSitterJsonParser {
 
         while let Some(node) = stack.pop() {
             // Check if this is a pair node with the target key
-            if node.kind() == "pair" {
-                if let Some(key_node) = node.child_by_field_name("key") {
-                    let key_text = &content[key_node.byte_range()];
-                    if key_text.trim_matches('"') == dep_type {
-                        if let Some(value_node) = node.child_by_field_name("value") {
-                            if value_node.kind() == "object" {
-                                return Some(value_node);
-                            }
-                        }
-                    }
+            if node.kind() == "pair"
+                && let Some(key_node) = node.child_by_field_name("key")
+            {
+                let key_text = &content[key_node.byte_range()];
+                if key_text.trim_matches('"') == dep_type
+                    && let Some(value_node) = node.child_by_field_name("value")
+                    && value_node.kind() == "object"
+                {
+                    return Some(value_node);
                 }
             }
 
@@ -85,10 +84,10 @@ impl TreeSitterJsonParser {
         let mut cursor = object_node.walk();
 
         for child in object_node.children(&mut cursor) {
-            if child.kind() == "pair" {
-                if let Some(package) = self.parse_dependency_pair(&child, content)? {
-                    packages.push(package);
-                }
+            if child.kind() == "pair"
+                && let Some(package) = self.parse_dependency_pair(&child, content)?
+            {
+                packages.push(package);
             }
         }
 

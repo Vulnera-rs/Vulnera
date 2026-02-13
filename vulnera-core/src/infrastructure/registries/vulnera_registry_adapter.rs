@@ -273,10 +273,10 @@ fn parse_version_lenient(s: &str) -> Option<Version> {
     let nums: Vec<&str> = core.split('.').collect();
     if nums.len() > 3 {
         let mut base = format!("{}.{}.{}", nums[0], nums[1], nums[2]);
-        if let Some(preid) = pre {
-            if !preid.is_empty() {
-                base = format!("{}-{}", base, preid);
-            }
+        if let Some(preid) = pre
+            && !preid.is_empty()
+        {
+            base = format!("{}-{}", base, preid);
         }
         Version::parse(&base).ok()
     } else {

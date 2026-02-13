@@ -188,11 +188,11 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
             }
 
             // Detect workspace if not already detected
-            if ctx.workspace.is_none() {
-                if let Some(workspace) = detect_workspace(&ctx.project_root) {
-                    // Note: We can't mutate ctx here, but we could update it in a future version
-                    debug!("Detected workspace: {:?}", workspace);
-                }
+            if ctx.workspace.is_none()
+                && let Some(workspace) = detect_workspace(&ctx.project_root)
+            {
+                // Note: We can't mutate ctx here, but we could update it in a future version
+                debug!("Detected workspace: {:?}", workspace);
             }
         }
 
@@ -405,14 +405,14 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
                 while let Some(result) = join_set.join_next().await {
                     match result {
                         Ok(Ok((idx, Some(resolved_version)))) => {
-                            if let Some(pkg) = packages.get_mut(idx) {
-                                if resolved_version > pkg.version {
-                                    debug!(
-                                        "Resolved Cargo.toml spec for {}: {} -> {}",
-                                        pkg.name, pkg.version, resolved_version
-                                    );
-                                    pkg.version = resolved_version;
-                                }
+                            if let Some(pkg) = packages.get_mut(idx)
+                                && resolved_version > pkg.version
+                            {
+                                debug!(
+                                    "Resolved Cargo.toml spec for {}: {} -> {}",
+                                    pkg.name, pkg.version, resolved_version
+                                );
+                                pkg.version = resolved_version;
                             }
                         }
                         Ok(Ok((_idx, None))) => {
@@ -556,14 +556,14 @@ impl<C: CacheService + 'static> AnalyzeDependenciesUseCase<C> {
         filename: Option<&str>,
     ) -> Result<vulnera_core::infrastructure::parsers::ParseResult, ApplicationError> {
         // Try to find a parser based on filename first
-        if let Some(filename) = filename {
-            if let Some(parser) = self.parser_factory.create_parser(filename) {
-                debug!("Using parser for filename: {}", filename);
-                return parser
-                    .parse_file(file_content)
-                    .await
-                    .map_err(ApplicationError::Parse);
-            }
+        if let Some(filename) = filename
+            && let Some(parser) = self.parser_factory.create_parser(filename)
+        {
+            debug!("Using parser for filename: {}", filename);
+            return parser
+                .parse_file(file_content)
+                .await
+                .map_err(ApplicationError::Parse);
         }
 
         // Fall back to ecosystem-based parsing by trying common filenames for the ecosystem

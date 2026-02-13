@@ -121,11 +121,7 @@ fn default_js_ts_frontend() -> JavaScriptFrontend {
 }
 
 fn parse_js_ts_frontend(value: Option<&str>) -> JavaScriptFrontend {
-    match value
-        .map(str::trim)
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
         Some("tree_sitter") => JavaScriptFrontend::TreeSitter,
         Some("oxc_preferred") => JavaScriptFrontend::OxcPreferred,
         _ => default_js_ts_frontend(),
@@ -490,10 +486,10 @@ impl ScanProjectUseCase {
                     stage_analysis.files_scanned + stage_analysis.files_skipped,
                     stage_analysis.files_skipped,
                 );
-                if let Some(ref state_path) = self.config.incremental_state_path {
-                    if let Err(e) = t.save_to_file(state_path) {
-                        warn!(error = %e, "Failed to save incremental state");
-                    }
+                if let Some(ref state_path) = self.config.incremental_state_path
+                    && let Err(e) = t.save_to_file(state_path)
+                {
+                    warn!(error = %e, "Failed to save incremental state");
                 }
                 let stats = t.stats();
                 info!(
@@ -567,7 +563,9 @@ impl ScanProjectUseCase {
             rules,
             effective_depth,
             effective_parallelism,
-            ast_cache_ttl: Duration::from_secs(self.config.ast_cache_ttl_hours.saturating_mul(3600)),
+            ast_cache_ttl: Duration::from_secs(
+                self.config.ast_cache_ttl_hours.saturating_mul(3600),
+            ),
         })
     }
 
@@ -591,20 +589,26 @@ impl ScanProjectUseCase {
         let results = stream::iter(files.iter().cloned())
             .map(|file| async move {
                 let file_path_str = file.path.display().to_string();
-                let content = std::fs::read_to_string(&file.path)
-                    .map_err(|e| format!("Failed to read {} in parse/index: {}", file.path.display(), e))?;
+                let content = std::fs::read_to_string(&file.path).map_err(|e| {
+                    format!(
+                        "Failed to read {} in parse/index: {}",
+                        file.path.display(),
+                        e
+                    )
+                })?;
 
                 let selected_frontend = self.parser_frontend_selector.select(file.language);
                 let mut warnings = Vec::new();
 
-                if selected_frontend == ParserFrontend::Oxc && OxcFrontend::supports(file.language) {
-                    if let Err(err) = self.oxc_frontend.parse_file(&file.path, &content) {
-                        warnings.push(format!(
-                            "OXC parse warning for {}: {}",
-                            file.path.display(),
-                            err
-                        ));
-                    }
+                if selected_frontend == ParserFrontend::Oxc
+                    && OxcFrontend::supports(file.language)
+                    && let Err(err) = self.oxc_frontend.parse_file(&file.path, &content)
+                {
+                    warnings.push(format!(
+                        "OXC parse warning for {}: {}",
+                        file.path.display(),
+                        err
+                    ));
                 }
 
                 let tree = self
@@ -633,16 +637,16 @@ impl ScanProjectUseCase {
                         errors.push(warning);
                     }
 
-                    if self.config.enable_ast_cache {
-                        if let Some(cache) = self.ast_cache.as_ref() {
-                            let content_hash = Self::compute_content_hash(&content);
-                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
-                            if let Err(e) = cache
-                                .set(&content_hash, &language, &ast, Some(ast_cache_ttl))
-                                .await
-                            {
-                                warn!(error = %e, "Failed to write L2 AST cache");
-                            }
+                    if self.config.enable_ast_cache
+                        && let Some(cache) = self.ast_cache.as_ref()
+                    {
+                        let content_hash = Self::compute_content_hash(&content);
+                        let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                        if let Err(e) = cache
+                            .set(&content_hash, &language, &ast, Some(ast_cache_ttl))
+                            .await
+                        {
+                            warn!(error = %e, "Failed to write L2 AST cache");
                         }
                     }
 
@@ -740,20 +744,21 @@ impl ScanProjectUseCase {
                 }
             };
 
-            if selected_frontend == ParserFrontend::Oxc && OxcFrontend::supports(file.language) {
-                if let Err(err) = self.oxc_frontend.parse_file(&file.path, &content) {
-                    warn!(
-                        file = %file.path.display(),
-                        language = %file.language,
-                        error = %err,
-                        "OXC parse failed, continuing with Tree-sitter compatibility lane"
-                    );
-                    stage.errors.push(format!(
-                        "OXC parse warning for {}: {}",
-                        file.path.display(),
-                        err
-                    ));
-                }
+            if selected_frontend == ParserFrontend::Oxc
+                && OxcFrontend::supports(file.language)
+                && let Err(err) = self.oxc_frontend.parse_file(&file.path, &content)
+            {
+                warn!(
+                    file = %file.path.display(),
+                    language = %file.language,
+                    error = %err,
+                    "OXC parse failed, continuing with Tree-sitter compatibility lane"
+                );
+                stage.errors.push(format!(
+                    "OXC parse warning for {}: {}",
+                    file.path.display(),
+                    err
+                ));
             }
 
             let file_path_str = file.path.display().to_string();
@@ -782,7 +787,9 @@ impl ScanProjectUseCase {
                 }
             }
 
-            let mut cached_tree = parsed_files.get(&file_path_str).map(|(tree, _)| tree.clone());
+            let mut cached_tree = parsed_files
+                .get(&file_path_str)
+                .map(|(tree, _)| tree.clone());
             let mut l2_hit = false;
 
             if cached_tree.is_some() {
@@ -806,15 +813,16 @@ impl ScanProjectUseCase {
                 }
 
                 if let Ok(tree) = self.sast_engine.parse(&content, file.language).await {
-                    if self.config.enable_ast_cache && !l2_hit {
-                        if let Some(cache) = self.ast_cache.as_ref() {
-                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
-                            if let Err(e) = cache
-                                .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
-                                .await
-                            {
-                                warn!(error = %e, "Failed to write L2 AST cache");
-                            }
+                    if self.config.enable_ast_cache
+                        && !l2_hit
+                        && let Some(cache) = self.ast_cache.as_ref()
+                    {
+                        let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                        if let Err(e) = cache
+                            .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
+                            .await
+                        {
+                            warn!(error = %e, "Failed to write L2 AST cache");
                         }
                     }
                     cached_tree = Some(tree);
@@ -848,9 +856,11 @@ impl ScanProjectUseCase {
                 .await
             {
                 warn!(file = %file.path.display(), error = %e, "Tree-sitter analysis failed");
-                stage
-                    .errors
-                    .push(format!("Analysis failed for {}: {}", file.path.display(), e));
+                stage.errors.push(format!(
+                    "Analysis failed for {}: {}",
+                    file.path.display(),
+                    e
+                ));
             }
 
             if self.config.enable_data_flow && effective_depth != AnalysisDepth::Quick {
@@ -879,24 +889,23 @@ impl ScanProjectUseCase {
                 );
             }
 
-            if let Some(max_total) = self.config.max_total_findings {
-                if stage.findings.len() >= max_total {
-                    info!(
-                        total_findings = stage.findings.len(),
-                        max_total,
-                        "Max total findings limit reached, stopping scan early"
+            if let Some(max_total) = self.config.max_total_findings
+                && stage.findings.len() >= max_total
+            {
+                info!(
+                    total_findings = stage.findings.len(),
+                    max_total, "Max total findings limit reached, stopping scan early"
+                );
+                let mut tracker = self.incremental_tracker.lock().unwrap();
+                if let Some(ref mut t) = *tracker {
+                    t.record_file(
+                        &file_path_str,
+                        content_hash,
+                        content.len() as u64,
+                        file_finding_count,
                     );
-                    let mut tracker = self.incremental_tracker.lock().unwrap();
-                    if let Some(ref mut t) = *tracker {
-                        t.record_file(
-                            &file_path_str,
-                            content_hash,
-                            content.len() as u64,
-                            file_finding_count,
-                        );
-                    }
-                    break;
                 }
+                break;
             }
 
             {
@@ -1484,17 +1493,17 @@ impl ScanProjectUseCase {
 
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
-            if analyzer.is_tainted(sink_var) {
-                if let Some(data_flow_finding) = analyzer.check_sink(
+            if analyzer.is_tainted(sink_var)
+                && let Some(data_flow_finding) = analyzer.check_sink(
                     sink_var,
                     &sink.pattern_name,
                     file_str,
                     sink.line as u32 + 1,
                     sink.column as u32,
-                ) {
-                    Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
-                    continue;
-                }
+                )
+            {
+                Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
+                continue;
             }
 
             let active_taints: Vec<String> = analyzer
@@ -1514,16 +1523,16 @@ impl ScanProjectUseCase {
                     .or_else(|_| regex_cache::get_regex(tainted_var))
                     .unwrap();
 
-                if re.is_match(&sink.matched_text) {
-                    if let Some(data_flow_finding) = analyzer.check_sink(
+                if re.is_match(&sink.matched_text)
+                    && let Some(data_flow_finding) = analyzer.check_sink(
                         tainted_var,
                         &sink.pattern_name,
                         file_str,
                         sink.line as u32 + 1,
                         sink.column as u32,
-                    ) {
-                        Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
-                    }
+                    )
+                {
+                    Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
                 }
             }
         }

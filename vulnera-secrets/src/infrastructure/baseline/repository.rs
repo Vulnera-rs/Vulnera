@@ -150,13 +150,12 @@ impl FileBaselineRepository {
         }
 
         // Update modification time
-        if self.file_path.exists() {
-            if let Ok(metadata) = std::fs::metadata(&self.file_path) {
-                if let Ok(modified) = metadata.modified() {
-                    let mut last_mod = self.last_modified.write().unwrap();
-                    *last_mod = Some(modified);
-                }
-            }
+        if self.file_path.exists()
+            && let Ok(metadata) = std::fs::metadata(&self.file_path)
+            && let Ok(modified) = metadata.modified()
+        {
+            let mut last_mod = self.last_modified.write().unwrap();
+            *last_mod = Some(modified);
         }
 
         Ok(baseline)
@@ -255,11 +254,11 @@ impl BaselineRepository for FileBaselineRepository {
         }
 
         // Update modification time
-        if let Ok(metadata) = std::fs::metadata(&self.file_path) {
-            if let Ok(modified) = metadata.modified() {
-                let mut last_mod = self.last_modified.write().unwrap();
-                *last_mod = Some(modified);
-            }
+        if let Ok(metadata) = std::fs::metadata(&self.file_path)
+            && let Ok(modified) = metadata.modified()
+        {
+            let mut last_mod = self.last_modified.write().unwrap();
+            *last_mod = Some(modified);
         }
 
         info!(

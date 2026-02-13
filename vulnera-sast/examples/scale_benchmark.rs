@@ -61,14 +61,8 @@ async fn run() -> Result<(), String> {
     println!("baseline_parallelism={baseline_parallelism}");
     println!("tuned_parallelism={tuned_parallelism}");
 
-    let baseline = benchmark_profile(
-        "baseline",
-        &target,
-        iterations,
-        depth,
-        baseline_parallelism,
-    )
-    .await?;
+    let baseline =
+        benchmark_profile("baseline", &target, iterations, depth, baseline_parallelism).await?;
 
     let tuned = benchmark_profile("tuned", &target, iterations, depth, tuned_parallelism).await?;
 
@@ -150,7 +144,9 @@ async fn benchmark_profile(
 
     let avg_ms = durations.iter().copied().map(|v| v as f64).sum::<f64>() / iterations as f64;
     let p95_index = ((iterations as f64) * 0.95).ceil() as usize;
-    let p95_ms = durations[p95_index.saturating_sub(1).min(durations.len().saturating_sub(1))];
+    let p95_ms = durations[p95_index
+        .saturating_sub(1)
+        .min(durations.len().saturating_sub(1))];
 
     let avg_files_scanned = total_files_scanned as f64 / iterations as f64;
     let avg_findings = total_findings as f64 / iterations as f64;

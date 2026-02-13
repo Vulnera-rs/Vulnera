@@ -82,7 +82,8 @@ impl SastModuleBuilder {
         let use_case = if let Some(uc) = use_case_override {
             uc
         } else {
-            let analysis_cfg = analysis_config.unwrap_or_else(|| AnalysisConfig::from(&sast_config));
+            let analysis_cfg =
+                analysis_config.unwrap_or_else(|| AnalysisConfig::from(&sast_config));
 
             let uc = ScanProjectUseCase::with_config(&sast_config, analysis_cfg);
             let uc = if let Some(cache) = ast_cache {

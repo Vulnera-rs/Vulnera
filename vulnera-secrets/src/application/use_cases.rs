@@ -455,12 +455,12 @@ impl ScanForSecretsUseCase {
         };
 
         // Optionally strip markdown code blocks if Markdown files are being scanned
-        if !scan_markdown_codeblocks {
-            if let Some(ext) = file.path.extension().and_then(|e| e.to_str()) {
-                let ext_lower = ext.to_lowercase();
-                if ext_lower == "md" || ext_lower == "markdown" {
-                    content = Self::strip_markdown_code_blocks(&content);
-                }
+        if !scan_markdown_codeblocks
+            && let Some(ext) = file.path.extension().and_then(|e| e.to_str())
+        {
+            let ext_lower = ext.to_lowercase();
+            if ext_lower == "md" || ext_lower == "markdown" {
+                content = Self::strip_markdown_code_blocks(&content);
             }
         }
 
@@ -503,13 +503,12 @@ impl ScanForSecretsUseCase {
             return Some("allowlist:global".to_string());
         }
 
-        if let Some(patterns) = self.rule_allowlist_patterns.get(&finding.rule_id) {
-            if patterns
+        if let Some(patterns) = self.rule_allowlist_patterns.get(&finding.rule_id)
+            && patterns
                 .iter()
                 .any(|pattern| pattern.is_match(&finding.matched_secret))
-            {
-                return Some(format!("allowlist:rule:{}", finding.rule_id));
-            }
+        {
+            return Some(format!("allowlist:rule:{}", finding.rule_id));
         }
 
         None

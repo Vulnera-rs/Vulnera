@@ -58,10 +58,10 @@ impl GitHubRepositoryClient {
                 .base_uri(&normalized)
                 .map_err(|e| RepositorySourceError::Configuration(e.to_string()))?;
         }
-        if let Some(t) = token {
-            if !t.trim().is_empty() {
-                builder = builder.personal_token(t);
-            }
+        if let Some(t) = token
+            && !t.trim().is_empty()
+        {
+            builder = builder.personal_token(t);
         }
         let octo = match builder.build() {
             Ok(o) => o,
@@ -131,17 +131,17 @@ impl RepositorySourceClient for GitHubRepositoryClient {
                 if files.len() as u32 >= max_files {
                     break;
                 }
-                if entry.get("type").and_then(|v| v.as_str()) == Some("blob") {
-                    if let (Some(path), Some(size)) = (
+                if entry.get("type").and_then(|v| v.as_str()) == Some("blob")
+                    && let (Some(path), Some(size)) = (
                         entry.get("path").and_then(|v| v.as_str()),
                         entry.get("size").and_then(|v| v.as_u64()),
-                    ) {
-                        files.push(RepositoryFile {
-                            path: path.to_string(),
-                            size,
-                            is_text: true,
-                        });
-                    }
+                    )
+                {
+                    files.push(RepositoryFile {
+                        path: path.to_string(),
+                        size,
+                        is_text: true,
+                    });
                 }
             }
         }

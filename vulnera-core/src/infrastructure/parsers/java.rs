@@ -108,20 +108,18 @@ impl MavenParser {
                     }
                 }
                 Ok(Event::Text(t)) => {
-                    if in_dependency {
-                        if let Some(tag) = current_tag.as_deref() {
-                            let txt = reader
-                                .decoder()
-                                .decode(t.as_ref())
-                                .unwrap_or_default()
-                                .trim()
-                                .to_string();
-                            match tag {
-                                "groupId" => group_id = Some(txt.trim().to_string()),
-                                "artifactId" => artifact_id = Some(txt.trim().to_string()),
-                                "version" => version_str = Some(txt.trim().to_string()),
-                                _ => {}
-                            }
+                    if in_dependency && let Some(tag) = current_tag.as_deref() {
+                        let txt = reader
+                            .decoder()
+                            .decode(t.as_ref())
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+                        match tag {
+                            "groupId" => group_id = Some(txt.trim().to_string()),
+                            "artifactId" => artifact_id = Some(txt.trim().to_string()),
+                            "version" => version_str = Some(txt.trim().to_string()),
+                            _ => {}
                         }
                     }
                 }
@@ -254,10 +252,10 @@ impl MavenParser {
                         .trim()
                         .to_string();
 
-                    if let Some(property) = current_property.as_ref() {
-                        if !value.is_empty() {
-                            properties.insert(property.clone(), value.clone());
-                        }
+                    if let Some(property) = current_property.as_ref()
+                        && !value.is_empty()
+                    {
+                        properties.insert(property.clone(), value.clone());
                     }
 
                     if stack.len() == 2

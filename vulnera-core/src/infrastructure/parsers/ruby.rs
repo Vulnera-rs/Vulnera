@@ -271,18 +271,18 @@ impl GemfileLockParser {
             }
 
             // Check for dependency definition (indentation 6 spaces)
-            if let Some(pkg) = &current_package {
-                if let Some(caps) = RE_DEP_LINE.captures(line) {
-                    let dep_name = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
-                    let dep_req = caps.get(2).map(|m| m.as_str()).unwrap_or("*").trim();
+            if let Some(pkg) = &current_package
+                && let Some(caps) = RE_DEP_LINE.captures(line)
+            {
+                let dep_name = caps.get(1).map(|m| m.as_str()).unwrap_or("").trim();
+                let dep_req = caps.get(2).map(|m| m.as_str()).unwrap_or("*").trim();
 
-                    if !dep_name.is_empty() {
-                        pending_dependencies.push((
-                            pkg.clone(),
-                            dep_name.to_string(),
-                            dep_req.to_string(),
-                        ));
-                    }
+                if !dep_name.is_empty() {
+                    pending_dependencies.push((
+                        pkg.clone(),
+                        dep_name.to_string(),
+                        dep_req.to_string(),
+                    ));
                 }
             }
         }
@@ -305,14 +305,11 @@ impl GemfileLockParser {
                 continue;
             }
 
-            if let Some(base_version) = extract_base_version(&dep_req) {
-                if let Ok(version) = parse_version_lenient(&base_version) {
-                    if let Ok(inferred_target) =
-                        Package::new(dep_name, version, Ecosystem::RubyGems)
-                    {
-                        dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
-                    }
-                }
+            if let Some(base_version) = extract_base_version(&dep_req)
+                && let Ok(version) = parse_version_lenient(&base_version)
+                && let Ok(inferred_target) = Package::new(dep_name, version, Ecosystem::RubyGems)
+            {
+                dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
             }
         }
 

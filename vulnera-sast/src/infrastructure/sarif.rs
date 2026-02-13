@@ -273,18 +273,18 @@ impl SarifExporter {
     /// Extract code snippet from finding description
     fn extract_snippet_from_description(&self, description: &str) -> Option<String> {
         // Look for code blocks in the description
-        if let Some(start) = description.find("```") {
-            if let Some(end) = description[start + 3..].find("```") {
-                let code = &description[start + 3..start + 3 + end];
-                // Remove language identifier if present
-                let code = code
-                    .lines()
-                    .skip_while(|l| l.chars().all(|c| c.is_alphanumeric()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !code.trim().is_empty() {
-                    return Some(code.trim().to_string());
-                }
+        if let Some(start) = description.find("```")
+            && let Some(end) = description[start + 3..].find("```")
+        {
+            let code = &description[start + 3..start + 3 + end];
+            // Remove language identifier if present
+            let code = code
+                .lines()
+                .skip_while(|l| l.chars().all(|c| c.is_alphanumeric()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !code.trim().is_empty() {
+                return Some(code.trim().to_string());
             }
         }
 

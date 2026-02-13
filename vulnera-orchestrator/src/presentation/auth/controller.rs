@@ -473,29 +473,28 @@ pub async fn logout(
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, Json<ErrorResponse>)> {
     // If blacklist is enabled, revoke all user tokens
-    if state.blacklist_tokens_on_logout {
-        if let Some(ref blacklist) = state.token_blacklist {
-            // Try to extract user from the access token cookie
-            if let Some(access_token) = extract_cookie(&headers, "access_token") {
-                // Get the user ID from the token (even if expired, we can still extract claims)
-                if let Ok(claims) = state.validate_token_use_case.get_claims(&access_token) {
-                    if let Ok(user_id) = claims.user_id() {
-                        // Revoke all tokens for this user
-                        // TTL should match the refresh token TTL to ensure all tokens are invalidated
-                        let ttl =
-                            std::time::Duration::from_secs(state.refresh_token_ttl_hours * 3600);
+    if state.blacklist_tokens_on_logout
+        && let Some(ref blacklist) = state.token_blacklist
+    {
+        // Try to extract user from the access token cookie
+        if let Some(access_token) = extract_cookie(&headers, "access_token") {
+            // Get the user ID from the token (even if expired, we can still extract claims)
+            if let Ok(claims) = state.validate_token_use_case.get_claims(&access_token)
+                && let Ok(user_id) = claims.user_id()
+            {
+                // Revoke all tokens for this user
+                // TTL should match the refresh token TTL to ensure all tokens are invalidated
+                let ttl = std::time::Duration::from_secs(state.refresh_token_ttl_hours * 3600);
 
-                        if let Err(e) = blacklist.revoke_all_user_tokens(&user_id, ttl).await {
-                            tracing::warn!(
-                                user_id = %user_id,
-                                error = %e,
-                                "Failed to revoke user tokens on logout"
-                            );
-                            // Don't fail the logout - cookie clearing will still work
-                        } else {
-                            tracing::info!(user_id = %user_id, "User tokens revoked on logout");
-                        }
-                    }
+                if let Err(e) = blacklist.revoke_all_user_tokens(&user_id, ttl).await {
+                    tracing::warn!(
+                        user_id = %user_id,
+                        error = %e,
+                        "Failed to revoke user tokens on logout"
+                    );
+                    // Don't fail the logout - cookie clearing will still work
+                } else {
+                    tracing::info!(user_id = %user_id, "User tokens revoked on logout");
                 }
             }
         }

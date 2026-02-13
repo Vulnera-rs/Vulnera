@@ -138,11 +138,11 @@ impl AnalysisContext {
         // Check if file is in cache
         if let Some(cached_time) = self.cache.get(file_path) {
             // Check if file has been modified since last analysis
-            if let Ok(metadata) = std::fs::metadata(file_path) {
-                if let Ok(modified) = metadata.modified() {
-                    // File needs re-analysis if it was modified after cache time
-                    return modified > *cached_time;
-                }
+            if let Ok(metadata) = std::fs::metadata(file_path)
+                && let Ok(modified) = metadata.modified()
+            {
+                // File needs re-analysis if it was modified after cache time
+                return modified > *cached_time;
             }
             // If we can't get modification time, assume it needs analysis
             return true;

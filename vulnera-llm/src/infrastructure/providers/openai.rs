@@ -336,28 +336,28 @@ impl LlmProvider for OpenAIProvider {
                                 ));
                             }
 
-                            if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
-                                if let Some(choice) = chunk.choices.into_iter().next() {
-                                    let text = choice.delta.content.clone();
-                                    let is_final = choice.finish_reason.is_some();
-                                    let stop_reason =
-                                        choice.finish_reason.as_deref().map(|r| match r {
-                                            "stop" => StopReason::EndTurn,
-                                            "length" => StopReason::MaxTokens,
-                                            _ => StopReason::Other,
-                                        });
+                            if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data)
+                                && let Some(choice) = chunk.choices.into_iter().next()
+                            {
+                                let text = choice.delta.content.clone();
+                                let is_final = choice.finish_reason.is_some();
+                                let stop_reason =
+                                    choice.finish_reason.as_deref().map(|r| match r {
+                                        "stop" => StopReason::EndTurn,
+                                        "length" => StopReason::MaxTokens,
+                                        _ => StopReason::Other,
+                                    });
 
-                                    let chunk_result = StreamChunk {
-                                        index: idx,
-                                        delta: text.map(|t| ContentBlock::Text { text: t }),
-                                        is_final,
-                                        stop_reason,
-                                        usage: None,
-                                    };
+                                let chunk_result = StreamChunk {
+                                    index: idx,
+                                    delta: text.map(|t| ContentBlock::Text { text: t }),
+                                    is_final,
+                                    stop_reason,
+                                    usage: None,
+                                };
 
-                                    idx += 1;
-                                    return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
-                                }
+                                idx += 1;
+                                return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
                             }
                         }
                     }

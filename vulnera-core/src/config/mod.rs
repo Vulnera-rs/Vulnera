@@ -763,7 +763,7 @@ impl Default for SastConfig {
             per_file_timeout_seconds: Some(30),
             scan_timeout_seconds: None, // No overall limit by default
             max_findings_per_file: Some(100),
-            max_total_findings: None,        // No limit by default
+            max_total_findings: None, // No limit by default
             js_ts_frontend: Some("oxc_preferred".to_string()),
             min_finding_severity: Some("info".to_string()),
             min_finding_confidence: Some("low".to_string()),
