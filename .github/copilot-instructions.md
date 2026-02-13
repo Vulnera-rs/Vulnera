@@ -1,6 +1,6 @@
 # Vulnera Copilot Instructions
 
-Vulnera is a multi-module async Rust vulnerability analysis platform (MSRV 1.82+). AI agents should focus on domain-driven design (DDD) patterns, the sandbox-isolated execution model, and the modular analysis pipeline orchestrated by the composition root.
+Vulnera is a multi-module async Rust vulnerability analysis platform (MSRV 1.91+). AI agents should focus on domain-driven design (DDD) patterns, the sandbox-isolated execution model, and the modular analysis pipeline orchestrated by the composition root.
 
 ## Architecture: The Big Picture
 

@@ -1,5 +1,6 @@
 //! Orchestrator use cases
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio::task::JoinSet;
@@ -25,16 +26,19 @@ use vulnera_sandbox::{
 pub struct CreateAnalysisJobUseCase {
     project_detector: Arc<dyn ProjectDetector>,
     module_selector: Arc<dyn ModuleSelector>,
+    available_modules: HashSet<ModuleType>,
 }
 
 impl CreateAnalysisJobUseCase {
     pub fn new(
         project_detector: Arc<dyn ProjectDetector>,
         module_selector: Arc<dyn ModuleSelector>,
+        available_modules: Vec<ModuleType>,
     ) -> Self {
         Self {
             project_detector,
             module_selector,
+            available_modules: available_modules.into_iter().collect(),
         }
     }
 
@@ -67,15 +71,38 @@ impl CreateAnalysisJobUseCase {
             })?;
 
         // Select modules to run
-        let modules_to_run = self
+        let selected_modules = self
             .module_selector
             .select_modules(&project, &analysis_depth);
+
+        let mut unavailable_modules = Vec::new();
+        let modules_to_run: Vec<ModuleType> = selected_modules
+            .into_iter()
+            .filter(|module_type| {
+                if self.available_modules.contains(module_type) {
+                    true
+                } else {
+                    unavailable_modules.push(module_type.clone());
+                    false
+                }
+            })
+            .collect();
+
+        if !unavailable_modules.is_empty() {
+            warn!(
+                project_id = %project.id,
+                analysis_depth = ?analysis_depth,
+                unavailable_modules = ?unavailable_modules,
+                "Filtered selected modules that are not registered in the current runtime"
+            );
+        }
 
         info!(
             project_id = %project.id,
             source_type = ?source_type,
             analysis_depth = ?analysis_depth,
             selected_modules = modules_to_run.len(),
+            filtered_modules = unavailable_modules.len(),
             duration_ms = start_time.elapsed().as_millis(),
             "Created analysis job plan"
         );

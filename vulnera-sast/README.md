@@ -40,6 +40,8 @@ Key settings:
 - Rule file path and taint config path
 - Analysis depth (Quick / Standard / Deep)
 - AST caching and incremental analysis
+- JS/TS frontend rollout (`js_ts_frontend = "oxc_preferred"` by default; set to `tree_sitter` to opt out)
+- Policy gates (`min_finding_severity`, `min_finding_confidence`, recommendation/evidence requirements)
 
 ## Rule system
 
@@ -58,6 +60,14 @@ Rules are stored under `vulnera-sast/rules/` and taint patterns under `vulnera-s
 - Unit tests: `cargo test -p vulnera-sast`
 - Data-driven SAST rules: `cargo test -p vulnera-sast --test datatest_sast_rules`
 - Snapshot review: `cargo insta review`
+
+## Benchmarking at scale
+
+Run baseline vs tuned parallelism comparison on a target repository:
+
+- `cargo run -p vulnera-sast --example scale_benchmark -- /path/to/repo`
+- Optional args: `iterations` and `depth` (`quick|standard|deep`)
+- Example: `cargo run -p vulnera-sast --example scale_benchmark -- . 5 deep`
 
 ## Limitations
 

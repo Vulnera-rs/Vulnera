@@ -2,6 +2,7 @@
 name = "vulnera-sast"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -40,6 +41,9 @@ tree-sitter-go = { workspace = true }
 tree-sitter-c = { workspace = true }
 tree-sitter-cpp = { workspace = true }
 tree-sitter-rust = { workspace = true }
+oxc_allocator = { workspace = true }
+oxc_parser = { workspace = true }
+oxc_span = { workspace = true }
 syn = { workspace = true }
 quote = { workspace = true }
 proc-macro2 = { workspace = true }
@@ -49,6 +53,7 @@ git2 = { workspace = true }
 
 # Streaming iterator for tree-sitter queries
 streaming-iterator = { workspace = true }
+futures = { workspace = true }
 
 
 # Caching serialization
@@ -72,7 +77,6 @@ proptest = { workspace = true }
 datatest-stable = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
-futures = { workspace = true }
 uuid = { workspace = true }
 serde_yml = { workspace = true }
 insta = { version = "1.46", features = ["yaml"] }

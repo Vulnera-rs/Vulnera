@@ -5,8 +5,8 @@
 **High-Performance Vulnerability Analysis Platform**
 
 [![License: BUSL 1.1](https://img.shields.io/badge/License-BUSL_1.1-blue.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange.svg)](https://www.rust-lang.org/tools/install)
-[![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![MSRV](https://img.shields.io/badge/MSRV-1.91%2B-orange.svg)](https://www.rust-lang.org/tools/install)
+[![Rust](https://img.shields.io/badge/Rust-1.91+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://hub.docker.com/)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-green.svg?logo=openapi-initiative)](https://swagger.io/)
 
@@ -106,7 +106,7 @@ flowchart TB
 
 ### Prerequisites
 
-- Rust 1.82+ • PostgreSQL 12+ • SQLx CLI
+- Rust 1.91+ • PostgreSQL 12+ • SQLx CLI
 
 ### Install & Run
 

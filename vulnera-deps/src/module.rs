@@ -12,6 +12,7 @@ use vulnera_core::infrastructure::parsers::ParserFactory;
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
+    VulnerabilityFindingMetadata,
 };
 
 use crate::use_cases::AnalyzeDependenciesUseCase;
@@ -256,6 +257,7 @@ impl AnalysisModule for DependencyAnalyzerModule {
                         }
                     },
                     secret_metadata: None,
+                    vulnerability_metadata: VulnerabilityFindingMetadata::default(),
                     enrichment: None,
                 };
                 findings.push(finding);

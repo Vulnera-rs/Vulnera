@@ -8,6 +8,7 @@ use vulnera_core::config::ApiSecurityConfig;
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
+    VulnerabilityFindingMetadata,
 };
 
 use crate::application::use_cases::ScanApiSpecificationUseCase;
@@ -143,6 +144,7 @@ impl AnalysisModule for ApiSecurityModule {
                 description: f.description,
                 recommendation: Some(f.recommendation),
                 secret_metadata: None,
+                vulnerability_metadata: VulnerabilityFindingMetadata::default(),
                 enrichment: None,
             })
             .collect();

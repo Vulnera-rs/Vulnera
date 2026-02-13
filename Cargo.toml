@@ -17,6 +17,7 @@ resolver = "2"
 name = "vulnera-rust"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -101,6 +102,7 @@ tempfile.workspace = true
 [workspace.package]
 version = "0.5.1"
 edition = "2024"
+rust-version = "1.91"
 authors = ["Vulnera-Team"]
 license = "BUSL-1.1"
 license-file = "LICENSE"
@@ -209,6 +211,9 @@ tree-sitter-c = "0.24.1"
 tree-sitter-cpp = "0.23.4"
 tree-sitter-grep = "0.1.0"
 globset = "0.4"
+oxc_allocator = "0.113.0"
+oxc_parser = "0.113.0"
+oxc_span = "0.113.0"
 
 # Serialization (binary)
 bincode = "1.3"

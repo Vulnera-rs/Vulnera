@@ -72,9 +72,44 @@ pub struct Finding {
     /// Secret-specific metadata (populated only for secret findings)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_metadata: Option<SecretFindingMetadata>,
+    /// Vulnerability-specific metadata (populated by vulnerability analyzers such as SAST)
+    pub vulnerability_metadata: VulnerabilityFindingMetadata,
     /// LLM-generated enrichment data (populated on-demand via enrichment endpoint)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrichment: Option<FindingEnrichment>,
+}
+
+/// Vulnerability-specific metadata attached to vulnerability findings
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct VulnerabilityFindingMetadata {
+    /// Code snippet at the finding location
+    pub snippet: Option<String>,
+    /// Rule metavariable bindings captured during matching
+    pub bindings: Option<std::collections::HashMap<String, String>>,
+    /// Optional data-flow trace for taint/dataflow findings
+    pub data_flow_path: Option<VulnerabilityDataFlowPath>,
+}
+
+/// Data flow path showing source-to-sink propagation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VulnerabilityDataFlowPath {
+    /// Source location where taint originated
+    pub source: VulnerabilityDataFlowNode,
+    /// Intermediate propagation steps
+    pub steps: Vec<VulnerabilityDataFlowNode>,
+    /// Sink location where taint is consumed
+    pub sink: VulnerabilityDataFlowNode,
+}
+
+/// Data flow node metadata for vulnerability traces
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VulnerabilityDataFlowNode {
+    /// Location in source code
+    pub location: Location,
+    /// Description of the node operation
+    pub description: String,
+    /// Expression tracked at this node
+    pub expression: String,
 }
 
 /// Secret-specific metadata attached to secret findings

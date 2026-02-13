@@ -8,7 +8,7 @@ use vulnera_core::config::SecretDetectionConfig;
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
-    SecretFindingMetadata, SecretVerificationState,
+    SecretFindingMetadata, SecretVerificationState, VulnerabilityFindingMetadata,
 };
 
 use crate::application::use_cases::ScanForSecretsUseCase;
@@ -108,6 +108,7 @@ impl AnalysisModule for SecretDetectionModule {
                     entropy: f.entropy,
                     evidence: f.evidence,
                 }),
+                vulnerability_metadata: VulnerabilityFindingMetadata::default(),
                 enrichment: None,
             })
             .collect();

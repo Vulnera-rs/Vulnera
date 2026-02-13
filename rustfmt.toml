@@ -1,4 +1,4 @@
-# Rust formatting configuration (stable-only options)
+# Rust formatting configuration
 
 # Use the project's Rust edition
 edition = "2024"

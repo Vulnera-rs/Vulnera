@@ -184,6 +184,11 @@ dynamic_depth_enabled = true     # Auto-detect depth based on repo size (opt-out
 dynamic_depth_file_count_threshold = 500 # Downgrade depth above this file count
 dynamic_depth_total_bytes_threshold = 52428800 # Downgrade depth above 50 MB
 tree_cache_max_entries = 1024    # Max parsed trees cached per worker
+js_ts_frontend = "oxc_preferred" # tree_sitter | oxc_preferred
+min_finding_severity = "info"   # critical | high | medium | low | info
+min_finding_confidence = "low"  # high | medium | low
+require_data_flow_evidence_for_dataflow = false
+require_recommendation = false
 
 
 # Cache TTL for popular package vulnerability listings (in hours)

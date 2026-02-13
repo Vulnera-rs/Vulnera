@@ -588,6 +588,28 @@ value = '''
 '''
 
 [[rules]]
+id = "python-tarfile-path-traversal"
+name = "Tarfile Path Traversal"
+description = "tarfile.extractall on untrusted archives may write files outside the destination"
+severity = "Critical"
+languages = ["Python"]
+cwe_ids = ["CWE-22", "CWE-73"]
+owasp_categories = ["A01:2021 - Broken Access Control"]
+tags = ["tarfile", "path-traversal", "zip-slip", "python"]
+message = "Validate tar member paths before extraction. Reject entries resolving outside the target directory."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+(call
+  function: (attribute
+    attribute: (identifier) @fn
+  )
+  (#eq? @fn "extractall")
+) @extract
+'''
+
+[[rules]]
 id = "python-jinja-autoescape-off"
 name = "Jinja2 Autoescape Disabled"
 description = "Disabling Jinja2 autoescape allows XSS vulnerabilities"
