@@ -422,6 +422,34 @@ impl Validate for SecretDetectionConfig {
             ));
         }
 
+        // Validate global allowlist regex patterns
+        for pattern in &self.global_allowlist_patterns {
+            if let Err(err) = regex::Regex::new(pattern) {
+                return Err(ValidationError::secret_detection(format!(
+                    "Invalid global allowlist regex pattern '{}': {}",
+                    pattern, err
+                )));
+            }
+        }
+
+        // Validate rule allowlist regex patterns
+        for (rule_id, patterns) in &self.rule_allowlist_patterns {
+            if rule_id.trim().is_empty() {
+                return Err(ValidationError::secret_detection(
+                    "rule_allowlist_patterns contains empty rule id".to_string(),
+                ));
+            }
+
+            for pattern in patterns {
+                if let Err(err) = regex::Regex::new(pattern) {
+                    return Err(ValidationError::secret_detection(format!(
+                        "Invalid allowlist regex for rule '{}': '{}': {}",
+                        rule_id, pattern, err
+                    )));
+                }
+            }
+        }
+
         // Validate scan_timeout_seconds > 0 if Some
         if let Some(scan_timeout) = self.scan_timeout_seconds {
             if scan_timeout == 0 {

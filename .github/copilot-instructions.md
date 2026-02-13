@@ -46,7 +46,7 @@ vulnera-cli (standalone workspace - offline analysis + server API calls)
 
 - **SAST**: Supports **Python, JavaScript, TypeScript, Rust, Go, C, C++** using Tree-sitter.
 - **Sandboxing**: Tiered isolation. Linux (Landlock + Seccomp) -> Process -> fallback. `SandboxPolicy::for_analysis` includes system paths, `/tmp` RW, and optional HTTP/Redis ports.
-- **Dependency Analysis**: Cross-ecosystem (NPM, PyPI, Cargo, Maven) with `vulnera-advisor` intelligence.
+- **Dependency Analysis**: Cross-ecosystem (NPM, PyPI, Cargo, Maven) with `vulnera-advisor` intelligence. Supports CWE filtering and Git commit range matching.
 - **LLM**: Integrated `GeminiLlmProvider` for automated remediation and finding enrichment.
 
 ## Configuration & Secrets

@@ -167,6 +167,7 @@ impl AnalysisModule for SastModule {
                 },
                 description: f.description,
                 recommendation: f.recommendation,
+                secret_metadata: None,
                 enrichment: None,
             })
             .collect();

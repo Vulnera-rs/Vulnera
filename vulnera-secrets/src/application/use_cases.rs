@@ -1,5 +1,6 @@
 //! Secret detection use cases
 
+use regex::Regex;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -21,6 +22,9 @@ use crate::infrastructure::verification::VerificationService;
 pub struct ScanResult {
     pub findings: Vec<SecretFinding>,
     pub files_scanned: usize,
+    pub baseline_suppressed: usize,
+    pub allowlist_suppressed: usize,
+    pub suppression_breakdown: std::collections::HashMap<String, usize>,
 }
 
 /// Use case for scanning a project for secrets
@@ -41,6 +45,10 @@ pub struct ScanForSecretsUseCase {
     scan_markdown_codeblocks: bool,
     /// Overall scan timeout
     scan_timeout: Option<Duration>,
+    /// Compiled global allowlist regex patterns
+    global_allowlist_patterns: Vec<Regex>,
+    /// Compiled rule-scoped allowlist regex patterns
+    rule_allowlist_patterns: std::collections::HashMap<String, Vec<Regex>>,
 }
 
 impl ScanForSecretsUseCase {
@@ -106,6 +114,36 @@ impl ScanForSecretsUseCase {
         let file_read_timeout = Duration::from_secs(config.file_read_timeout_seconds);
         let scan_timeout = config.scan_timeout_seconds.map(Duration::from_secs);
 
+        let global_allowlist_patterns = config
+            .global_allowlist_patterns
+            .iter()
+            .filter_map(|pattern| match Regex::new(pattern) {
+                Ok(regex) => Some(regex),
+                Err(err) => {
+                    warn!(pattern = %pattern, error = %err, "Invalid global allowlist regex; skipping pattern");
+                    None
+                }
+            })
+            .collect();
+
+        let mut rule_allowlist_patterns: std::collections::HashMap<String, Vec<Regex>> =
+            std::collections::HashMap::new();
+        for (rule_id, patterns) in &config.rule_allowlist_patterns {
+            let mut compiled_patterns = Vec::new();
+            for pattern in patterns {
+                match Regex::new(pattern) {
+                    Ok(regex) => compiled_patterns.push(regex),
+                    Err(err) => {
+                        warn!(rule_id = %rule_id, pattern = %pattern, error = %err, "Invalid rule allowlist regex; skipping pattern");
+                    }
+                }
+            }
+
+            if !compiled_patterns.is_empty() {
+                rule_allowlist_patterns.insert(rule_id.clone(), compiled_patterns);
+            }
+        }
+
         Self {
             scanner,
             detector_engine: detector_engine.clone(),
@@ -118,6 +156,8 @@ impl ScanForSecretsUseCase {
             file_read_timeout,
             scan_markdown_codeblocks: config.scan_markdown_codeblocks,
             scan_timeout,
+            global_allowlist_patterns,
+            rule_allowlist_patterns,
         }
     }
 
@@ -264,12 +304,28 @@ impl ScanForSecretsUseCase {
                 }
             }
 
+            // Filter findings using allowlists first
+            let mut allowlist_suppressed = 0usize;
+            let mut suppression_breakdown = std::collections::HashMap::new();
+            let mut allowlist_filtered = Vec::new();
+
+            for finding in all_findings {
+                match self.allowlist_reason(&finding) {
+                    Some(reason) => {
+                        allowlist_suppressed += 1;
+                        *suppression_breakdown.entry(reason).or_insert(0) += 1;
+                    }
+                    None => allowlist_filtered.push(finding),
+                }
+            }
+
             // Filter findings using baseline if available
+            let mut baseline_suppressed = 0usize;
             let filtered_findings = if let Some(ref baseline_repo) = self.baseline_repository {
                 let mut filtered = Vec::new();
                 let mut new_findings_for_baseline = Vec::new();
 
-                for finding in all_findings {
+                for finding in allowlist_filtered {
                     match baseline_repo.contains(&finding) {
                         Ok(true) => {
                             debug!(
@@ -278,6 +334,10 @@ impl ScanForSecretsUseCase {
                                 "Finding filtered by baseline"
                             );
                             // Skip findings that exist in baseline (assumed false positives)
+                            baseline_suppressed += 1;
+                            *suppression_breakdown
+                                .entry("baseline".to_string())
+                                .or_insert(0) += 1;
                         }
                         Ok(false) => {
                             filtered.push(finding.clone());
@@ -303,7 +363,11 @@ impl ScanForSecretsUseCase {
                     let entries: Vec<_> = new_findings_for_baseline
                         .iter()
                         .map(|finding| {
-                            FileBaselineRepository::finding_to_entry(finding, true, false)
+                            let is_verified = matches!(
+                                finding.verification_state,
+                                crate::domain::entities::SecretVerificationState::Verified
+                            );
+                            FileBaselineRepository::finding_to_entry(finding, true, is_verified)
                         })
                         .collect();
 
@@ -316,7 +380,7 @@ impl ScanForSecretsUseCase {
 
                 filtered
             } else {
-                all_findings
+                allowlist_filtered
             };
 
             info!(
@@ -326,6 +390,9 @@ impl ScanForSecretsUseCase {
             Ok(ScanResult {
                 findings: filtered_findings,
                 files_scanned,
+                baseline_suppressed,
+                allowlist_suppressed,
+                suppression_breakdown,
             })
         };
 
@@ -423,6 +490,29 @@ impl ScanForSecretsUseCase {
         }
 
         out
+    }
+}
+
+impl ScanForSecretsUseCase {
+    fn allowlist_reason(&self, finding: &SecretFinding) -> Option<String> {
+        if self
+            .global_allowlist_patterns
+            .iter()
+            .any(|pattern| pattern.is_match(&finding.matched_secret))
+        {
+            return Some("allowlist:global".to_string());
+        }
+
+        if let Some(patterns) = self.rule_allowlist_patterns.get(&finding.rule_id) {
+            if patterns
+                .iter()
+                .any(|pattern| pattern.is_match(&finding.matched_secret))
+            {
+                return Some(format!("allowlist:rule:{}", finding.rule_id));
+            }
+        }
+
+        None
     }
 }
 

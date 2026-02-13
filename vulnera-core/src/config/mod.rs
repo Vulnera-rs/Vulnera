@@ -790,6 +790,10 @@ pub struct SecretDetectionConfig {
     pub verification_concurrent_limit: usize,
     /// Optional path to baseline file for tracking known secrets
     pub baseline_file_path: Option<PathBuf>,
+    /// Global allowlist regex patterns; matches are suppressed before reporting
+    pub global_allowlist_patterns: Vec<String>,
+    /// Rule-scoped allowlist regex patterns keyed by rule id
+    pub rule_allowlist_patterns: std::collections::HashMap<String, Vec<String>>,
     /// Whether to update baseline after scan
     pub update_baseline: bool,
     /// Whether to scan git history for secrets
@@ -842,6 +846,8 @@ impl Default for SecretDetectionConfig {
             verification_timeout_seconds: 5,
             verification_concurrent_limit: 10,
             baseline_file_path: None,
+            global_allowlist_patterns: Vec::new(),
+            rule_allowlist_patterns: std::collections::HashMap::new(),
             update_baseline: false,
             scan_git_history: false,
             max_commits_to_scan: None,

@@ -8,6 +8,8 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ### Added
 - **Dependency Analysis Improvements:**
   - Precise semver interval intersection in `VersionRange::overlaps_with` for better vulnerability matching.
+  - Support for Git commit range matching in vulnerability checks via `matches_git_range`.
+  - CWE ID filtering and normalization (standardizing formats like "79" → "CWE-79").
   - Robust glob pattern matching for dependency ignore rules using `globset`.
   - Resolution of dependency edges to actual package versions in npm, Ruby, PHP, Python (uv), and Rust lockfile parsers.
   - Preserved dependency edges for git/path dependencies in Cargo parser for accurate graph analysis.

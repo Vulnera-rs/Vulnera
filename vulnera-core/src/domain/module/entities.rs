@@ -69,9 +69,42 @@ pub struct Finding {
     pub description: String,
     /// Recommended remediation (if available)
     pub recommendation: Option<String>,
+    /// Secret-specific metadata (populated only for secret findings)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_metadata: Option<SecretFindingMetadata>,
     /// LLM-generated enrichment data (populated on-demand via enrichment endpoint)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrichment: Option<FindingEnrichment>,
+}
+
+/// Secret-specific metadata attached to secret findings
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SecretFindingMetadata {
+    /// Secret detector identifier
+    pub detector_id: String,
+    /// Verification state returned by the verifier subsystem
+    pub verification_state: SecretVerificationState,
+    /// Redacted secret snippet (safe for display)
+    pub redacted_secret: String,
+    /// Optional entropy value when entropy detector contributed to the finding
+    pub entropy: Option<f64>,
+    /// Optional evidence notes used during scoring and triage
+    pub evidence: Vec<String>,
+}
+
+/// Verification state for detected secrets
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum SecretVerificationState {
+    /// Secret was successfully verified against provider/API
+    Verified,
+    /// Secret was checked and determined invalid
+    Invalid,
+    /// Verification attempted but result is indeterminate (timeouts/network/provider errors)
+    Unknown,
+    /// Verification available but not attempted for this finding
+    Unverified,
+    /// No verifier exists for this secret type
+    NotSupported,
 }
 
 /// Finding type

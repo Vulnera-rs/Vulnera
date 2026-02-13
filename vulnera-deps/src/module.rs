@@ -255,6 +255,7 @@ impl AnalysisModule for DependencyAnalyzerModule {
                             None
                         }
                     },
+                    secret_metadata: None,
                     enrichment: None,
                 };
                 findings.push(finding);
