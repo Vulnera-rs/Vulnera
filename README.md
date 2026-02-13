@@ -12,7 +12,7 @@
 
 _Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets detection, and API security auditing_
 
-[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/)
+[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/) • [Workspace Index](docs/README.md)
 
 </div>
 
@@ -119,19 +119,6 @@ cargo run
 
 **Verify:** `curl http://localhost:3000/health` • **API Docs:** <http://localhost:3000/docs>
 
----
-
-## 📖 Documentation
-
-| Guide                                                                           | Description                             |
-| ------------------------------------------------------------------------------- | --------------------------------------- |
-| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan             |
-| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html)       | Command-line usage                      |
-| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html)       | Environment variables and TOML config   |
-| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html)     | JWT and API key setup                   |
-| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html)       | Module-specific documentation           |
-| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html)      | System design and DDD patterns          |
-| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html)      | GitHub Actions, GitLab CI, Azure DevOps |
 
 ---
 
@@ -271,24 +258,6 @@ Azure Front Door → API Management → App Service/Container Apps
 
 ---
 
-## 👥 Team & Community
-
-| Name                     | Role                            |
-| ------------------------ | ------------------------------- |
-| **Khaled Mahmoud**       | Project Lead, Backend Developer |
-| **Abd El-Rahman Mossad** | Frontend, LSP Server Maintainer |
-| **Amr Medhat**           | Cloud Engineer                  |
-| **Gasser Mohammed**      | Frontend Engineer               |
-
-**Resources:**
-
-- **Web Dashboard:** [vulnera.studio](https://vulnera.studio) — Full-featured team collaboration platform
-- **Documentation:** [k5602.github.io/Vulnera](https://k5602.github.io/Vulnera/) — Complete guides and tutorials
-- **GitHub:** [k5602/Vulnera](https://github.com/k5602/Vulnera) — Source code and issues
-- **Community:** [GitHub Discussions](https://github.com/k5602/Vulnera/discussions) — Q&A and feedback
-
----
-
 ## 📜 License
 
 Core platform (server, analysis modules, orchestration): **Business Source License 1.1** with a
@@ -299,9 +268,3 @@ CLI , Advisors and LSP (adapter): **AGPL-3.0-or-later**.
 See [LICENSE](./LICENSE) for details and commercial licensing.
 
 ---
-
-<div align="center">
-
-**[Web Dashboard](https://vulnera.studio)** • **[Documentation](https://k5602.github.io/Vulnera/)** • **[API Reference](http://localhost:3000/docs)** • **[Contributing](CONTRIBUTING.md)** • **[Changelog](CHANGELOG.md)**
-
-</div>

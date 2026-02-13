@@ -6,6 +6,16 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 ## [0.5.1] - 2026-02-13
 
 ### Added
+- **CLI Architecture & UX (vulnera-cli):**
+  - Introduced application use-case orchestration for CLI command flows (`analyze`, `sast`, `secrets`, `deps`, `auth`, `quota`, `api`, `generate-fix`) to reduce command-layer coupling.
+  - Added shared CLI services for watch execution and scan-target resolution (changed files, explicit file list, excludes, language filters).
+  - Added user-facing project hook management via `vulnera config hooks` with `install`, `status`, and `remove` subcommands.
+  - Added backend selection for hook install (`git` or `pre-commit`) with idempotent managed blocks.
+- **SAST Remediation Pipeline (vulnera-cli):**
+  - Implemented true bulk LLM-backed fix generation for `vulnera sast --fix`.
+  - Added remediation aggregation in SAST output including generated LLM fixes, SAST-native suggestions, and dependency upgrade suggestions.
+  - Added SARIF emission with fix payloads when bulk fixes are generated.
+
 - **Dependency Analysis Improvements:**
   - Precise semver interval intersection in `VersionRange::overlaps_with` for better vulnerability matching.
   - Support for Git commit range matching in vulnerability checks via `matches_git_range`.
@@ -50,6 +60,13 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
   - Replaced `.map/.any` patterns with `.contains/.iter` where clearer.
 
 ### Fixed
+- **CLI Quality & Reliability:**
+  - Unified API client construction in `CliContext` to eliminate per-command drift.
+  - Improved watch-mode safety by centralizing scan execution behavior.
+  - Replaced brittle CLI version assertion with package-version-based assertion in tests.
+- **CLI Lint/Tooling:**
+  - Addressed strict clippy findings in CLI paths touched during refactor (including pointer-arg and conditional simplifications).
+
 - **Robustness:** Added resilient regex compilation in API analyzers with graceful error handling.
 - **Error Handling:** Replaced unchecked `unwrap()` calls with explicit error propagation in `app.rs`.
 - **Startup:** Added validation for loaded configuration at startup with clear diagnostics.
@@ -58,6 +75,10 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 ### Dependencies Added
 - `globset` for robust glob pattern matching.
+
+### Tests
+- Extended `vulnera-cli` command smoke tests to cover `config hooks` command surface and subcommand help.
+- Added focused unit tests for SAST bulk-fix suggestion builders and dependency-suggestion deduplication logic.
 
 ## [0.5.0] - 2026-02-11
 

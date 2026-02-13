@@ -139,7 +139,7 @@ COPY --from=builder /app/migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Create NVD data directory (for SQLite database)
+# Create NVD data directory 
 RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
 # Ensure PATH includes /usr/local/bin for any other subprocess calls
