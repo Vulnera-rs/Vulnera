@@ -190,6 +190,23 @@ min_finding_confidence = "low"  # high | medium | low
 require_data_flow_evidence_for_dataflow = false
 require_recommendation = false
 
+[sast.quality_gates]
+# Minimum aggregate precision/recall for fixture-based SAST accuracy tests
+min_precision = 0.70
+min_recall = 0.50
+# Minimum unique CWE identifiers represented by CVE fixtures
+min_cwe_coverage = 12
+# Maximum allowed second/first scan duration ratio for incremental mode
+max_incremental_duration_ratio = 1.20
+# Maximum resident memory (RSS, MB) during deep-scan quality-gate tests
+max_resident_memory_mb = 2048
+# Enforce focused rollout gates for Python and combined JS/TS quality
+enforce_primary_language_gates = true
+python_min_precision = 0.75
+python_min_recall = 0.60
+js_ts_min_precision = 0.75
+js_ts_min_recall = 0.60
+
 
 # Cache TTL for popular package vulnerability listings (in hours)
 cache_ttl_hours = 24

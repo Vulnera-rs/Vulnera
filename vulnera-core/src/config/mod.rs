@@ -654,6 +654,51 @@ impl Default for RulePackConfig {
     }
 }
 
+/// SAST quality gate thresholds used for CI and benchmark enforcement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SastQualityGatesConfig {
+    /// Minimum aggregate precision required by the SAST accuracy report.
+    pub min_precision: f64,
+    /// Minimum aggregate recall required by the SAST accuracy report.
+    pub min_recall: f64,
+    /// Minimum unique CWE IDs required across CVE fixtures.
+    pub min_cwe_coverage: usize,
+    /// Maximum allowed ratio for incremental scan duration (second_run / first_run).
+    ///
+    /// Values < 1.0 require speedup. Values > 1.0 allow some variance.
+    pub max_incremental_duration_ratio: f64,
+    /// Maximum allowed resident set size (RSS) in MB during deep-scan quality tests.
+    pub max_resident_memory_mb: u64,
+    /// Enforce focused quality gates for primary rollout languages (Python + JS/TS).
+    pub enforce_primary_language_gates: bool,
+    /// Minimum precision required for Python fixtures.
+    pub python_min_precision: f64,
+    /// Minimum recall required for Python fixtures.
+    pub python_min_recall: f64,
+    /// Minimum precision required for combined JavaScript + TypeScript fixtures.
+    pub js_ts_min_precision: f64,
+    /// Minimum recall required for combined JavaScript + TypeScript fixtures.
+    pub js_ts_min_recall: f64,
+}
+
+impl Default for SastQualityGatesConfig {
+    fn default() -> Self {
+        Self {
+            min_precision: 0.70,
+            min_recall: 0.50,
+            min_cwe_coverage: 12,
+            max_incremental_duration_ratio: 1.20,
+            max_resident_memory_mb: 2048,
+            enforce_primary_language_gates: true,
+            python_min_precision: 0.75,
+            python_min_recall: 0.60,
+            js_ts_min_precision: 0.75,
+            js_ts_min_recall: 0.60,
+        }
+    }
+}
+
 /// SAST (Static Application Security Testing) configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -719,6 +764,8 @@ pub struct SastConfig {
     pub enable_incremental: Option<bool>,
     /// Path to store incremental analysis state (file hashes)
     pub incremental_state_path: Option<PathBuf>,
+    /// CI quality gate thresholds for SAST benchmark and regression tests
+    pub quality_gates: SastQualityGatesConfig,
 }
 
 impl Default for SastConfig {
@@ -771,6 +818,7 @@ impl Default for SastConfig {
             require_recommendation: false,
             enable_incremental: Some(false), // Disabled by default
             incremental_state_path: None,
+            quality_gates: SastQualityGatesConfig::default(),
         }
     }
 }
