@@ -39,8 +39,12 @@ fn infer_types(tree: &Tree, source_bytes: &[u8], language: Language) -> HashMap<
                 left: (identifier) @var
                 right: (call function: (attribute attribute: (identifier) @type))
               )"#,
+            r#"(assignment
+                                left: (identifier) @var
+                                right: (identifier) @alias
+                            )"#,
         ],
-        Language::JavaScript | Language::TypeScript => vec![
+        Language::JavaScript => vec![
             r#"(variable_declarator
                 name: (identifier) @var
                 value: (new_expression constructor: (identifier) @type)
@@ -49,6 +53,44 @@ fn infer_types(tree: &Tree, source_bytes: &[u8], language: Language) -> HashMap<
                 left: (identifier) @var
                 right: (new_expression constructor: (identifier) @type)
               )"#,
+            r#"(variable_declarator
+                                name: (identifier) @var
+                                value: (identifier) @alias
+                            )"#,
+            r#"(assignment_expression
+                                left: (identifier) @var
+                                right: (identifier) @alias
+                            )"#,
+        ],
+        Language::TypeScript => vec![
+            r#"(variable_declarator
+                                name: (identifier) @var
+                                type: (type_annotation (type_identifier) @type)
+                            )"#,
+            r#"(required_parameter
+                                pattern: (identifier) @var
+                                type: (type_annotation (type_identifier) @type)
+                            )"#,
+            r#"(optional_parameter
+                                pattern: (identifier) @var
+                                type: (type_annotation (type_identifier) @type)
+                            )"#,
+            r#"(variable_declarator
+                                name: (identifier) @var
+                                value: (new_expression constructor: (identifier) @type)
+                            )"#,
+            r#"(assignment_expression
+                                left: (identifier) @var
+                                right: (new_expression constructor: (identifier) @type)
+                            )"#,
+            r#"(variable_declarator
+                                name: (identifier) @var
+                                value: (identifier) @alias
+                            )"#,
+            r#"(assignment_expression
+                                left: (identifier) @var
+                                right: (identifier) @alias
+                            )"#,
         ],
         _ => Vec::new(),
     };
@@ -59,7 +101,8 @@ fn infer_types(tree: &Tree, source_bytes: &[u8], language: Language) -> HashMap<
 
     let ts_language = match language {
         Language::Python => tree_sitter_python::LANGUAGE.into(),
-        Language::JavaScript | Language::TypeScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::JavaScript => tree_sitter_javascript::LANGUAGE.into(),
+        Language::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         Language::Go => tree_sitter_go::LANGUAGE.into(),
         Language::Rust => tree_sitter_rust::LANGUAGE.into(),
         Language::C => tree_sitter_c::LANGUAGE.into(),
@@ -81,6 +124,7 @@ fn infer_types(tree: &Tree, source_bytes: &[u8], language: Language) -> HashMap<
         } {
             let mut var: Option<String> = None;
             let mut ty: Option<String> = None;
+            let mut alias: Option<String> = None;
 
             for capture in m.captures {
                 let capture_name = query.capture_names()[capture.index as usize];
@@ -93,12 +137,20 @@ fn infer_types(tree: &Tree, source_bytes: &[u8], language: Language) -> HashMap<
                 match capture_name {
                     "var" => var = Some(text),
                     "type" => ty = Some(text),
+                    "alias" => alias = Some(text),
                     _ => {}
                 }
             }
 
-            if let (Some(var), Some(ty)) = (var, ty) {
-                types.insert(var, ty);
+            if let (Some(var_name), Some(type_name)) = (var.as_ref(), ty.as_ref()) {
+                types.insert(var_name.clone(), type_name.clone());
+                continue;
+            }
+
+            if let (Some(var_name), Some(alias_name)) = (var.as_ref(), alias.as_ref())
+                && let Some(alias_ty) = types.get(alias_name.as_str()).cloned()
+            {
+                types.insert(var_name.clone(), alias_ty);
             }
         }
     }

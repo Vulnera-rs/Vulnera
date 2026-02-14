@@ -670,16 +670,14 @@ pub struct SastQualityGatesConfig {
     pub max_incremental_duration_ratio: f64,
     /// Maximum allowed resident set size (RSS) in MB during deep-scan quality tests.
     pub max_resident_memory_mb: u64,
-    /// Enforce focused quality gates for primary rollout languages (Python + JS/TS).
-    pub enforce_primary_language_gates: bool,
-    /// Minimum precision required for Python fixtures.
-    pub python_min_precision: f64,
-    /// Minimum recall required for Python fixtures.
-    pub python_min_recall: f64,
-    /// Minimum precision required for combined JavaScript + TypeScript fixtures.
-    pub js_ts_min_precision: f64,
-    /// Minimum recall required for combined JavaScript + TypeScript fixtures.
-    pub js_ts_min_recall: f64,
+    /// Enforce precision/recall gates for every language represented in fixtures.
+    pub enforce_per_language_gates: bool,
+    /// Minimum precision required per language in fixture-based tests.
+    pub per_language_min_precision: f64,
+    /// Minimum recall required per language in fixture-based tests.
+    pub per_language_min_recall: f64,
+    /// Minimum number of distinct fixture languages required for benchmark validity.
+    pub min_languages_with_fixtures: usize,
 }
 
 impl Default for SastQualityGatesConfig {
@@ -690,11 +688,10 @@ impl Default for SastQualityGatesConfig {
             min_cwe_coverage: 12,
             max_incremental_duration_ratio: 1.20,
             max_resident_memory_mb: 2048,
-            enforce_primary_language_gates: true,
-            python_min_precision: 0.75,
-            python_min_recall: 0.60,
-            js_ts_min_precision: 0.75,
-            js_ts_min_recall: 0.60,
+            enforce_per_language_gates: true,
+            per_language_min_precision: 0.70,
+            per_language_min_recall: 0.50,
+            min_languages_with_fixtures: 7,
         }
     }
 }
@@ -1455,6 +1452,43 @@ impl Validate for Config {
                 "Analytics cleanup_interval_hours must be > 0",
             ));
         }
+
+        let gates = &self.sast.quality_gates;
+        if !(0.0..=1.0).contains(&gates.min_precision) {
+            return Err(ValidationError::api(
+                "SAST quality gate min_precision must be in [0.0, 1.0]",
+            ));
+        }
+        if !(0.0..=1.0).contains(&gates.min_recall) {
+            return Err(ValidationError::api(
+                "SAST quality gate min_recall must be in [0.0, 1.0]",
+            ));
+        }
+        if !(0.0..=1.0).contains(&gates.per_language_min_precision) {
+            return Err(ValidationError::api(
+                "SAST quality gate per_language_min_precision must be in [0.0, 1.0]",
+            ));
+        }
+        if !(0.0..=1.0).contains(&gates.per_language_min_recall) {
+            return Err(ValidationError::api(
+                "SAST quality gate per_language_min_recall must be in [0.0, 1.0]",
+            ));
+        }
+        if gates.min_languages_with_fixtures == 0 {
+            return Err(ValidationError::api(
+                "SAST quality gate min_languages_with_fixtures must be > 0",
+            ));
+        }
+        if gates.max_incremental_duration_ratio < 0.0 {
+            return Err(ValidationError::api(
+                "SAST quality gate max_incremental_duration_ratio must be >= 0.0",
+            ));
+        }
+        if gates.max_resident_memory_mb == 0 {
+            return Err(ValidationError::api(
+                "SAST quality gate max_resident_memory_mb must be > 0",
+            ));
+        }
         Ok(())
     }
 }
@@ -1498,4 +1532,49 @@ pub enum ConfigLoadError {
 
     #[error("Configuration validation error: {0}")]
     Validation(#[from] ValidationError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_config_for_tests() -> Config {
+        let mut config = Config::default();
+        config.auth.jwt_secret = "a9f7b2c4e6h8k1m3p5r7t9v2x4z6b8d0q1w3e5r7t9y2u4i6".to_string();
+        config
+    }
+
+    #[test]
+    fn test_quality_gates_validation_accepts_valid_defaults() {
+        let config = valid_config_for_tests();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_quality_gates_validation_rejects_invalid_per_language_precision() {
+        let mut config = valid_config_for_tests();
+        config.sast.quality_gates.per_language_min_precision = 1.5;
+
+        let err = config
+            .validate()
+            .expect_err("config validation should fail");
+        assert!(
+            err.to_string().contains("per_language_min_precision"),
+            "unexpected validation error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_quality_gates_validation_rejects_zero_language_coverage_requirement() {
+        let mut config = valid_config_for_tests();
+        config.sast.quality_gates.min_languages_with_fixtures = 0;
+
+        let err = config
+            .validate()
+            .expect_err("config validation should fail");
+        assert!(
+            err.to_string().contains("min_languages_with_fixtures"),
+            "unexpected validation error: {err}"
+        );
+    }
 }

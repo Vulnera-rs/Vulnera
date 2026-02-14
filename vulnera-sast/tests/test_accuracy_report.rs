@@ -139,66 +139,29 @@ async fn accuracy_report_all_fixtures() {
         quality_gates.min_cwe_coverage
     );
 
-    if quality_gates.enforce_primary_language_gates {
-        let python = report
-            .per_language
-            .get("python")
-            .expect("CI GATE: missing Python fixtures/metrics in accuracy report");
-        let python_precision = python.precision().unwrap_or(0.0);
-        let python_recall = python.recall().unwrap_or(0.0);
-
+    if quality_gates.enforce_per_language_gates {
         assert!(
-            python_precision >= quality_gates.python_min_precision,
-            "CI GATE: Python precision {python_precision:.3} < {:.3}",
-            quality_gates.python_min_precision
-        );
-        assert!(
-            python_recall >= quality_gates.python_min_recall,
-            "CI GATE: Python recall {python_recall:.3} < {:.3}",
-            quality_gates.python_min_recall
+            report.per_language.len() >= quality_gates.min_languages_with_fixtures,
+            "CI GATE: fixture language coverage {} < {} threshold",
+            report.per_language.len(),
+            quality_gates.min_languages_with_fixtures
         );
 
-        let js = report.per_language.get("javascript");
-        let ts = report.per_language.get("typescript");
+        for (lang, metrics) in &report.per_language {
+            let lang_precision = metrics.precision().unwrap_or(0.0);
+            let lang_recall = metrics.recall().unwrap_or(0.0);
 
-        let js_ts_tp =
-            js.map_or(0usize, |m| m.true_positives) + ts.map_or(0usize, |m| m.true_positives);
-        let js_ts_fp =
-            js.map_or(0usize, |m| m.false_positives) + ts.map_or(0usize, |m| m.false_positives);
-        let js_ts_fn =
-            js.map_or(0usize, |m| m.false_negatives) + ts.map_or(0usize, |m| m.false_negatives);
-
-        let js_ts_precision = if js_ts_tp + js_ts_fp == 0 {
-            0.0
-        } else {
-            js_ts_tp as f64 / (js_ts_tp + js_ts_fp) as f64
-        };
-        let js_ts_recall = if js_ts_tp + js_ts_fn == 0 {
-            0.0
-        } else {
-            js_ts_tp as f64 / (js_ts_tp + js_ts_fn) as f64
-        };
-
-        assert!(
-            js_ts_tp + js_ts_fp + js_ts_fn > 0,
-            "CI GATE: missing JavaScript/TypeScript fixtures for primary language gate"
-        );
-
-        eprintln!(
-            "Primary language gates: python(P={:.3},R={:.3}) js_ts(P={:.3},R={:.3})",
-            python_precision, python_recall, js_ts_precision, js_ts_recall
-        );
-
-        assert!(
-            js_ts_precision >= quality_gates.js_ts_min_precision,
-            "CI GATE: JS/TS precision {js_ts_precision:.3} < {:.3}",
-            quality_gates.js_ts_min_precision
-        );
-        assert!(
-            js_ts_recall >= quality_gates.js_ts_min_recall,
-            "CI GATE: JS/TS recall {js_ts_recall:.3} < {:.3}",
-            quality_gates.js_ts_min_recall
-        );
+            assert!(
+                lang_precision >= quality_gates.per_language_min_precision,
+                "CI GATE: language '{lang}' precision {lang_precision:.3} < {:.3}",
+                quality_gates.per_language_min_precision
+            );
+            assert!(
+                lang_recall >= quality_gates.per_language_min_recall,
+                "CI GATE: language '{lang}' recall {lang_recall:.3} < {:.3}",
+                quality_gates.per_language_min_recall
+            );
+        }
     }
 
     // Soft check: warn (but don't fail) if any single language is below threshold
@@ -216,6 +179,7 @@ async fn accuracy_report_all_fixtures() {
 #[tokio::test]
 async fn accuracy_report_has_minimum_fixture_coverage() {
     let fixture_paths = discover_fixtures();
+    let quality_gates = SastConfig::default().quality_gates;
 
     // We expect at least fixtures for the primary languages
     assert!(
@@ -236,8 +200,9 @@ async fn accuracy_report_has_minimum_fixture_coverage() {
         .collect();
 
     assert!(
-        languages.len() >= 3,
-        "Expected fixtures covering at least 3 languages, found {}: {:?}",
+        languages.len() >= quality_gates.min_languages_with_fixtures,
+        "Expected fixtures covering at least {} languages, found {}: {:?}",
+        quality_gates.min_languages_with_fixtures,
         languages.len(),
         languages
     );

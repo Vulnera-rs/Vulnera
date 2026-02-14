@@ -412,7 +412,10 @@ impl SastEngine {
 
             match inferred {
                 Some(ty) => {
-                    if !allowed_types.iter().any(|allowed| allowed == &ty) {
+                    if !allowed_types
+                        .iter()
+                        .any(|allowed| types_compatible(allowed, &ty))
+                    {
                         return false;
                     }
                 }
@@ -962,6 +965,25 @@ fn normalize_identifier(text: &str) -> String {
         .unwrap_or(without_call)
         .trim()
         .to_string()
+}
+
+fn normalize_type_name(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let base = trimmed
+        .split(['<', '[', '|', '&'])
+        .next()
+        .unwrap_or(trimmed);
+    base.rsplit(['.', ':'])
+        .next()
+        .unwrap_or(base)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn types_compatible(expected: &str, inferred: &str) -> bool {
+    let expected_norm = normalize_type_name(expected);
+    let inferred_norm = normalize_type_name(inferred);
+    expected_norm == inferred_norm
 }
 
 #[cfg(test)]
