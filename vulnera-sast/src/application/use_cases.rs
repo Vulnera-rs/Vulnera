@@ -20,7 +20,7 @@ use vulnera_core::config::{AnalysisDepth, SastConfig};
 
 use crate::domain::call_graph::ParameterInfo;
 use crate::domain::finding::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding, Location, Severity,
+    DataFlowFinding, Finding as SastFinding, Location, SemanticNode, SemanticPath, Severity,
 };
 use crate::domain::pattern_types::PatternRule;
 use crate::domain::suppression::FileSuppressions;
@@ -1552,7 +1552,7 @@ impl ScanProjectUseCase {
         let language_tag = language.to_string().to_lowercase();
         let severity = Self::data_flow_severity_for_category(&sink.category);
         // Build the finding with data flow path
-        let source_node = DataFlowNode {
+        let source_node = SemanticNode {
             location: Location {
                 file_path: data_flow_finding.source.file.clone(),
                 line: data_flow_finding.source.line,
@@ -1568,7 +1568,7 @@ impl ScanProjectUseCase {
             expression: data_flow_finding.source.expression.clone(),
         };
 
-        let sink_node = DataFlowNode {
+        let sink_node = SemanticNode {
             location: Location {
                 file_path: data_flow_finding.sink.file.clone(),
                 line: data_flow_finding.sink.line,
@@ -1584,10 +1584,10 @@ impl ScanProjectUseCase {
             expression: data_flow_finding.sink.expression.clone(),
         };
 
-        let steps: Vec<DataFlowNode> = data_flow_finding
+        let steps: Vec<SemanticNode> = data_flow_finding
             .intermediate_steps
             .iter()
-            .map(|step| DataFlowNode {
+            .map(|step| SemanticNode {
                 location: Location {
                     file_path: step.file.clone(),
                     line: step.line,
@@ -1625,7 +1625,7 @@ impl ScanProjectUseCase {
                  Consider using appropriate escaping for {} context.",
                 sink.pattern_name, sink.category
             )),
-            data_flow_path: Some(DataFlowPath {
+            semantic_path: Some(SemanticPath {
                 source: source_node,
                 sink: sink_node,
                 steps,
@@ -1661,7 +1661,7 @@ impl ScanProjectUseCase {
     /// Adjust severity for findings confirmed by data flow analysis
     fn adjust_severity_for_data_flow(findings: &mut [SastFinding]) {
         for finding in findings.iter_mut() {
-            if finding.data_flow_path.is_some() {
+            if finding.semantic_path.is_some() {
                 // Escalate severity when data flow confirms the vulnerability
                 match finding.severity {
                     Severity::Low => finding.severity = Severity::Medium,

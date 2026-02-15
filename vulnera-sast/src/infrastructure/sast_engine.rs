@@ -27,7 +27,7 @@ use tracing::{debug, instrument, trace};
 use tree_sitter::{Query, QueryPredicateArg, Tree};
 
 use crate::domain::finding::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, Finding, Location, Severity,
+    DataFlowFinding, Finding, Location, SemanticNode, SemanticPath, Severity,
 };
 use crate::domain::pattern_types::{Pattern, PatternRule};
 use crate::domain::value_objects::{Confidence, Language};
@@ -581,8 +581,8 @@ impl SastEngine {
     /// Convert a data flow finding to a regular Finding
     fn dataflow_to_finding(&self, df: &DataFlowFinding, file_path: &str) -> Finding {
         // Build data flow path from the data flow finding
-        let data_flow_path = Some(DataFlowPath {
-            source: DataFlowNode {
+        let semantic_path = Some(SemanticPath {
+            source: SemanticNode {
                 location: Location {
                     file_path: df.source.file.clone(),
                     line: df.source.line,
@@ -596,7 +596,7 @@ impl SastEngine {
             steps: df
                 .intermediate_steps
                 .iter()
-                .map(|step| DataFlowNode {
+                .map(|step| SemanticNode {
                     location: Location {
                         file_path: step.file.clone(),
                         line: step.line,
@@ -608,7 +608,7 @@ impl SastEngine {
                     expression: step.expression.clone(),
                 })
                 .collect(),
-            sink: DataFlowNode {
+            sink: SemanticNode {
                 location: Location {
                     file_path: df.sink.file.clone(),
                     line: df.sink.line,
@@ -638,7 +638,7 @@ impl SastEngine {
                 df.sink.note.clone().unwrap_or_default()
             ),
             recommendation: Some("Sanitize input before using in sensitive operations".to_string()),
-            data_flow_path,
+            semantic_path,
             snippet: Some(df.sink.expression.clone()),
             bindings: None,
         }
@@ -687,7 +687,7 @@ impl SastEngine {
             confidence: Confidence::High,
             description,
             recommendation,
-            data_flow_path: None,
+            semantic_path: None,
             snippet: Some(snippet),
             bindings,
         }

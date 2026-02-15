@@ -196,7 +196,7 @@ impl ExecuteAnalysisJobUseCase {
         for module_type in &job.modules_to_run {
             if let Some(module) = self.module_registry.get_module(module_type) {
                 // Prepare module-specific configuration from project metadata
-                let config_map = match module.prepare_config(project).await {
+                let mut config_map = match module.prepare_config(project).await {
                     Ok(map) => map,
                     Err(e) => {
                         warn!(
@@ -208,6 +208,15 @@ impl ExecuteAnalysisJobUseCase {
                         std::collections::HashMap::new()
                     }
                 };
+
+                if *module_type == ModuleType::SAST {
+                    config_map.insert(
+                        "sast.analysis_depth".to_string(),
+                        serde_json::Value::String(
+                            sast_analysis_depth_for_job(&job.analysis_depth).to_string(),
+                        ),
+                    );
+                }
 
                 let config = ModuleConfig {
                     job_id: job.job_id,
@@ -437,6 +446,13 @@ impl ExecuteAnalysisJobUseCase {
         );
 
         Ok(results)
+    }
+}
+
+fn sast_analysis_depth_for_job(depth: &AnalysisDepth) -> &'static str {
+    match depth {
+        AnalysisDepth::Full => "deep",
+        AnalysisDepth::FastScan | AnalysisDepth::DependenciesOnly => "quick",
     }
 }
 
@@ -714,5 +730,23 @@ impl AggregateResultsUseCase {
 impl Default for AggregateResultsUseCase {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sast_analysis_depth_for_job_mapping() {
+        assert_eq!(sast_analysis_depth_for_job(&AnalysisDepth::Full), "deep");
+        assert_eq!(
+            sast_analysis_depth_for_job(&AnalysisDepth::FastScan),
+            "quick"
+        );
+        assert_eq!(
+            sast_analysis_depth_for_job(&AnalysisDepth::DependenciesOnly),
+            "quick"
+        );
     }
 }

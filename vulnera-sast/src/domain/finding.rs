@@ -16,9 +16,9 @@ pub struct Finding {
     pub confidence: Confidence,
     pub description: String,
     pub recommendation: Option<String>,
-    /// Data flow path if this is a taint finding
+    /// Semantic path if this finding includes taint/dataflow evidence
     #[serde(default)]
-    pub data_flow_path: Option<DataFlowPath>,
+    pub semantic_path: Option<SemanticPath>,
     /// Code snippet at the finding location
     #[serde(default)]
     pub snippet: Option<String>,
@@ -83,20 +83,20 @@ impl std::fmt::Display for Severity {
     }
 }
 
-/// Data flow path showing how taint propagates
+/// Semantic path showing source-to-sink evidence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataFlowPath {
+pub struct SemanticPath {
     /// Source location where taint originated
-    pub source: DataFlowNode,
+    pub source: SemanticNode,
     /// Intermediate steps in the flow
-    pub steps: Vec<DataFlowNode>,
+    pub steps: Vec<SemanticNode>,
     /// Sink location where taint is consumed
-    pub sink: DataFlowNode,
+    pub sink: SemanticNode,
 }
 
-/// A node in the data flow path
+/// A node in a semantic path
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataFlowNode {
+pub struct SemanticNode {
     /// Location in source code
     pub location: Location,
     /// Description of what happens at this node

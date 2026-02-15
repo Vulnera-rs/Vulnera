@@ -86,24 +86,24 @@ pub struct VulnerabilityFindingMetadata {
     pub snippet: Option<String>,
     /// Rule metavariable bindings captured during matching
     pub bindings: Option<std::collections::HashMap<String, String>>,
-    /// Optional data-flow trace for taint/dataflow findings
-    pub data_flow_path: Option<VulnerabilityDataFlowPath>,
+    /// Optional semantic trace for taint/dataflow findings
+    pub semantic_path: Option<VulnerabilitySemanticPath>,
 }
 
-/// Data flow path showing source-to-sink propagation
+/// Semantic path showing source-to-sink propagation
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct VulnerabilityDataFlowPath {
+pub struct VulnerabilitySemanticPath {
     /// Source location where taint originated
-    pub source: VulnerabilityDataFlowNode,
+    pub source: VulnerabilitySemanticNode,
     /// Intermediate propagation steps
-    pub steps: Vec<VulnerabilityDataFlowNode>,
+    pub steps: Vec<VulnerabilitySemanticNode>,
     /// Sink location where taint is consumed
-    pub sink: VulnerabilityDataFlowNode,
+    pub sink: VulnerabilitySemanticNode,
 }
 
-/// Data flow node metadata for vulnerability traces
+/// Semantic node metadata for vulnerability traces
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct VulnerabilityDataFlowNode {
+pub struct VulnerabilitySemanticNode {
     /// Location in source code
     pub location: Location,
     /// Description of the node operation

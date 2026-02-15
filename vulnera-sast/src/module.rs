@@ -4,11 +4,11 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
 
-use vulnera_core::config::SastConfig;
+use vulnera_core::config::{AnalysisDepth as SastAnalysisDepth, SastConfig};
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
-    VulnerabilityDataFlowNode, VulnerabilityDataFlowPath, VulnerabilityFindingMetadata,
+    VulnerabilityFindingMetadata, VulnerabilitySemanticNode, VulnerabilitySemanticPath,
 };
 
 use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
@@ -25,6 +25,8 @@ use crate::infrastructure::ast_cache::AstCacheService;
 pub struct SastModule {
     use_case: Arc<ScanProjectUseCase>,
     sast_config: SastConfig,
+    analysis_config: AnalysisConfig,
+    ast_cache: Option<Arc<dyn AstCacheService>>,
 }
 
 /// Builder for [`SastModule`].
@@ -78,15 +80,14 @@ impl SastModuleBuilder {
         } = self;
 
         let sast_config = sast_config.unwrap_or_default();
+        let analysis_config = analysis_config.unwrap_or_else(|| AnalysisConfig::from(&sast_config));
+        let ast_cache_for_use_case = ast_cache.clone();
 
         let use_case = if let Some(uc) = use_case_override {
             uc
         } else {
-            let analysis_cfg =
-                analysis_config.unwrap_or_else(|| AnalysisConfig::from(&sast_config));
-
-            let uc = ScanProjectUseCase::with_config(&sast_config, analysis_cfg);
-            let uc = if let Some(cache) = ast_cache {
+            let uc = ScanProjectUseCase::with_config(&sast_config, analysis_config.clone());
+            let uc = if let Some(cache) = ast_cache_for_use_case {
                 uc.with_ast_cache(cache)
             } else {
                 uc
@@ -97,6 +98,8 @@ impl SastModuleBuilder {
         SastModule {
             use_case,
             sast_config,
+            analysis_config,
+            ast_cache,
         }
     }
 }
@@ -143,10 +146,8 @@ impl AnalysisModule for SastModule {
             )));
         }
 
-        // Execute scan
         let scan_result = self
-            .use_case
-            .execute(source_path)
+            .execute_scan_with_depth_override(config, source_path)
             .await
             .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
 
@@ -187,7 +188,7 @@ impl AnalysisModule for SastModule {
 
                 if policy.require_data_flow_evidence_for_dataflow
                     && is_data_flow_rule(&f.rule_id)
-                    && f.data_flow_path.is_none()
+                    && f.semantic_path.is_none()
                 {
                     filtered_by_dataflow += 1;
                     return false;
@@ -227,8 +228,8 @@ impl AnalysisModule for SastModule {
                 vulnerability_metadata: VulnerabilityFindingMetadata {
                     snippet: f.snippet,
                     bindings: f.bindings,
-                    data_flow_path: f.data_flow_path.map(|path| VulnerabilityDataFlowPath {
-                        source: VulnerabilityDataFlowNode {
+                    semantic_path: f.semantic_path.map(|path| VulnerabilitySemanticPath {
+                        source: VulnerabilitySemanticNode {
                             location: Location {
                                 path: path.source.location.file_path,
                                 line: Some(path.source.location.line),
@@ -242,7 +243,7 @@ impl AnalysisModule for SastModule {
                         steps: path
                             .steps
                             .into_iter()
-                            .map(|step| VulnerabilityDataFlowNode {
+                            .map(|step| VulnerabilitySemanticNode {
                                 location: Location {
                                     path: step.location.file_path,
                                     line: Some(step.location.line),
@@ -254,7 +255,7 @@ impl AnalysisModule for SastModule {
                                 expression: step.expression,
                             })
                             .collect(),
-                        sink: VulnerabilityDataFlowNode {
+                        sink: VulnerabilitySemanticNode {
                             location: Location {
                                 path: path.sink.location.file_path,
                                 line: Some(path.sink.location.line),
@@ -318,6 +319,33 @@ impl AnalysisModule for SastModule {
             },
             error: None,
         })
+    }
+}
+
+impl SastModule {
+    async fn execute_scan_with_depth_override(
+        &self,
+        module_config: &ModuleConfig,
+        source_path: &Path,
+    ) -> Result<crate::application::use_cases::ScanResult, crate::application::use_cases::ScanError>
+    {
+        let Some(depth_override) = parse_analysis_depth_override(module_config)
+            .map_err(|e| crate::application::use_cases::ScanError::Config(e.to_string()))?
+        else {
+            return self.use_case.execute(source_path).await;
+        };
+
+        let mut effective_analysis = self.analysis_config.clone();
+        effective_analysis.analysis_depth = depth_override;
+
+        let use_case = if let Some(cache) = &self.ast_cache {
+            ScanProjectUseCase::with_config(&self.sast_config, effective_analysis)
+                .with_ast_cache(Arc::clone(cache))
+        } else {
+            ScanProjectUseCase::with_config(&self.sast_config, effective_analysis)
+        };
+
+        use_case.execute(source_path).await
     }
 }
 
@@ -441,8 +469,90 @@ fn is_data_flow_rule(rule_id: &str) -> bool {
     rule_id.starts_with("data-flow-") || rule_id.contains("dataflow") || rule_id.contains("taint")
 }
 
+fn parse_analysis_depth_override(
+    module_config: &ModuleConfig,
+) -> Result<Option<SastAnalysisDepth>, ModuleExecutionError> {
+    let Some(raw) = module_config
+        .config
+        .get("sast.analysis_depth")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(None);
+    };
+
+    let parsed = match raw.trim().to_ascii_lowercase().as_str() {
+        "deep" => SastAnalysisDepth::Deep,
+        "standard" => SastAnalysisDepth::Standard,
+        "quick" => SastAnalysisDepth::Quick,
+        other => {
+            return Err(ModuleExecutionError::InvalidConfig(format!(
+                "Invalid SAST analysis depth override: {other}"
+            )));
+        }
+    };
+
+    Ok(Some(parsed))
+}
+
 impl Default for SastModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn module_config_with_depth(value: Option<&str>) -> ModuleConfig {
+        let mut config = HashMap::new();
+        if let Some(v) = value {
+            config.insert(
+                "sast.analysis_depth".to_string(),
+                serde_json::Value::String(v.to_string()),
+            );
+        }
+
+        ModuleConfig {
+            job_id: uuid::Uuid::new_v4(),
+            project_id: "test-project".to_string(),
+            source_uri: ".".to_string(),
+            config,
+        }
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_accepts_known_values() {
+        let deep = parse_analysis_depth_override(&module_config_with_depth(Some("deep")))
+            .expect("deep should parse");
+        let standard = parse_analysis_depth_override(&module_config_with_depth(Some("standard")))
+            .expect("standard should parse");
+        let quick = parse_analysis_depth_override(&module_config_with_depth(Some("quick")))
+            .expect("quick should parse");
+
+        assert_eq!(deep, Some(SastAnalysisDepth::Deep));
+        assert_eq!(standard, Some(SastAnalysisDepth::Standard));
+        assert_eq!(quick, Some(SastAnalysisDepth::Quick));
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_absent_returns_none() {
+        let parsed = parse_analysis_depth_override(&module_config_with_depth(None))
+            .expect("absence should not fail");
+        assert_eq!(parsed, None);
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_rejects_invalid_value() {
+        let err = parse_analysis_depth_override(&module_config_with_depth(Some("ultra")))
+            .expect_err("invalid value should fail");
+
+        match err {
+            ModuleExecutionError::InvalidConfig(message) => {
+                assert!(message.contains("Invalid SAST analysis depth override"));
+            }
+            other => panic!("unexpected error variant: {other}"),
+        }
     }
 }
