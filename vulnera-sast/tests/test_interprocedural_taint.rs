@@ -180,6 +180,86 @@ runCommand(input);
     );
 }
 
+#[tokio::test]
+async fn test_python_callback_parameter_propagates_to_return() {
+    let result = scan_files(&[(
+        "app.py",
+        r#"
+import os
+
+def apply(callback, value):
+    result = callback(value)
+    return result
+
+def identity(v):
+    return v
+
+user = os.environ.get("USER_INPUT")
+command = apply(identity, user)
+eval(command)
+"#,
+    )])
+    .await;
+
+    let has_eval_or_dataflow = result.findings.iter().any(|f| {
+        f.rule_id
+            .as_deref()
+            .map(|r| r.contains("unsafe-function-call") || r.contains("data-flow"))
+            .unwrap_or(false)
+    });
+
+    assert!(
+        has_eval_or_dataflow,
+        "Expected callback parameter taint to flow through apply() return into eval(). Findings: {:?}",
+        result
+            .findings
+            .iter()
+            .map(|f| f.rule_id.as_deref().unwrap_or("(none)"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_js_callback_parameter_propagates_to_return() {
+    let result = scan_files(&[(
+        "app.js",
+        r#"
+const child_process = require('child_process');
+
+function apply(callback, value) {
+    const result = callback(value);
+    return result;
+}
+
+function passthrough(v) {
+    return v;
+}
+
+const user = process.env.USER_INPUT;
+const cmd = apply(passthrough, user);
+child_process.exec(cmd);
+"#,
+    )])
+    .await;
+
+    let has_command_or_dataflow = result.findings.iter().any(|f| {
+        f.rule_id
+            .as_deref()
+            .map(|r| r.contains("child-process") || r.contains("data-flow"))
+            .unwrap_or(false)
+    });
+
+    assert!(
+        has_command_or_dataflow,
+        "Expected callback parameter taint to flow through apply() return into child_process.exec(). Findings: {:?}",
+        result
+            .findings
+            .iter()
+            .map(|f| f.rule_id.as_deref().unwrap_or("(none)"))
+            .collect::<Vec<_>>()
+    );
+}
+
 // =========================================================================
 // Call graph construction: multi-file
 // =========================================================================

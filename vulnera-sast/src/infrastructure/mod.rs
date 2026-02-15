@@ -11,6 +11,7 @@
 pub mod ast_cache;
 pub mod call_graph;
 pub mod call_graph_queries;
+pub mod cfg;
 pub mod data_flow;
 pub mod incremental;
 pub mod metavar_patterns;
@@ -29,6 +30,7 @@ pub mod taint_queries;
 
 pub use ast_cache::*;
 pub use call_graph::*;
+pub use cfg::*;
 pub use data_flow::*;
 pub use incremental::*;
 pub use oxc_frontend::*;

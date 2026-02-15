@@ -1237,6 +1237,10 @@ impl ScanProjectUseCase {
                                     target_id,
                                     argument_taints,
                                 ));
+                            } else {
+                                Self::propagate_unresolved_callback_call(
+                                    analyzer, range, &call, &file_str,
+                                );
                             }
                         }
 
@@ -1858,6 +1862,44 @@ impl ScanProjectUseCase {
         }
 
         None
+    }
+
+    fn propagate_unresolved_callback_call(
+        analyzer: &mut DataFlowAnalyzer,
+        function_range: &FunctionRange,
+        call: &CallAssignment,
+        file: &str,
+    ) {
+        let is_callback_param = function_range
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name == call.callee);
+
+        if !is_callback_param {
+            return;
+        }
+
+        let first_tainted_argument = call
+            .args
+            .iter()
+            .find_map(|arg| Self::resolve_taint_for_expr(analyzer, arg));
+
+        if let Some(state) = first_tainted_argument {
+            analyzer.set_taint_state(
+                &call.target,
+                state,
+                file,
+                call.line as u32 + 1,
+                call.column as u32,
+            );
+
+            debug!(
+                callback = %call.callee,
+                target = %call.target,
+                line = call.line + 1,
+                "Propagated taint through unresolved callback parameter call"
+            );
+        }
     }
 
     fn extract_call_assignments(
