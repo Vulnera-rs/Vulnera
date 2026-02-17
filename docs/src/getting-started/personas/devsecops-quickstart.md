@@ -79,7 +79,7 @@ jobs:
 
       - name: Download Vulnera CLI
         run: |
-          curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+          curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
           chmod +x vulnera
 
       - name: Run Full Security Analysis

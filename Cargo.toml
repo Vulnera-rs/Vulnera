@@ -106,7 +106,7 @@ rust-version = "1.91"
 authors = ["Vulnera-Team"]
 license = "AGPL-3.0-or-later"
 license-file = "LICENSE"
-repository = "https://github.com/k5602/vulnera"
+repository = "https://github.com/Vulnera-rs/vulnera"
 keywords = ["security", "vulnerability", "analysis", "dependencies"]
 categories = ["web-programming", "development-tools"]
 

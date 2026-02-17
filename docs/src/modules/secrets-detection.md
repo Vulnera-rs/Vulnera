@@ -1,103 +1,139 @@
-# Secrets Detection
+# Secrets Detection Module
 
-The Secrets Detection Module identifies exposed secrets, credentials, API keys, and other sensitive information in source code and repositories.
+The Secrets Detection module finds hardcoded credentials and sensitive tokens in source code using **regex-based rules** and **entropy heuristics**. It runs fully offline by default, with optional online verification for select providers.
+
+---
 
 ## Detection Methods
 
-| Method            | Description                                             |
-| ----------------- | ------------------------------------------------------- |
-| **ML-based**      | ML Based Pattern Analyzer                               |
-| **Entropy-based** | Statistical analysis detecting high-entropy strings     |
-| **Git History**   | Optional analysis of commit history for removed secrets |
+| Method       | Description                                       | Offline |
+| ------------ | ------------------------------------------------- | ------- |
+| Regex rules  | Known secret patterns with context keywords       | ✅ Yes  |
+| Entropy      | High-entropy token detection (Base64/hex/generic) | ✅ Yes  |
+| Verification | Optional provider checks (AWS/GitHub/GitLab)      | ❌ No   |
+
+---
 
 ## Supported Secret Types
 
-### Cloud Credentials
+Examples include:
 
-- AWS access keys, secret keys, session tokens
-- Azure credentials and connection strings
-- GCP service account keys
+- Cloud credentials (AWS, Azure, GCP)
+- API keys and tokens (Stripe, Twilio, GitHub, GitLab, generic API keys)
+- OAuth/JWT/Bearer tokens
+- Database connection strings and passwords
+- Private keys (RSA/EC/PGP/SSH)
+- High-entropy strings (Base64/hex/generic tokens)
 
-### API Keys
+---
 
-- Generic API keys
-- Stripe keys
-- Twilio tokens
-- SendGrid keys
-- Slack tokens
-- And many more...
+## How It Works
 
-### Authentication Tokens
+1. **Discovery** — Walks files within the scan root.
+2. **Regex rules** — Applies built-in secret patterns.
+3. **Entropy detection** — Flags high-entropy strings using thresholds.
+4. **Optional verification** — Provider-specific checks (disabled by default).
+5. **Post-process** — Dedupes and emits unified findings.
 
-- OAuth tokens
-- JWT tokens
-- Bearer tokens
-- Session tokens
+---
 
-### Database Credentials
+## CLI Usage (Actual Flags)
 
-- Connection strings
-- Database passwords
-- MongoDB URIs
-- Redis passwords
+Secrets detection runs via `vulnera secrets`:
 
-### Private Keys
+```/dev/null/commands.txt#L1-14
+# Basic scan
+vulnera secrets .
 
-- SSH keys
-- RSA keys
-- EC keys
-- PGP private keys
+# Only changed files (git required)
+vulnera secrets . --changed-only
 
-### Version Control Tokens
+# Specific files
+vulnera secrets . --files src/config.rs,src/lib.rs
 
-- GitHub tokens (classic and fine-grained)
-- GitLab tokens
-- Bitbucket tokens
+# Exclude paths (glob patterns)
+vulnera secrets . --exclude "tests/*,vendor/*"
 
-### High-Entropy Strings
+# Include entropy-based detections (more noise)
+vulnera secrets . --include-entropy
+```
 
-- Base64-encoded secrets
-- Hexadecimal secrets
-- Random tokens
+**Available flags:**
 
-## Entropy Detection
+- `--fail-on-secret`
+- `--changed-only`
+- `--files <path1,path2,...>`
+- `--exclude <glob1,glob2,...>`
+- `--include-tests`
+- `--include-entropy`
+- `--no-cache`
+- `--watch`
 
-### How It Works
+---
 
-Entropy measures the randomness of a string. High-entropy strings are likely to be secrets because they appear random (unlike normal code or text).
+## Output
 
-### Thresholds
+Secrets findings follow the unified finding schema:
 
-| Type            | Default Threshold | Description                     |
-| --------------- | ----------------- | ------------------------------- |
-| **Base64**      | 4.5               | Strings matching Base64 pattern |
-| **Hexadecimal** | 3.0               | Strings matching hex pattern    |
+- `secret_metadata` is populated
+- `vulnerability_metadata` may be empty
+- `enrichment` is optional (LLM)
 
-## Git History Scanning
+You can emit SARIF:
 
-Optional deep scanning of commit history:
+```/dev/null/commands.txt#L1-2
+vulnera secrets . --format sarif > report.sarif
+```
 
-This detects secrets that were committed and later removed but remain in git history.
+---
 
-## Exclude Patterns
+## Configuration (Server + Library)
 
-The module automatically excludes:
+Secrets detection is configured via `vulnera_core::config::SecretDetectionConfig`.
 
-- Build artifacts (`target/`, `dist/`, `build/`)
-- Dependencies (`node_modules/`, `vendor/`)
-- Generated files (`*.min.js`, `*.bundle.js`)
-- Binary files
-- what's in `.gitignore`
+Key settings:
 
-## Baseline Support
+- `enable_entropy_detection`
+- `base64_entropy_threshold`, `hex_entropy_threshold`
+- `exclude_patterns`, `exclude_extensions`
+- `baseline_file_path`, `update_baseline`
+- `scan_git_history`, `max_commits_to_scan`
+- `enable_verification` (default: false)
 
-Track known secrets to reduce false positives:
+Example (TOML):
 
-## Severity Classification
+```/dev/null/config.toml#L1-16
+[secret_detection]
+enable_entropy_detection = true
+base64_entropy_threshold = 4.5
+hex_entropy_threshold = 3.0
+exclude_patterns = ["node_modules", ".git", "target"]
+exclude_extensions = ["md", "markdown", "rst", "html"]
+scan_git_history = false
+enable_verification = false
+```
 
-| Severity     | Secret Types                                      |
-| ------------ | ------------------------------------------------- |
-| **Critical** | AWS credentials, private keys, database passwords |
-| **High**     | API keys, OAuth tokens, JWT secrets               |
-| **Medium**   | High-entropy strings, generic tokens              |
-| **Low**      | Potential false positives, test credentials       |
+---
+
+## Offline Guarantees
+
+Secrets detection runs fully offline by default:
+
+- No network calls
+- Regex rules and entropy heuristics are local
+- Verification is opt-in and requires network access
+
+---
+
+## Limitations
+
+- Entropy detection can surface false positives in test fixtures and generated tokens.
+- Markdown and certain doc extensions are excluded by default unless explicitly included.
+- Verification is limited to supported providers.
+
+---
+
+## Next Steps
+
+- [Analysis Overview](../analysis/overview.md)
+- [Configuration Reference](../reference/configuration.md)

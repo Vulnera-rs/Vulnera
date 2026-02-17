@@ -4,46 +4,64 @@
 
 ---
 
-## For Individual Developers
+## Getting Started
+
+### For Individual Developers
 
 - [Developer Quick Start](getting-started/personas/developer-quickstart.md)
 
-## For Security Teams
+### For Security Teams
 
 - [DevSecOps Quick Start](getting-started/personas/devsecops-quickstart.md)
 - [Quota & Pricing](user-guide/quota-pricing.md)
 
-## For Cloud Engineers
+### For Cloud Engineers
 
 - [Cloud Engineer Quick Start](getting-started/personas/cloud-engineer-quickstart.md)
 
-## Dashboard & Web Platform
-
-- [Dashboard Guide](user-guide/dashboard/guide.md)
-- [Organization Management](user-guide/dashboard/organization-management.md)
-- [Team Collaboration](user-guide/dashboard/team-collaboration.md)
+---
 
 ## Analysis Capabilities
 
-### AI-Assisted Analysis Overview
+- [Overview](analysis/overview.md)
 
-- [Analysis Capabilities Overview](analysis/overview.md)
+### Dependency Analysis
 
-### AI-Assisted Secret Detection (ML-Powered)
+- [Dependency Analysis](modules/dependency-analysis.md)
 
-- [Overview & ML Models](analysis/secrets-detection.md)
+### SAST (Static Analysis)
 
-### AI-Assisted Code Analysis (ML-Powered)
+- [SAST Overview](modules/sast.md)
+- [AI-Assisted Code Analysis](analysis/sast.md)
 
-- [Overview & ML Models](analysis/sast.md)
+### Secrets Detection
 
-## AI-Powered Explanations & Fixes (LLM-Based)
+- [Secrets Detection](modules/secrets-detection.md)
+- [AI-Assisted Secret Detection](analysis/secrets-detection.md)
 
-- [Overview](user-guide/llm-features.md)
+### API Security
+
+- [API Security](modules/api-security.md)
+
+---
+
+## AI-Powered Features
+
+- [LLM Explanations & Auto-Fixes](user-guide/llm-features.md)
+
+---
+
+## Dashboard & Web Platform
+
+- [Dashboard Guide](user-guide/website-dashboard.md)
+- [Organization Management](user-guide/dashboard/organization-management.md)
+- [Team Collaboration](user-guide/dashboard/team-collaboration.md)
+
+---
 
 ## Reference
 
 - [Configuration](reference/configuration.md)
 - [System Architecture](reference/architecture.md)
-- [Orchestrator Observability Architecture](reference/orchestrator-observability.md)
+- [Orchestrator Observability](reference/orchestrator-observability.md)
 - [FAQ](reference/faq.md)

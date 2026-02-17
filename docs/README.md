@@ -9,12 +9,21 @@ This page is the onboarding index for contributors working in the monorepo.
 
 Use this once at the workspace root:
 
-```bash
+```/dev/null/commands.txt#L1-2
 chmod +x .githooks/pre-commit
 git config core.hooksPath .githooks
 ```
 
-## Crate Overview
+## Canonical Documentation Sources
+
+- Root project README: `/README.md`
+- Change log: `/CHANGELOG.md`
+- Docs book source: `/docs/src`
+- Crate/Module map: `/docs/modules.md`
+- Architecture diagram (Mermaid): `/docs/arch.mmd`
+- Docs book config: `/docs/book.toml`
+
+## Crate Overview (Monorepo)
 
 - Root server workspace: `/` (this repo)
 - Adapter (LSP): `/adapter`
@@ -29,32 +38,27 @@ git config core.hooksPath .githooks
 - LLM module: `/vulnera-llm`
 - Sandbox module: `/vulnera-sandbox`
 
-## Crate Docs / Changelog Links
+## Crate Docs & Changelog Links
 
-### Root Workspace
-- README: `/README.md`
-- Changelog: `/CHANGELOG.md`
-- Book/docs source: `/docs/src`
-
-### Adapter
-- README: `/adapter/README.md`
-
-### Advisors
-- README: `/advisors/README.md`
-- Docs: `/advisors/docs/README.md`
-- Changelog: `/advisors/CHANGELOG.md`
-
-### CLI
-- README: `/vulnera-cli/README.md`
-- Docs index: `/vulnera-cli/docs/README.md`
-- Changelog: `/vulnera-cli/CHANGELOG.md`
-
-### SAST
-- README: `/vulnera-sast/README.md`
+| Crate                  | README                    | Docs index                    | Changelog                   |
+| ---------------------- | ------------------------- | ----------------------------- | --------------------------- |
+| Root server            | `/README.md`              | `/docs/src/README.md`         | `/CHANGELOG.md`             |
+| `adapter`              | `/adapter/README.md`      | —                             | —                           |
+| `advisors`             | `/advisors/README.md`     | `/advisors/docs/README.md`    | `/advisors/CHANGELOG.md`    |
+| `vulnera-cli`          | `/vulnera-cli/README.md`  | `/vulnera-cli/docs/README.md` | `/vulnera-cli/CHANGELOG.md` |
+| `vulnera-sast`         | `/vulnera-sast/README.md` | —                             | —                           |
+| `vulnera-core`         | —                         | —                             | —                           |
+| `vulnera-orchestrator` | —                         | —                             | —                           |
+| `vulnera-deps`         | —                         | —                             | —                           |
+| `vulnera-secrets`      | —                         | —                             | —                           |
+| `vulnera-api`          | —                         | —                             | —                           |
+| `vulnera-llm`          | —                         | —                             | —                           |
+| `vulnera-sandbox`      | —                         | —                             | —                           |
 
 ## Contributor Quick Path
 
 1. Start at `/README.md` and this file (`/docs/README.md`).
 2. Set root git hooks once.
-3. Use crate-local README/docs for module-specific workflows.
-4. Track changes in `/CHANGELOG.md` (root) and crate-specific changelogs where applicable.
+3. Use `/docs/src` for canonical technical docs and `/docs/modules.md` for crate-level responsibilities.
+4. Use crate-local README/docs where present.
+5. Track changes in `/CHANGELOG.md` (root) and crate-specific changelogs where applicable.

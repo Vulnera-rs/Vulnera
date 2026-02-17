@@ -15,7 +15,7 @@ pub fn generate_sarif_report(report: &AggregatedReport) -> Result<String, serde_
                 "driver": {
                     "name": "Vulnera",
                     "version": "0.2.0",
-                    "informationUri": "https://github.com/k5602/vulnera"
+                    "informationUri": "https://github.com/Vulnera-rs/vulnera"
                 }
             },
             "results": report.module_results.iter()

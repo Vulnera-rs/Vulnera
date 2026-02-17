@@ -11,7 +11,7 @@ Choose your platform:
 ### macOS
 
 ```bash
-curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-macos-x86_64 -o vulnera
+curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-macos-aarch64 -o vulnera
 chmod +x vulnera
 sudo mv vulnera /usr/local/bin/
 ```
@@ -19,20 +19,20 @@ sudo mv vulnera /usr/local/bin/
 ### Linux
 
 ```bash
-curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
 chmod +x vulnera
 sudo mv vulnera /usr/local/bin/
 ```
 
 ### Windows
 
-Download from [GitHub Releases](https://github.com/k5602/Vulnera/releases), add to PATH.
+Download from [GitHub Releases](https://github.com/Vulnera-rs/Vulnera/releases), add to PATH.
 
 ### Verify Installation
 
 ```bash
 vulnera --version
-# Output: Vulnera 0.3.0
+# Output: Vulnera 0.5.1
 ```
 
 ## Run Your First Analysis (Offline)
@@ -176,7 +176,7 @@ Add to `.gitlab-ci.yml`:
 ```yaml
 security:
   script:
-    - curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+    - curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
     - chmod +x vulnera
     - ./vulnera analyze . --severity high
 ```
@@ -209,16 +209,16 @@ vulnera analyze . --offline
 
 ## Troubleshooting
 
-**Q: No findings found—is it working?**  
+**Q: No findings found—is it working?**
 A: That's good! Your code is secure. Try with `--show-passed` to see all checks run.
 
-**Q: Getting "permission denied" error?**  
+**Q: Getting "permission denied" error?**
 A: Make sure the binary is executable: `chmod +x vulnera`
 
-**Q: Want to see what's detected?**  
+**Q: Want to see what's detected?**
 A: Run with verbose output: `vulnera analyze . -v`
 
-**Q: Dependency scanning not working?**  
+**Q: Dependency scanning not working?**
 A: You need to authenticate. Get an API key at <https://vulnera.studio/dashboard/keys>
 
 ---

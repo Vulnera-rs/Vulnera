@@ -1,6 +1,6 @@
 # Dependency Analysis
 
-The Dependency Analysis Module scans dependency manifests across multiple package ecosystems to identify known vulnerabilities in your project's dependencies.
+The Dependency Analysis module scans dependency manifests and lockfiles across multiple ecosystems to identify known vulnerabilities. It requires network access for CVE lookups (OSV, NVD, GHSA).
 
 ## Supported Ecosystems
 
@@ -15,35 +15,44 @@ The Dependency Analysis Module scans dependency manifests across multiple packag
 | **Ruby (Bundler)**      | `Gemfile`, `Gemfile.lock`                             |
 | **.NET (NuGet)**        | `packages.config`, `*.csproj`, `*.props`, `*.targets` |
 
-## Features
+## Online Requirement
 
-- **Graph-Based Analysis** — Full directed graph support for reachability and transitive vulnerability attribution
-- **Concurrent Processing** — Analyzes multiple packages in parallel for faster results
-- **Safe Version Recommendations** — Provides upgrade suggestions with impact classification (major/minor/patch)
-- **Registry Integration** — Resolves versions from official package registries
-- **CVE Aggregation** — Combines vulnerability data from OSV, NVD, and GHSA
-- **Version Constraint Analysis** — Understands complex version constraints
+Dependency analysis requires a server connection to query vulnerability sources:
+
+- OSV
+- NVD
+- GHSA
+
+Running in offline mode skips dependency analysis.
 
 ## Resolution Strategy
 
-Vulnera employs a hybrid strategy for building project dependency trees:
+Vulnera uses a hybrid resolution approach:
 
-- **Lockfile-First (Recommended)** — Extracts the complete, pre-resolved dependency tree from lockfiles (e.g., `package-lock.json`, `Cargo.lock`). This provides 100% accuracy for transitive dependencies.
-- **Manifest-Only** — For projects without lockfiles, Vulnera performs best-effort transitive resolution via registry metadata. Note: Full transitive resolution for manifest-only projects is currently a work-in-progress for some ecosystems.
+- **Lockfile-first** — Extracts a fully resolved dependency tree from lockfiles for accurate transitive coverage.
+- **Manifest-only fallback** — Best-effort resolution via registry metadata when lockfiles are absent.
 
-### Detail Levels
+**Known gaps:** Lockfile-independent transitive resolution is incomplete for some ecosystems (notably npm and PyPI).
+
+## Features
+
+- **Directed dependency graph** with reachability analysis
+- **Concurrent vulnerability lookups** with configurable limits
+- **Safe version recommendations** with patch/minor/major impact classification
+- **CWE normalization** and filtering
+- **Advisory intelligence** via `vulnera-advisor`
+
+## Detail Levels
 
 | Level      | Best For                           | Includes                                           |
 | ---------- | ---------------------------------- | -------------------------------------------------- |
-| `minimal`  | Status bar, badges                 | Vulnerabilities list, basic metadata               |
+| `minimal`  | Status badges                      | Vulnerabilities list, basic metadata               |
 | `standard` | Inline decorations, quick fixes    | Vulnerabilities, packages, version recommendations |
 | `full`     | Detailed reports, dependency trees | All data + dependency graph                        |
 
-## Version Recommendations
+## Output Example
 
-When vulnerabilities are found, the module provides safe version recommendations:
-
-```json
+```/dev/null/example.json#L1-13
 {
   "package": "lodash",
   "current_version": "4.17.15",
@@ -56,10 +65,22 @@ When vulnerabilities are found, the module provides safe version recommendations
 }
 ```
 
-### Upgrade Impact Classification
+## CLI Usage
 
-| Impact  | Description                               |
-| ------- | ----------------------------------------- |
-| `patch` | Bug fix only (x.y.Z)                      |
-| `minor` | New features, backward compatible (x.Y.z) |
-| `major` | Breaking changes (X.y.z)                  |
+Dependency analysis runs via `vulnera deps` (online only):
+
+```/dev/null/commands.txt#L1-8
+# Basic scan
+vulnera deps .
+
+# Include transitive dependencies
+vulnera deps . --include-transitive
+
+# Force rescan (ignore local cache)
+vulnera deps . --force-rescan
+```
+
+## Next Steps
+
+- [Analysis Overview](../analysis/overview.md)
+- [Configuration Reference](../reference/configuration.md)

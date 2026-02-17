@@ -1,0 +1,78 @@
+flowchart TD
+  %% Vulnera job-based orchestration architecture (current)
+  subgraph CR["Composition Root (src/app.rs)"]
+    CR1["Config + Service Wiring"]
+    CR2["Module Registry"]
+    CR3["Job Queue + Workers"]
+    CR4["HTTP Router (Axum)"]
+  end
+
+  subgraph HTTP["Presentation Layer"]
+    H1["/api/v1/analyze/job"]
+    H2["/api/v1/jobs/{id}"]
+    H3["/api/v1/organizations/*"]
+    H4["/api/v1/llm/*"]
+  end
+
+  subgraph ORCH["Orchestrator (vulnera-orchestrator)"]
+    O1["CreateAnalysisJobUseCase"]
+    O2["Job Store (Postgres)"]
+    O3["Job Queue (Dragonfly)"]
+    O4["RuleBasedModuleSelector"]
+    O5["ExecuteAnalysisJobUseCase"]
+    O6["JobWorkflow (state machine)"]
+  end
+
+  subgraph SANDBOX["Sandbox (vulnera-sandbox)"]
+    S1["SandboxPolicy::for_profile(...)"]
+    S2["SandboxExecutor"]
+    S3["Backend: Landlock / Process / Noop"]
+  end
+
+  subgraph MODULES["Analysis Modules (vulnera-*)"]
+    M1["Dependency Analysis"]
+    M2["SAST"]
+    M3["Secrets"]
+    M4["API Security"]
+    M5["LLM Enrichment (optional)"]
+  end
+
+  subgraph INFRA["Infrastructure"]
+    I1["PostgreSQL (jobs, findings, orgs)"]
+    I2["Dragonfly/Redis (queue, cache)"]
+    I3["External APIs (OSV/NVD/GHSA, LLM providers)"]
+    I4["Git/S3 Source Fetch"]
+  end
+
+  subgraph OUT["Outputs"]
+    R1["Final Findings Report"]
+    R2["Webhook Delivery (optional)"]
+    R3["Analytics & Dashboard"]
+  end
+
+  CR1 --> CR2
+  CR1 --> CR3
+  CR1 --> CR4
+
+  HTTP --> O1
+  O1 --> O2
+  O1 --> O3
+
+  O3 --> O5
+  O5 --> O4
+  O4 --> SANDBOX
+  SANDBOX --> MODULES
+
+  MODULES --> O6
+  O6 --> O2
+  O2 --> OUT
+
+  M1 --> I3
+  M5 --> I3
+  O5 --> I4
+  O2 --> I1
+  O3 --> I2
+
+  OUT --> R1
+  OUT --> R2
+  OUT --> R3

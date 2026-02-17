@@ -2,247 +2,206 @@
 
 # Vulnera
 
-**High-Performance Vulnerability Analysis Platform**
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![MSRV: 1.91](https://img.shields.io/badge/MSRV-1.91-orange.svg)](https://www.rust-lang.org/)
+[![version](https://img.shields.io/badge/version-0.5.1-green.svg)](CHANGELOG.md)
+[![Docs](https://img.shields.io/badge/docs-online-blue)](https://Vulnera-rs.github.io/Vulnera/)
 
-[![License: BUSL 1.1](https://img.shields.io/badge/License-BUSL_1.1-blue.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.91%2B-orange.svg)](https://www.rust-lang.org/tools/install)
-[![Rust](https://img.shields.io/badge/Rust-1.91+-orange.svg?logo=rust)](https://www.rust-lang.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://hub.docker.com/)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-green.svg?logo=openapi-initiative)](https://swagger.io/)
+**A modular, async Rust vulnerability analysis platform.**
 
-_Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets detection, and API security auditing_
-
-[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/) • [Workspace Index](docs/README.md)
+[Documentation](https://Vulnera-rs.github.io/Vulnera/) · [Architecture](docs/src/reference/architecture.md) · [Changelog](CHANGELOG.md) · [Contributing](#contributing)
 
 </div>
 
 ---
 
-## Architecture
+## Philosophy
 
-</text>
-| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan |
-| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html) | Command-line usage |
-| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html) | Environment variables and TOML config |
-| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html) | JWT and API key setup |
-| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html) | Module-specific documentation |
-| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html) | System design and DDD patterns |
-| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html) | GitHub Actions, GitLab CI, Azure DevOps |
+Most security tooling is either a black box SaaS product or a single-purpose scanner duct-taped into a CI pipeline. Vulnera is neither.
 
-```mermaid
-flowchart TB
-    subgraph Clients["Client Layer"]
-        CLI["CLI Tool"]
-        API["HTTP API"]
-        EXT["IDE Extensions"]
-    end
+The core conviction: **security analysis should be a composable, auditable, offline-first system** — not a phone-home service. Every finding must be traceable to a rule, a tree-sitter query, or a named entropy threshold. No mystery scores.
 
-    subgraph Orchestrator["Orchestration"]
-        ORCH["Module Registry"]
-        SEL["Rule-Based Selector"]
-        JOB["Job Queue"]
-    end
+Design principles that govern every decision:
 
-    subgraph Modules["Analysis Modules"]
-        DEPS["🔍 Dependencies"]
-        SAST["🛡️ SAST"]
-        SEC["🔑 Secrets"]
-        APIS["📋 API Security"]
-    end
-
-    subgraph Data["Data Sources"]
-        OSV["OSV"]
-        NVD["NVD"]
-        GHSA["GHSA"]
-    end
-
-    CLI & API & EXT --> ORCH
-    ORCH --> SEL --> JOB
-    JOB --> DEPS & SAST & SEC & APIS
-    DEPS --> OSV & NVD & GHSA
-```
-
-## ✨ Features
-
-| Module                  | Capabilities                                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| **Dependency Analysis** | npm, PyPI, Maven, Cargo, Go, PHP, Ruby, NuGet — Graph-based transitive analysis (lockfile preferred) |
-| **SAST**                | Rust, Python, JS/TS, Go, C, C++ — Inter-procedural taint analysis with high-speed tree-sitter AST    |
-| **Secrets Detection**   | AST-context + entropy-based detection for AWS, Azure, GCP, API keys, and sensitive tokens            |
-| **API Security**        | Deep OpenAPI 3.x auditing for authentication, data exposure, and contract integrity                  |
-
-**Core Platform:**
-
-- 🚀 **Async Rust** — Tokio-powered concurrent processing
-- 🏗️ **DDD Architecture** — Clean separation of domain, application, infrastructure layers
-- 🔐 **Auth** — JWT tokens + API keys with PostgreSQL-backed management
-- ⚡ **Smart Caching** — Dragonfly DB with configurable TTL
-- 📖 **OpenAPI** — Auto-generated Swagger UI documentation
+- **Make illegal states unrepresentable.** The type system enforces domain invariants; panics and `unwrap()` are banned in production paths via CI guardrails.
+- **Least-privilege execution.** Analysis modules run inside Landlock + seccomp sandboxes on Linux. The sandbox is not optional glue — it is a first-class domain concept with a typed policy builder.
+- **Dependency inversion at every boundary.** Nothing instantiates its own database pool or HTTP client. Everything is wired at the composition root (`src/app.rs`) and injected via `Arc<dyn Trait>`.
+- **Offline first, network optional.** SAST, secrets detection, and API analysis run fully offline. Network is opt-in (dependency CVE lookups, LLM enrichment).
 
 ---
 
-## 🚀 Quick Start
+## What It Does
 
-### Prerequisites
+Four analysis modules, one orchestrator, one job queue:
 
-- Rust 1.91+ • PostgreSQL 12+ • SQLx CLI
+| Module                  | Method                                            | Ecosystems / Languages                                       |
+| ----------------------- | ------------------------------------------------- | ------------------------------------------------------------ |
+| **Dependency Analysis** | CVE lookup via OSV · NVD · GHSA                   | npm, PyPI, Cargo, Maven/Gradle, Go, Composer, Bundler, NuGet |
+| **SAST**                | Tree-sitter AST + inter-procedural taint analysis | Python, JavaScript, TypeScript, Rust, Go, C, C++             |
+| **Secrets Detection**   | ML-pattern + Shannon entropy                      | All text files                                               |
+| **API Security**        | Spec-rule engine                                  | OpenAPI 3.0 / 3.1                                            |
 
-### Install & Run
+LLM enrichment (Google Gemini, OpenAI, Azure OpenAI) is an optional post-processing pass — it explains and proposes fixes for findings but is never part of detection itself.
+
+---
+
+## Architecture at a Glance
+
+```
+vulnera-rust  (binary — Axum HTTP server, composition root)
+  ├─ vulnera-orchestrator   async job queue · module registry · REST API · analytics
+  │    ├─ vulnera-sandbox   Landlock + seccomp · process isolation · typed policy builder
+  │    ├─ vulnera-deps      dependency graph · lockfile parsers · registry clients
+  │    ├─ vulnera-sast      Tree-sitter engine · taint/call-graph · TOML rule packs
+  │    ├─ vulnera-secrets   entropy analysis · ML pattern matching
+  │    ├─ vulnera-api       OpenAPI 3.x rule engine
+  │    └─ vulnera-llm       provider registry (Gemini · OpenAI · Azure) · resilience layer
+  └─ vulnera-core           domain models · config · shared traits · infra abstractions
+
+vulnera-cli      (separate workspace — offline scanner + server client)
+vulnera-advisor  (separate workspace — advisory intelligence crate)
+adapter          (separate workspace — LSP server)
+```
+
+Each crate follows strict DDD layering: `domain/` has zero side effects, `application/` orchestrates use cases, `infrastructure/` owns all I/O, `presentation/` owns HTTP controllers and DTOs.
+
+Full architecture detail: [`docs/src/reference/architecture.md`](docs/src/reference/architecture.md)
+
+---
+
+## Current State
+
+**Working and tested:**
+
+- Full job-based analysis pipeline (HTTP → queue → sandbox → modules → persist)
+- All four analysis modules with configurable depth (`minimal` / `standard` / `full`)
+- Landlock + seccomp sandbox with typed `SandboxPolicy` and `fail_closed` mode
+- JWT + Argon2 cookie auth with CSRF · API key auth with SHA-256 storage
+- Token-bucket rate limiting with per-tier quotas (anonymous / API key / org)
+- Organization model with RBAC (owner / admin / analyst / viewer)
+- Two-level cache: Moka L1 (in-memory) + Dragonfly L2 (distributed)
+- SARIF output · webhook delivery · analytics aggregation
+- LLM provider registry with circuit-breaker + exponential backoff
+- SAST V5: declarative TOML rule packs · `SymbolTable` · inter-procedural taint · OXC frontend option for JS/TS and semantic analysis
+- Data-driven CVE fixture harness with precision/recall quality gates in CI
+
+**Known gaps / active work:**
+
+- Transitive dependency resolution for manifest-only projects (no lockfile) is incomplete in some ecosystems
+- Enterprise license gating (`ModuleTier`) is plumbed but the entitlement check is not enforced end-to-end
+- WASM sandbox backend is scaffolded but not functional
+- OpenTelemetry export is not yet wired (observability event model is defined, spans are not exported)
+- Windows support is untested; Landlock is Linux-only by design
+
+---
+
+## Quick Start (Server)
+
+**Requirements:** Rust 1.91+, PostgreSQL 12+, `sqlx-cli`
 
 ```bash
-git clone https://github.com/k5602/Vulnera.git && cd Vulnera
+git clone https://github.com/Vulnera-rs/Vulnera.git
+cd Vulnera
+
+# Database
 export DATABASE_URL='postgresql://user:pass@localhost:5432/vulnera'
-sqlx migrate run --source migrations
+sqlx migrate run
+
+# Minimal config
+cat > .env <<'EOF'
+DATABASE_URL=postgresql://user:pass@localhost:5432/vulnera
+VULNERA__AUTH__JWT_SECRET=change-me-to-a-random-32-char-secret
+EOF
+
 cargo run
+# → http://localhost:3000
+# → http://localhost:3000/docs  (Swagger UI)
 ```
 
-**Verify:** `curl http://localhost:3000/health` • **API Docs:** <http://localhost:3000/docs>
+See [`docs/src/reference/configuration.md`](docs/src/reference/configuration.md) for the full env-var reference.
 
 ---
 
-## ⚙️ Configuration
+## Roadmap
 
-Copy `.env.example` to `.env` and configure:
+Roughly ordered by impact-to-effort ratio:
 
-```bash
-# Required
-DATABASE_URL='postgresql://user:pass@localhost:5432/vulnera'
-VULNERA__AUTH__JWT_SECRET='minimum-32-character-secret-key'
+### Near-term (next 1–3 months)
 
-# LLM Provider (AI features)
-VULNERA__LLM__PROVIDER='google_ai'  # or 'openai', 'azure'
-GOOGLE_AI_KEY='your-api-key'        # for Google AI
-# OPENAI_API_KEY='your-api-key'     # for OpenAI
-# AZURE_OPENAI_KEY='your-api-key'   # for Azure
+- [ ] Complete lockfile-independent transitive resolution for npm and PyPI
+- [ ] OpenTelemetry span export (Jaeger / OTLP)
+- [ ] Enforce enterprise tier gating end-to-end
+- [ ] WASM sandbox backend (portable alternative to Landlock for non-Linux)
+- [ ] Formal reachability scoring: combine CVE severity + call-graph reachability
+- [ ] GitHub Actions integration
+- [ ] Self-hosted deployment guide
 
-# Sandbox (secure module execution)
-VULNERA__SANDBOX__ENABLED=true
-VULNERA__SANDBOX__BACKEND='landlock'    # landlock, auto, process, noop
-VULNERA__SANDBOX__FAILURE_MODE='best_effort' # best_effort or fail_closed
+### Medium-term (3–6 months)
 
-# Optional
-VULNERA__CACHE__DRAGONFLY_URL='redis://127.0.0.1:6379'
-VULNERA__ANALYSIS__MAX_CONCURRENT_PACKAGES=8
-```
+- [ ] Policy-as-code: org-level `vulnera.policy.toml` with block / warn / ignore rules
+- [ ] False-positive management loop: per-finding suppression with audit trail
+- [ ] DAST module scaffold (HTTP fuzzing via OpenAPI spec)
+- [ ] IaC security module (Terraform, Dockerfile, Kubernetes manifests)
+- [ ] SCIM provisioning for enterprise SSO
 
-**Supported LLM Providers:**
+### Longer-term
 
-- **Google AI** — Gemini models (`gemini-flash-latest`)
-- **OpenAI** — GPT models (`gpt-4.1`)
-- **Azure OpenAI** — Enterprise Azure deployments
-
-**Sandbox Backends:**
-
-- **Landlock** — Linux 5.13+ kernel-level isolation (near-zero overhead)
-- **Process** — Fork-based isolation (works on any Linux)
-- **Auto** — Tries Landlock, falls back to Process
-
-Config files: `config/development.toml`, `config/production.toml`
+- [ ] Best-in-class Rust-specific analysis: MIR-level unsafe auditing, `unsafe` attribution across FFI boundaries
+- [ ] Measurable MTTR reduction pipeline: auto-PR generation for dependency upgrades
+- [ ] Cross-repo dependency graph for monorepos
+- [ ] Custom rule IDE (web-based TOML rule editor with live preview)
+- [ ] Vulnera-Monitor as Darkweb and in real-time monitoring of vulnerabilities
 
 ---
 
-## 🌍 Web Platform Access
+## Contributing
 
-**No setup required:**
+This is an early-stage open-source project. Contributions in any of these areas accelerate it the most:
 
-```bash
-# Option 1: Use web dashboard
-# 1. Visit https://vulnera.studio
-# 2. Sign up → Create organization
-# 3. Get API key from Settings → API Keys
-# 4. Use key with CLI or CI/CD
+**High-impact, well-scoped:**
 
-vulnera auth login --api-key YOUR_API_KEY
-vulnera analyze .
-```
+- SAST rules — new Tree-sitter queries in `vulnera-sast/rules/*.toml` with a matching CVE fixture in `vulnera-sast/tests/fixtures/` and we will open a new repo for community contributions.
+- Lockfile parsers — completing `go.sum`, `Gemfile.lock`, and `composer.lock` transitive resolution in `vulnera-deps`
+- False positives — improving entropy thresholds and pattern filters in `vulnera-secrets`
 
-**For teams:**
+**Architectural:**
 
-```bash
-# Organization admin creates team via web dashboard
-# 1. https://vulnera.studio → Create Organization
-# 2. Settings → Members → Invite team members
-# 3. Share organization API key for CI/CD
-# 4. All members share token quota, view shared scans
-```
+- OpenTelemetry integration — wire the existing observability event model (`docs/src/reference/orchestrator-observability.md`) to an OTLP exporter
+- WASM sandbox backend — implement `SandboxExecutor` for `wasmtime` in `vulnera-sandbox`
 
----
+**Quality:**
 
-## 🔐 Authentication
+- Expanding the CVE fixture corpus (`vulnera-sast/tests/fixtures/`) with real-world vulnerable code samples
+- Integration tests for the full HTTP → queue → analysis → persist pipeline
+
+### Setup
 
 ```bash
-# Register (sets HttpOnly cookies)
-curl -X POST http://localhost:3000/api/v1/auth/register \
-  -H "Content-Type: application/json" \
-  -c cookies.txt \
-  -d '{"email": "user@example.com", "password": "SecurePass123"}'
+# Install git hooks
+chmod +x .githooks/pre-commit
+git config core.hooksPath .githooks
 
-# Extract CSRF token from response, then make protected requests
-curl -X POST http://localhost:3000/api/v1/analyze/job \
-  -b cookies.txt \
-  -H "X-CSRF-Token: <csrf_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"source": {"type": "directory", "path": "."}}'
-```
-
----
-
-## 🛠️ Development
-
-```bash
-# Setup
-make -C scripts/build_workflow install-deps
-
-# Test
+# Run full CI check locally
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
 cargo nextest run --workspace
 
-# CI checks
-make -C scripts/build_workflow quick-check
+# Review snapshot changes after logic edits
+cargo insta review
 ```
 
-### Project Structure
-
-```
-vulnera-core/         # Domain models, config, shared infrastructure
-vulnera-orchestrator/ # HTTP API, job orchestration, controllers
-vulnera-deps/         # Dependency analysis module
-vulnera-sast/         # Static analysis module
-vulnera-secrets/      # Secrets detection module
-vulnera-api/          # OpenAPI security analysis module
-vulnera-llm/          # LLM-powered explanations
-```
+**Before opening a PR**, read [`CONTRIBUTING.md`](CONTRIBUTING.md). The short version: conventional commits, no `unwrap()`/`expect()` in production paths (CI will reject it), and new SQL must use `sqlx::query!` macros. Also, please approve the CLA.
 
 ---
 
-## 🚢 Deployment
+## Security
 
-### Production Checklist
-
-- [ ] Strong JWT secret (32+ characters)
-- [ ] Disable docs: `VULNERA__SERVER__ENABLE_DOCS=false`
-- [ ] Configure CORS origins
-- [ ] Enable HTTPS
-- [ ] Set up monitoring (OpenTelemetry)
-
-### Azure Architecture
-
-```
-Azure Front Door → API Management → App Service/Container Apps
-                                         ↓
-                   PostgreSQL ← Vulnera → Key Vault
-                                         ↓
-                                   Dragonfly Cache
-```
+Vulnerabilities should be reported privately. See [`SECURITY.md`](SECURITY.md).
 
 ---
 
-## 📜 License
+## License
 
-Core platform (server, analysis modules, orchestration): **Business Source License 1.1** with a
-Change Date to **GPL-3.0-or-later**.
+**Server, analysis modules, orchestration** (`vulnera-rust`, `vulnera-core`, `vulnera-orchestrator`, `vulnera-sast`, `vulnera-deps`, `vulnera-secrets`, `vulnera-api`, `vulnera-llm`, `vulnera-sandbox`): [AGPL-3.0-or-later](LICENSE)
 
-CLI , Advisors and LSP (adapter): **AGPL-3.0-or-later**.
-
-See [LICENSE](./LICENSE) for details and commercial licensing.
-
----
+**CLI, Advisors, LSP Adapter** (`vulnera-cli`, `advisors`, `adapter`): AGPL-3.0-or-later (see each Repo's LICENSE file)

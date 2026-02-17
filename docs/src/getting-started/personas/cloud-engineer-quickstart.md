@@ -8,7 +8,7 @@
 
 ```bash
 # Install CLI
-curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
 chmod +x vulnera
 
 # Authenticate with API key (get from https://vulnera.studio/dashboard/keys)
@@ -97,7 +97,7 @@ version: 0.2
 phases:
   install:
     commands:
-      - curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+      - curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
       - chmod +x vulnera
 
   build:
@@ -125,7 +125,7 @@ steps:
       secureFile: 'vulnera-api-key'
 
   - script: |
-      curl -L https://github.com/k5602/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
+      curl -L https://github.com/Vulnera-rs/Vulnera/releases/latest/download/vulnera-linux-x86_64 -o vulnera
       chmod +x vulnera
       ./vulnera auth login --api-key $(cat $(Agent.TempDirectory)/vulnera-api-key)
       ./vulnera analyze . --all-modules
@@ -234,7 +234,7 @@ vulnera findings filter \
 ```hcl
 # main.tf
 module "vulnera_scan" {
-  source = "git::https://github.com/k5602/Vulnera.git//terraform/modules/scanner"
+  source = "git::https://github.com/Vulnera-rs/Vulnera.git//terraform/modules/scanner"
 
   bucket_name = "my-infrastructure"
   schedule    = "cron(0 2 * * ? *)"  # Daily at 2 AM

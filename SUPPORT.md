@@ -28,7 +28,7 @@ If you'd like to financially support the project, you can do so via [GitHub Spon
 | Resource | URL |
 | --- | --- |
 | Web Dashboard | [vulnera.studio](https://vulnera.studio) |
-| Documentation | [k5602.github.io/Vulnera](https://k5602.github.io/Vulnera/) |
+| Documentation | [Vulnera-rs.github.io/Vulnera](https://Vulnera-rs.github.io/Vulnera/) |
 | Changelog | [CHANGELOG.md](CHANGELOG.md) |
 | Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Security Policy | [SECURITY.md](SECURITY.md) |

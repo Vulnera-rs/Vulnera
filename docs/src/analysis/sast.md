@@ -1,388 +1,170 @@
-# AI-Assisted Code Analysis (ML-Powered AST Pattern Matching)
+# SAST (Static Application Security Testing)
 
-Detect security vulnerabilities in source code using machine learning-powered Abstract Syntax Tree (AST) analysis and intelligent pattern matching.
+Vulnera SAST detects security issues in source code using Tree-sitter parsing, a call-graph builder, and inter-procedural taint analysis. It is fully offline and runs locally.
 
-## What Is Code Analysis?
+## What It Detects
 
-Code analysis (SAST - Static Application Security Testing) automatically finds vulnerabilities in your source code:
+Common categories include:
 
-- 💉 SQL Injection, command injection, LDAP injection
-- 🎯 Cross-Site Scripting (XSS), HTML injection
-- 🔓 Insecure deserialization, unsafe object instantiation
-- 🔐 Hardcoded credentials and API keys
-- 🛡️ Missing input validation and output encoding
-- 🚫 Unsafe cryptography and weak randomness
-- 📦 Unsafe package loads and dynamic code execution
+- SQL injection and command injection
+- XSS and HTML injection
+- Unsafe deserialization and dynamic code execution
+- Insecure crypto and weak randomness
+- Path traversal and file disclosure
+- Unsafe `unsafe` usage patterns (Rust)
 
-## How It Works: ML-Powered AST Analysis
+## How It Works
 
-### Technology Stack
+**Pipeline overview:**
 
-Vulnera's code analysis uses **machine learning-based AST parsing and pattern matching**:
-
-### AST-Based Pattern Matching
-
-**How it works:**
-
-```
-Input: 
-    user_id = request.GET['id']
-    query = f"SELECT * FROM users WHERE id={user_id}"
-    db.execute(query)
-
-AST Parser
-  ↓
-Abstract Syntax Tree
-  ├─ assignment: user_id ← function_call (request.GET)
-  ├─ assignment: query ← f-string with interpolation
-  └─ function_call: db.execute(query)
-
-ML Pattern Matcher
-  ├─ Detects: user input → SQL query
-  ├─ Recognizes: direct interpolation (not parameterized)
-  └─ Analysis: Taint flow from input to SQL
-  
-Output: "SQL Injection (95% confidence) - Use parameterized queries"
-```
-
-**Why it's ML:** Understands code semantics (not just regex), recognizes taint flow patterns.
+1. **Discovery** — Walks the project and maps files to supported languages.
+2. **Parsing** — Builds syntax trees using Tree-sitter (with OXC for JS/TS when enabled).
+3. **Rule matching** — Applies TOML rule packs to AST patterns.
+4. **Taint analysis** — Tracks source → sink flow, intra- and inter-procedural.
+5. **Call graph** — Resolves function calls across files to expand taint reachability.
+6. **Post-process** — Dedupes, scores confidence/severity, emits unified findings.
 
 ## Supported Languages
 
-### Python
+| Language   | Parser                       | File Extensions       |
+| ---------- | ---------------------------- | --------------------- |
+| Python     | tree-sitter-python           | `.py`                 |
+| JavaScript | tree-sitter-javascript / OXC | `.js`                 |
+| TypeScript | tree-sitter-javascript / OXC | `.ts`                 |
+| Rust       | tree-sitter-rust             | `.rs`                 |
+| Go         | tree-sitter-go               | `.go`                 |
+| C          | tree-sitter-c                | `.c`, `.h`            |
+| C++        | tree-sitter-cpp              | `.cpp`, `.cc`, `.hpp` |
 
-**Detections:**
+**Note:** JSX/TSX files are not scanned.
 
-- SQL Injection (SQLi), command injection
-- XSS in templates (Jinja2, Django)
-- Hardcoded secrets
-- Unsafe pickle/eval usage
+## Analysis Depth (SAST)
 
-**Example:**
+Depth controls the SAST engine’s thoroughness (separate from orchestrator depth):
 
-```python
-# Vulnerable ❌
-username = request.args.get('username')
-query = f"SELECT * FROM users WHERE username='{username}'"
-results = db.execute(query)
+| Depth      | Description                                                          |
+| ---------- | -------------------------------------------------------------------- |
+| `quick`    | Pattern matching only (no data-flow analysis)                        |
+| `standard` | Patterns + intra-procedural data flow                                |
+| `deep`     | Full analysis (patterns + data flow + call graph + inter-procedural) |
 
-# Secure ✅
-username = request.args.get('username')
-query = "SELECT * FROM users WHERE username=?"
-results = db.execute(query, [username])
+Dynamic depth adjustment is enabled by default. Large repositories are auto-downgraded to keep scans within time budgets. Disable with `VULNERA__SAST__DYNAMIC_DEPTH_ENABLED=false`.
+
+## Rule System
+
+Rules are TOML-based and embedded at build time. You can optionally load Git-based rule packs.
+
+**Locations:**
+
+- `vulnera-sast/rules/*.toml` — core rule packs
+- `vulnera-sast/taint-patterns/*.toml` — taint sources/sinks/sanitizers
+- `vulnera-sast/tests/fixtures/` — CVE fixtures for quality gates
+
+## CLI Usage (Actual Flags)
+
+SAST runs via `vulnera sast`:
+
+```/dev/null/commands.txt#L1-12
+# Basic scan
+vulnera sast .
+
+# Severity filter
+vulnera sast . --min-severity high
+
+# Only changed files (git required)
+vulnera sast . --changed-only
+
+# Explicit file list
+vulnera sast . --files src/main.rs,src/lib.rs
+
+# Exclude paths (glob patterns)
+vulnera sast . --exclude "tests/*,vendor/*"
 ```
 
-### JavaScript/TypeScript
+**Available flags:**
 
-**Detections:**
+- `--min-severity <critical|high|medium|low>`
+- `--fail-on-vuln`
+- `--changed-only`
+- `--files <path1,path2,...>`
+- `--exclude <glob1,glob2,...>`
+- `--languages <lang1,lang2,...>` (override auto-detection)
+- `--rules <category1,category2,...>` (rule categories)
+- `--no-cache` (disable incremental cache)
+- `--watch` (continuous scanning)
+- `--fix` (LLM-powered bulk fixes; requires online + auth + quota)
+- `--baseline <path>` (baseline file for diff)
+- `--save-baseline` (save current findings to baseline)
+- `--only-new` (report only findings not in baseline)
 
-- XSS in DOM operations
-- Unsafe SQL operations
-- Command injection
-- Unsafe eval/Function usage
+## Output
 
-**Example:**
+SAST findings are emitted in the unified finding schema:
 
-```javascript
-// Vulnerable ❌
-const userId = req.query.id;
-const sql = `SELECT * FROM users WHERE id=${userId}`;
-db.query(sql);
+- `severity` and `confidence`
+- `location` (path + line/column)
+- optional `snippet` and `semantic_path` (taint trace)
 
-// Secure ✅
-const userId = req.query.id;
-const sql = "SELECT * FROM users WHERE id=?";
-db.query(sql, [userId]);
+You can emit SARIF:
+
+```/dev/null/commands.txt#L1-2
+vulnera sast . --format sarif > report.sarif
 ```
 
-### Rust
+## Configuration (Server + Library)
 
-**Detections:**
+The SAST engine is configured via `vulnera_core::config::SastConfig` and `AnalysisConfig`.
 
-- Unsafe code blocks without proper justification
-- Panic-inducing operations on untrusted input
-- Unsafe serialization
+Key settings:
 
-**Example:**
+- `analysis_depth = "quick|standard|deep"`
+- `js_ts_frontend = "oxc_preferred" | "tree_sitter"`
+- `enable_data_flow`, `enable_call_graph`
+- `enable_ast_cache`, `ast_cache_ttl_hours`
+- `dynamic_depth_enabled`, file/size thresholds
+- `min_finding_severity`, `min_finding_confidence`
+- `rule_packs` and `rule_pack_allowlist`
 
-```rust
-// Vulnerable ❌
-let user_input: String = get_user_input();
-let buffer = unsafe { String::from_utf8_unchecked(user_input.into_bytes()) };
+Example (TOML):
 
-// Secure ✅
-let user_input: String = get_user_input();
-let buffer = String::from_utf8(user_input.into_bytes())?;
+```/dev/null/config.toml#L1-16
+[sast]
+analysis_depth = "standard"
+js_ts_frontend = "oxc_preferred"
+enable_data_flow = true
+enable_call_graph = true
+enable_ast_cache = true
+dynamic_depth_enabled = true
+min_finding_severity = "low"
+min_finding_confidence = "low"
 ```
 
-## ML Pattern Models
+## Offline Guarantees
 
-### SQL Injection Detection
+SAST runs fully offline:
 
-```
-ML Model: Taint-Flow Analyzer
-├─ Identifies: User input sources (request.GET, request.POST, sys.argv, etc.)
-├─ Traces: Data flow through functions
-├─ Detects: Direct string concatenation to SQL queries
-└─ Confidence: 95%+ (very reliable ML model)
+- No network calls
+- All rule packs embedded unless you configure external rule packs
 
-Rule Example:
-  IF (source == user_input) AND
-     (sink == sql_query) AND
-     (concatenation_or_interpolation == true) AND
-     (parameterized_query == false)
-  THEN
-    Alert: SQL Injection vulnerability
-```
+## Quality Gates
 
-### XSS (Cross-Site Scripting)
+The SAST module ships with a fixture-based accuracy harness enforced in CI.
 
-```
-ML Model: Output Encoding Analyzer
-├─ Identifies: Untrusted user input
-├─ Traces: Data flow to HTML output
-├─ Detects: Missing HTML escaping/encoding
-└─ Confidence: 90%+ (context-dependent)
+Thresholds (from `config/default.toml`):
 
-Types Detected:
-  ├─ Reflected XSS (user input directly in HTML)
-  ├─ Stored XSS (database data without escaping)
-  ├─ DOM-based XSS (JavaScript DOM manipulation)
-  └─ Template XSS (Jinja2, Django without autoescape)
-```
+- Precision: ≥ 0.70
+- Recall: ≥ 0.50
+- Unique CWE coverage: ≥ 12
+- Languages with fixtures: ≥ 7
 
-### Command Injection
+## Limitations
 
-```
-ML Model: Shell Command Analyzer
-├─ Identifies: System command execution calls (os.system, subprocess, exec)
-├─ Traces: User input reaching command strings
-├─ Detects: Unsanitized user input in shell commands
-└─ Confidence: 98%+ (very clear vulnerability pattern)
-
-Dangerous Patterns:
-  ├─ os.system(f"command {user_input}")
-  ├─ subprocess.run(f"cmd {user_input}", shell=True)
-  ├─ exec(f"code {user_input}")
-  └─ eval(user_input)
-```
-
-## Running Code Analysis
-
-### Standalone Code Analysis
-
-```bash
-# Scan all source files for vulnerabilities
-vulnera sast /path/to/project
-
-# Scan specific file
-vulnera sast app.py
-
-# Show only high/critical severity
-vulnera sast . --severity high
-```
-
-### As Part of Full Analysis
-
-```bash
-vulnera analyze /path/to/project
-# Includes SAST automatically
-```
-
-### Output
-
-```
-CODE ANALYSIS REPORT (SAST)
-════════════════════════════════════════════════════════
-
-🔴 CRITICAL (2)
-  ├─ SQL Injection (app.py:42)
-  │  Severity: Critical (CWE-89)
-  │  Confidence: 95%
-  │  Issue: User input directly interpolated into SQL query
-  │  Fix: Use parameterized queries
-  │
-  └─ Command Injection (utils.py:120)
-     Severity: Critical (CWE-78)
-     Confidence: 98%
-     Issue: os.system() with unsanitized user input
-     Fix: Use subprocess.run() with list args, shell=False
-
-🟡 MEDIUM (1)
-  └─ Missing Input Validation (forms.py:35)
-     Severity: Medium (CWE-20)
-     Confidence: 85%
-     Issue: No length/type validation on email field
-     Fix: Add validation: len(email) < 255 and '@' in email
-```
-
-## Configuration
-
-### Fine-Tune Detection Rules
-
-```toml
-# .vulnera.toml
-[analysis.sast]
-enabled = true
-languages = ["python", "javascript", "rust"]
-
-# Custom rules file
-rules_file = ".vulnera-sast-rules.toml"
-
-# Severity overrides
-[analysis.sast.severity_overrides]
-"SQL_INJECTION" = "critical"
-"XSS" = "high"
-"MISSING_INPUT_VALIDATION" = "medium"
-
-# Exclude patterns
-exclude_patterns = [
-  "test/*",
-  "vendor/*",
-  "node_modules/*"
-]
-```
-
-### Creating Custom Rules
-
-```toml
-# .vulnera-sast-rules.toml
-[[rules]]
-id = "CUSTOM-AUTH-001"
-name = "Missing API Key Validation"
-severity = "high"
-language = "python"
-pattern = """
-  (function_definition
-    name: (identifier) @name
-    (#match? @name "^login")
-    body: (block
-      (expression_statement
-        (function_call
-          function: (identifier) @func
-          (#match? @func "authenticate")))
-      ))
-"""
-message = "Authentication function doesn't validate API key format"
-
-[[rules]]
-id = "CUSTOM-CONFIG-001"
-name = "Hardcoded Configuration"
-severity = "medium"
-language = "javascript"
-pattern = "DATABASE_URL.*=.*password"
-message = "Database password appears to be hardcoded"
-```
-
-## Best Practices
-
-### 1. Use Parameterized Queries
-
-❌ **Vulnerable:**
-
-```python
-user_id = request.GET.get('id')
-query = f"SELECT * FROM users WHERE id={user_id}"
-```
-
-✅ **Secure:**
-
-```python
-user_id = request.GET.get('id')
-query = "SELECT * FROM users WHERE id=?"
-results = db.execute(query, [user_id])
-```
-
-### 2. Escape HTML Output
-
-❌ **Vulnerable:**
-
-```javascript
-document.innerHTML = `<p>${userInput}</p>`;
-```
-
-✅ **Secure:**
-
-```javascript
-const p = document.createElement('p');
-p.textContent = userInput;  // textContent = escape
-container.appendChild(p);
-```
-
-### 3. Avoid Shell Command Execution
-
-❌ **Vulnerable:**
-
-```python
-os.system(f"convert {filename} output.png")
-```
-
-✅ **Secure:**
-
-```python
-subprocess.run(["convert", filename, "output.png"], check=True)
-```
-
-### 4. Validate All Input
-
-❌ **Vulnerable:**
-
-```python
-email = request.POST.get('email')
-send_confirmation(email)
-```
-
-✅ **Secure:**
-
-```python
-email = request.POST.get('email')
-if validate_email(email):
-    send_confirmation(email)
-else:
-    raise ValueError("Invalid email format")
-```
-
-## Comparing AST vs Regex Detection
-
-| Aspect | AST Analysis | Regex Patterns |
-|--------|-------------|-----------------|
-| **Accuracy** | 95%+ (understands semantics) | 60-70% (pattern matching) |
-| **False Positives** | <10% | >20% |
-| **Speed** | Slower (parsing required) | Very fast |
-| **Language Awareness** | Full (understands syntax) | Limited (text-based) |
-| **Taint Tracking** | ✅ Yes | ❌ No |
-| **Data Flow Analysis** | ✅ Yes | ❌ No |
-
-**Vulnera uses AST analysis because it's more accurate and reduces false positives.**
-
-## Offline Analysis
-
-Code analysis works completely offline:
-
-```bash
-# No server needed
-vulnera sast /path/to/project --offline
-
-# ML models are embedded in the CLI
-# Rules are stored locally
-```
-
-**Performance:** 0.5-5 seconds for typical project
-
-## Troubleshooting
-
-**Q: Why isn't my SQL injection detected?**  
-A: ML model may not recognize the injection point. Add custom rule or check if it's actually parameterized.
-
-
-**Q: Scan is slow**  
-A: SAST requires parsing. Larger projects take longer. Run in background or narrow scope with `exclude_patterns`.
-
-**Q: Want to skip certain files**  
-A: Use `exclude_patterns` in config or `.vulnera.toml`.
+- Tree-sitter is syntax-level; no macro expansion or full type resolution.
+- Dynamic code generation and runtime behavior are out of scope.
+- JSX/TSX files are excluded.
 
 ## Next Steps
 
-- [Configure analysis rules](../user-guide/configuration.md)
-- [Get AI-powered explanations for findings](../user-guide/llm-features.md)
-- [View all analysis capabilities](overview.md)
+- [Analysis Overview](overview.md)
+- [Module Reference: SAST](../modules/sast.md)
+- [Configuration Reference](../reference/configuration.md)

@@ -172,7 +172,7 @@ use axum::{
     ),
     external_docs(
         description = "Find more information about Vulnera",
-        url = "https://github.com/k5602/Vulnera"
+        url = "https://github.com/Vulnera-rs/Vulnera"
     )
 )]
 pub struct ApiDoc;

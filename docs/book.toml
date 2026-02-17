@@ -16,8 +16,8 @@ create-missing = false
 default-theme = "navy"
 preferred-dark-theme = "navy"
 smart-punctuation = true
-git-repository-url = "https://github.com/k5602/Vulnera"
-edit-url-template = "https://github.com/k5602/Vulnera/edit/main/docs/{path}"
+git-repository-url = "https://github.com/Vulnera-rs/Vulnera"
+edit-url-template = "https://github.com/Vulnera-rs/Vulnera/edit/main/docs/{path}"
 site-url = "/Vulnera/"
 no-section-label = false
 

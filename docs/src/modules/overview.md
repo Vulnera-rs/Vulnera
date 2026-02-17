@@ -1,72 +1,98 @@
 # Analysis Modules Overview
 
-Vulnera provides four specialized security analysis modules that can work independently or together through the unified orchestrator.
+Vulnera provides four specialized security analysis modules that can run independently or together through the unified orchestrator. Module selection is automatic and tier-aware.
 
 ## Module Summary
 
-| Module                                        | Purpose                                     | Languages/Ecosystems                         |
-| --------------------------------------------- | ------------------------------------------- | -------------------------------------------- |
-| [Dependency Analysis](dependency-analysis.md) | Scan dependencies for known vulnerabilities | npm, PyPI, Maven, Cargo, Go, PHP, Ruby, .NET |
-| [SAST](sast.md)                               | Static code analysis for security issues    | Rust, Python, JS/TS, Go, C, C++              |
-| [Secrets Detection](secrets-detection.md)     | Find exposed credentials and API keys       | All text files                               |
-| [API Security](api-security.md)               | Analyze OpenAPI specifications              | OpenAPI 3.x                                  |
+| Module                                        | Purpose                                     | Coverage                                                     | Offline? |
+| --------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------ | -------- |
+| [Dependency Analysis](dependency-analysis.md) | Scan dependencies for known vulnerabilities | npm, PyPI, Cargo, Maven/Gradle, Go, Composer, Bundler, NuGet | ❌ No    |
+| [SAST](sast.md)                               | Static code analysis for security issues    | Python, JavaScript, TypeScript, Rust, Go, C, C++             | ✅ Yes   |
+| [Secrets Detection](secrets-detection.md)     | Find exposed credentials and API keys       | All text files                                               | ✅ Yes   |
+| [API Security](api-security.md)               | Analyze OpenAPI specifications              | OpenAPI 3.0 / 3.1                                            | ✅ Yes   |
 
-## Unified Orchestrator
+LLM enrichment is optional post-processing. It never participates in detection and requires network access.
 
-The orchestrator automatically selects and executes appropriate modules based on the source type and analysis depth.
+---
 
-### Analysis Depth Levels
+## Module Selection Logic (Orchestrator)
 
-| Level      | Description                                 | Use Case                    |
-| ---------- | ------------------------------------------- | --------------------------- |
-| `minimal`  | Fast analysis with essential checks only    | Quick CI checks             |
-| `standard` | Balanced analysis with comprehensive checks | Default for most projects   |
-| `full`     | Deep analysis including optional checks     | Security audits, compliance |
-
-### Example: Full Repository Analysis
-
-This automatically:
-
-1. Detects project type and dependency files
-2. Runs Dependency Analysis if dependency files are found
-3. Runs SAST for supported languages (Rust, Python, JS/TS, Go, C, C++)
-4. Runs Secrets Detection across all files
-5. Runs API Security if OpenAPI specs are detected
-6. Aggregates all findings into a unified report
-
-## Data Sources
-
-Vulnera aggregates vulnerability data from multiple authoritative sources:
-
-| Source   | Type                            | Coverage                              |
-| -------- | ------------------------------- | ------------------------------------- |
-| **OSV**  | Open Source Vulnerabilities     | Multi-ecosystem, maintained by Google |
-| **NVD**  | National Vulnerability Database | Comprehensive CVE database            |
-| **GHSA** | GitHub Security Advisories      | GitHub-curated advisories             |
-
-## Module Selection Logic
-
-The orchestrator uses rule-based module selection:
+The orchestrator uses `RuleBasedModuleSelector` to activate modules based on project content and analysis depth:
 
 ```
-Project Analysis → Detect Files → Select Modules → Execute → Aggregate
-       │                │               │              │          │
-       │                │               │              │          └─ Unified Report
-       │                │               │              │
-       │                │               │              └─ Parallel Execution
-       │                │               │
-       │                │               └─ RuleBasedModuleSelector
-       │                │
-       │                └─ File Pattern Detection
-       │
-       └─ Source Type (git, directory, file)
+Project Source (directory / git / S3)
+        │
+        ▼
+File pattern detection
+        │
+        ├─ dependency manifests found?  → Dependency Analysis
+        ├─ supported source files found? → SAST
+        ├─ all files (Full only) → Secrets Detection
+        └─ OpenAPI spec found? → API Security
+        │
+        ▼
+Parallel execution (one sandbox per module)
+        │
+        ▼
+Aggregated findings report
 ```
 
-## Configuration
+---
 
-Each module can be configured independently. See the individual module pages for specific configuration options:
+## Analysis Depth (Orchestrator)
 
-- [Dependency Analysis Configuration](dependency-analysis.md#configuration)
-- [SAST Configuration](sast.md#configuration)
-- [Secrets Detection Configuration](secrets-detection.md#configuration)
-- [API Security Configuration](api-security.md#configuration)
+The orchestrator uses a coarse depth model to decide which modules run:
+
+| Depth               | Description                                      | Modules                     |
+| ------------------- | ------------------------------------------------ | --------------------------- |
+| `dependencies_only` | Dependencies only                                | deps                        |
+| `fast_scan`         | Fast scan (dependencies + minimal code analysis) | deps + sast                 |
+| `full`              | Full analysis (all applicable modules)           | deps + sast + secrets + api |
+
+> Module coverage still depends on project content. For example, SAST only runs if supported source files are present; API Security only runs if an OpenAPI spec is detected.
+
+---
+
+## Module Tiers (Community vs Enterprise)
+
+Module types are defined in `vulnera-core/src/domain/module/value_objects.rs` and tagged by tier.
+
+**Community (open-source):**
+
+- `DependencyAnalyzer`
+- `SAST`
+- `SecretDetection`
+- `ApiSecurity`
+
+**Enterprise (licensed, not enabled by default):**
+
+- `MaliciousPackageDetection`
+- `LicenseCompliance`
+- `SBOM`
+- `DAST`
+- `FuzzTesting`
+- `IaC`
+- `CSPM`
+
+The selector adds enterprise modules in `Full` analysis and filters them by entitlement. The entitlement check is present but not enforced end-to-end yet.
+
+---
+
+## Data Sources (Dependency Analysis)
+
+Dependency findings are aggregated from:
+
+- **OSV** — Open-source vulnerability database
+- **NVD** — National Vulnerability Database
+- **GHSA** — GitHub Security Advisories
+
+Results are cached (Moka L1 + Dragonfly L2) to reduce repeated network calls.
+
+---
+
+## Module Reference
+
+- [Dependency Analysis](dependency-analysis.md) — ecosystem coverage, lockfile strategy, version recommendations
+- [SAST](sast.md) — supported languages, rule packs, taint analysis, confidence scoring
+- [Secrets Detection](secrets-detection.md) — detection methods, secret types, baselines
+- [API Security](api-security.md) — analysis categories, OAuth/OIDC checks, strict mode

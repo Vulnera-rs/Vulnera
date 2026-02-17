@@ -1,232 +1,124 @@
 # Analysis Capabilities Overview
 
-Vulnera provides four specialized analysis modules powered by AI-assisted detection. Understand what each module does, how it works, and what to expect.
+Vulnera provides four specialized analysis modules powered by purpose-built detection techniques. Each module is independently selectable and produces findings in a unified schema.
 
 ## The Four Analysis Modules
 
-Vulnera combines complementary security analysis approaches:
+| Module                                        | Purpose                                 | Method                                            | Offline? | Coverage                                                     |
+| --------------------------------------------- | --------------------------------------- | ------------------------------------------------- | -------- | ------------------------------------------------------------ |
+| [Dependency Analysis](dependency-analysis.md) | Find known CVEs in third-party packages | Registry lookup (OSV · NVD · GHSA)                | ❌ No    | npm, PyPI, Cargo, Maven/Gradle, Go, Composer, Bundler, NuGet |
+| [SAST](sast.md)                               | Find security flaws in source code      | Tree-sitter AST + inter-procedural taint analysis | ✅ Yes   | Python, JavaScript, TypeScript, Rust, Go, C, C++             |
+| [Secrets Detection](secrets-detection.md)     | Find exposed credentials and tokens     | Regex + entropy detection                         | ✅ Yes   | All text files                                               |
+| [API Security](api-security.md)               | Find misconfigurations in API specs     | Rule-based spec analysis                          | ✅ Yes   | OpenAPI 3.0 / 3.1                                            |
 
-| Module | Purpose | AI Method | Offline? | Coverage |
-|--------|---------|-----------|----------|----------|
-| [AI-Assisted Secret Detection](secrets-detection.md) | Find exposed credentials | ML Pattern Recognition + Entropy | ✅ Yes | All text files |
-| [AI-Assisted Code Analysis](sast.md) | Find security code flaws | AST Pattern Matching | ✅ Yes | Python, JavaScript, Rust |
-| [AI-Assisted API Security Analysis](api-security.md) | Find API misconfigurations | Rule-based Analysis | ✅ Yes | OpenAPI 3.x specs |
-| [Dependency Vulnerability Scanning](dependency-analysis.md) | Find known CVEs in dependencies | Registry Lookup (OSV/NVD/GHSA) | ❌ No | 8+ ecosystems |
+LLM enrichment (Google Gemini, OpenAI, Azure OpenAI) is a separate post-processing pass that explains and proposes fixes for findings produced by the modules above. It is never part of detection and requires network access.
 
-## How Analysis Modules Are Selected
+---
 
-Vulnera uses **intelligent module selection**—it detects your project structure and runs appropriate modules:
+## How Module Selection Works
 
-```bash
-# Analyzing a Node.js project
-vulnera analyze /path/to/nodejs-app
-
-# Automatically detects:
-# ✅ Found package.json → Runs dependency analysis
-# ✅ Found .js files → Runs AI-assisted code analysis
-# ✅ Scanning all files → Runs secret detection
-# ✅ No OpenAPI spec → Skips API analysis
-```
-
-**Result:** You get findings from 3 modules without specifying anything.
-
-### Analysis Depths
-
-Control how thorough the analysis is:
-
-```bash
-vulnera analyze /path/to/project --depth minimal   # Quick scan, common issues only
-vulnera analyze /path/to/project --depth standard  # Balanced (default)
-vulnera analyze /path/to/project --depth full      # Comprehensive, all checks enabled
-```
-
-## AI-Assisted Detection: What Does That Mean?
-
-Unlike generic term "AI analysis," Vulnera's modules use **specific, documented AI/ML techniques**:
-
-### 1. ML-Based Pattern Recognition (Secrets)
-
-**Method:** Machine Learning pattern models for detecting credentials
+The orchestrator uses `RuleBasedModuleSelector` to automatically activate modules based on file patterns and analysis depth. You do not need to specify modules manually — the right ones run based on what is in the project.
 
 ```
-Input: "aws_access_key_id=AKIAIOSFODNN7EXAMPLE"
-    ↓
-ML Pattern Matcher (trained on known secret formats)
-    ↓
-Output: "AWS Access Key detected with 98% confidence"
+Incoming source (directory / git / S3)
+        │
+        ▼
+  File pattern detection
+        │
+        ├─ dependency manifests found?  → Dependency Analysis
+        ├─ .py / .js / .ts / .rs / .go / .c / .cpp files?  → SAST
+        ├─ all files  → Secrets Detection (always runs in Full)
+        └─ openapi.yaml / openapi.json / swagger.yaml found?  → API Security
+        │
+        ▼
+  Parallel execution (one sandbox per module)
+        │
+        ▼
+  Aggregated findings report
 ```
 
-**Why it's ML:** Patterns are learned from real-world secret formats, not hand-coded regex alone.
+---
 
-### 2. AST-Based Pattern Matching (SAST)
+## Analysis Depth (Orchestrator)
 
-**Method:** Abstract Syntax Tree analysis with pattern matching rules
+The **orchestrator** uses a coarse analysis depth to decide which modules to run:
 
-```
-Input: 
-    sql_query = "SELECT * FROM users WHERE id = " + user_input
-    ↓
-AST Parser (converts code to structured tree)
-    ↓
-ML Pattern Matcher (finds taint flow: input → query)
-    ↓
-Output: "SQL Injection vulnerability (taint detected)"
-```
+| Depth               | Description                                      | Modules                     |
+| ------------------- | ------------------------------------------------ | --------------------------- |
+| `dependencies_only` | Dependencies only                                | deps                        |
+| `fast_scan`         | Fast scan (dependencies + minimal code analysis) | deps + sast                 |
+| `full`              | Full analysis (all applicable modules)           | deps + sast + secrets + api |
 
-**Why it's ML:** Uses data flow analysis and call graphs, not simple regex.
+> Note: Module coverage still depends on project content. For example, SAST only runs if supported source files are present, and API Security only runs if an OpenAPI spec is detected.
 
-### 3. Entropy-Based Detection
+---
 
-**Method:** Mathematical entropy analysis + ML pattern recognition
+## Analysis Depth (SAST)
 
-```
-Input: High-entropy strings in code/config
-    ↓
-Entropy Calculator (Shannon entropy, Base64 detection)
-    ↓
-ML Baseline Filter (removes false positives)
-    ↓
-Output: "Potential high-entropy secret found"
-```
+The **SAST module** has its own depth semantics (separate from orchestrator depth):
 
-**Why it's ML:** Entropy thresholds are trained on real secrets vs noise.
+| Depth      | Description                                                          |
+| ---------- | -------------------------------------------------------------------- |
+| `quick`    | Fast pattern matching only (no data-flow analysis)                   |
+| `standard` | Balanced analysis (patterns + intra-procedural data flow)            |
+| `deep`     | Full analysis (patterns + data flow + call graph + inter-procedural) |
 
-### 4. Rule-Based API Analysis
+Dynamic depth adjustment is enabled by default. Large repositories are auto-downgraded to keep scans within time budgets. Disable via `VULNERA__SAST__DYNAMIC_DEPTH_ENABLED=false`.
 
-**Method:** Specification analysis against security rules
+---
 
-```
-Input: OpenAPI 3.x specification
-    ↓
-Specification Parser
-    ↓
-Security Rule Engine (checks auth, CORS, input validation)
-    ↓
-Output: "API endpoint missing authentication"
-```
+## Offline vs. Online Capabilities
 
-**Not ML, but systematic:** Uses curated security best practices.
+### Fully offline (no network required)
 
-## Module Details at a Glance
+- SAST — rule packs embedded at compile time
+- Secrets Detection — regex + entropy detection locally
+- API Security — OpenAPI rules locally
 
-### Module 1: AI-Assisted Secret Detection (ML-Powered)
+### Requires network
 
-**What it finds:**
+- **Dependency Analysis** — CVE lookup against OSV, NVD, GHSA, and registries
+- **LLM enrichment** — explanations and fixes via external providers
 
-- AWS Access Keys, Azure credentials, GCP keys
-- API tokens, Bearer tokens, private keys
-- Database connection strings, SSH keys
-- High-entropy strings (base64, hex)
+---
 
-**Technology:** ML pattern recognition + entropy analysis  
-**Accuracy:** 95%+ (ML-trained patterns)  
-**False positive rate:** <5% (ML baseline filtering)  
-**Speed:** <100ms per file
+## Unified Finding Schema
 
-### Module 2: AI-Assisted Code Analysis (ML-Powered)
+Every module emits findings in the same structure:
 
-**What it finds:**
-
-- SQL Injection, XSS, command injection
-- Hardcoded credentials
-- Unsafe cryptography, weak randomness
-- Missing input validation
-
-**Technology:** AST pattern matching + data flow analysis  
-**Languages:** Python, JavaScript, Rust  
-**Accuracy:** 90%+ (AST-based, lower false positives than regex)  
-**Speed:** ~500ms per file (AST parsing)
-
-### Module 3: AI-Assisted API Security Analysis
-
-**What it finds:**
-
-- Missing authentication/authorization
-- Insecure authentication flows (basic auth over HTTP)
-- CORS misconfigurations
-- Missing security headers
-- Unvalidated input parameters
-- Sensitive data exposure
-
-**Technology:** OpenAPI 3.x specification analysis  
-**Coverage:** Any OpenAPI 3.0+ spec  
-**Accuracy:** Systematic (100% coverage of rules)  
-**Speed:** ~50ms per spec
-
-### Module 4: Dependency Vulnerability Scanning
-
-**What it finds:**
-
-- Known CVEs in dependencies
-- Outdated package versions
-- Transitive dependency risks
-
-**Technology:** Registry lookup (OSV, NVD, GHSA)  
-**Coverage:** 8+ ecosystems (npm, PyPI, Maven, Cargo, Go, Ruby, .NET, Packagist)  
-**Accuracy:** 100% (matches against authoritative CVE databases)  
-**Speed:** 1-10 seconds (depends on number of dependencies)
-
-## Offline vs Online Modules
-
-### Offline Analysis (All Local)
-
-```bash
-vulnera analyze /path/to/project --offline
-```
-
-**Works without server:**
-
-- ✅ AI-Assisted Secret Detection (ML models included)
-- ✅ AI-Assisted Code Analysis (AST rules included)
-- ✅ AI-Assisted API Analysis (rules included)
-
-**Doesn't work offline:**
-
-- ❌ Dependency scanning (requires CVE database lookups)
-
-**Performance:** ~1-5 seconds total (depends on project size)
-
-### Online Analysis (Full Power)
-
-```bash
-vulnera analyze /path/to/project --all-modules
-```
-
-**Requires network:**
-
-- ✅ All four modules run
-- ✅ Dependency scanning uses latest CVE data
-- ✅ ML models are current (pattern updates)
-
-**Performance:** 5-30 seconds (includes network latency)
-
-## Output Format
-
-All modules produce unified findings with:
-
-```json
+```/dev/null/finding.json#L1-28
 {
-  "findings": [
-    {
-      "id": "SAST-SQL-001",
-      "type": "SQL Injection",
-      "severity": "high",
-      "file": "app.py",
-      "line": 42,
-      "message": "User input concatenated into SQL query",
-      "ml_model": "AST Pattern Matcher v2.1",
-      "confidence": 0.95,
-      "remediation": "Use parameterized queries",
-      "llm_explanation": "This is vulnerable because... [LLM-powered]"
-    }
-  ]
+  "id": "SAST-PY-SQL-001",
+  "type": "vulnerability",
+  "rule_id": "python-sql-injection",
+  "location": {
+    "path": "src/db.py",
+    "line": 42,
+    "column": 5,
+    "end_line": 42,
+    "end_column": 48
+  },
+  "severity": "high",
+  "confidence": "high",
+  "description": "User input concatenated directly into SQL query.",
+  "recommendation": "Use parameterized queries or a query builder.",
+  "secret_metadata": null,
+  "vulnerability_metadata": {
+    "snippet": "query = f\"SELECT * FROM users WHERE id={user_id}\"",
+    "bindings": null,
+    "semantic_path": null
+  },
+  "enrichment": null
 }
 ```
 
-## Next Steps
+The `enrichment` field is populated only when LLM enrichment is requested after analysis; `secret_metadata` is only present for secret findings.
 
-- [Learn about AI-Assisted Secret Detection](secrets-detection.md)
-- [Learn about AI-Assisted Code Analysis](sast.md)
-- [Learn about AI-Assisted API Security Analysis](api-security.md)
-- [Learn about Dependency Scanning](dependency-analysis.md)
-- [Get LLM-powered explanations for findings](../user-guide/llm-features.md)
+---
+
+## Module-Specific Documentation
+
+- [Dependency Analysis](dependency-analysis.md) — ecosystem coverage, lockfile strategy, version recommendations
+- [SAST](sast.md) — supported languages, rule packs, taint analysis, confidence scoring
+- [Secrets Detection](secrets-detection.md) — detection methods, secret types, baselines
+- [API Security](api-security.md) — analysis categories, detected issue types, strict mode
