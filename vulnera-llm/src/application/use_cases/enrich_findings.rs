@@ -2,6 +2,7 @@
 
 use crate::domain::{CompletionRequest, LlmProvider};
 use crate::infrastructure::prompts::PromptBuilder;
+use crate::infrastructure::response_parser::ResponseParser;
 use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
@@ -173,60 +174,36 @@ impl EnrichFindingsUseCase {
 
     /// Parse LLM response into FindingEnrichment
     fn parse_enrichment_response(content: &str) -> Result<FindingEnrichment> {
-        // Try to parse as JSON first
-        if let Ok(parsed) = serde_json::from_str::<EnrichmentJsonResponse>(content) {
-            return Ok(FindingEnrichment {
+        match ResponseParser::parse_json::<EnrichmentJsonResponse>(content) {
+            Ok(parsed) => Ok(FindingEnrichment {
                 explanation: Some(parsed.explanation),
                 remediation_suggestion: Some(parsed.remediation),
                 risk_summary: Some(parsed.risk_summary),
                 enrichment_successful: true,
                 error: None,
                 enriched_at: Some(chrono::Utc::now()),
-            });
+            }),
+            Err(parse_error) => {
+                if !content.trim().is_empty() {
+                    Ok(FindingEnrichment {
+                        explanation: Some(content.to_string()),
+                        remediation_suggestion: None,
+                        risk_summary: None,
+                        enrichment_successful: true,
+                        error: Some(parse_error.to_string()),
+                        enriched_at: Some(chrono::Utc::now()),
+                    })
+                } else {
+                    error!("Empty response from LLM");
+                    Ok(FindingEnrichment {
+                        enrichment_successful: false,
+                        error: Some("Empty response from LLM".to_string()),
+                        enriched_at: Some(chrono::Utc::now()),
+                        ..Default::default()
+                    })
+                }
+            }
         }
-
-        // Try to extract JSON from markdown code block
-        if let Some(json_content) = Self::extract_json_from_markdown(content)
-            && let Ok(parsed) = serde_json::from_str::<EnrichmentJsonResponse>(&json_content)
-        {
-            return Ok(FindingEnrichment {
-                explanation: Some(parsed.explanation),
-                remediation_suggestion: Some(parsed.remediation),
-                risk_summary: Some(parsed.risk_summary),
-                enrichment_successful: true,
-                error: None,
-                enriched_at: Some(chrono::Utc::now()),
-            });
-        }
-
-        // Fallback: treat entire response as explanation
-        if !content.trim().is_empty() {
-            Ok(FindingEnrichment {
-                explanation: Some(content.to_string()),
-                remediation_suggestion: None,
-                risk_summary: None,
-                enrichment_successful: true,
-                error: None,
-                enriched_at: Some(chrono::Utc::now()),
-            })
-        } else {
-            error!("Empty response from LLM");
-            Ok(FindingEnrichment {
-                enrichment_successful: false,
-                error: Some("Empty response from LLM".to_string()),
-                enriched_at: Some(chrono::Utc::now()),
-                ..Default::default()
-            })
-        }
-    }
-
-    /// Extract JSON from markdown code block
-    fn extract_json_from_markdown(content: &str) -> Option<String> {
-        let json_start = content.find("```json").or_else(|| content.find("```"))?;
-        let content_after_start = &content[json_start..];
-        let actual_start = content_after_start.find('\n')? + 1;
-        let json_end = content_after_start[actual_start..].find("```")?;
-        Some(content_after_start[actual_start..actual_start + json_end].to_string())
     }
 
     /// Get priority value for severity (higher = more critical)

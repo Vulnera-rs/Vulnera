@@ -25,8 +25,9 @@ pub struct GoogleAIProvider {
 impl GoogleAIProvider {
     /// Create a new Google AI provider
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let timeout_seconds = 120;
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(timeout_seconds))
             .build()
             .unwrap_or_else(|e| {
                 error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
@@ -44,6 +45,18 @@ impl GoogleAIProvider {
     /// Create with custom base URL (for testing or proxies)
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Configure request timeout (in seconds)
+    pub fn with_timeout(mut self, timeout_seconds: u64) -> Self {
+        self.client = Client::builder()
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap_or_else(|e| {
+                error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
+                Client::new()
+            });
         self
     }
 

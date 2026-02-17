@@ -18,30 +18,9 @@ _Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets 
 
 ---
 
-## 🌐 Web Dashboard & Team Collaboration
-
-**[Vulnera Studio](https://vulnera.studio)** — Central web platform for team collaboration, security insights, and reporting:
-
-| Feature                     | Description                                                                        |
-| --------------------------- | ---------------------------------------------------------------------------------- |
-| **Organization Management** | Create teams, manage members with role-based access (Owner, Admin, Member, Viewer) |
-| **Shared Quota Pools**      | Team members share token allocations; no per-user limits                           |
-| **API Key Management**      | Generate and rotate keys for CLI and CI/CD integration                             |
-| **Integrations**            | Connect GitHub, GitLab, Slack, webhooks for automated workflows                    |
-| **Team Analytics**          | Track usage by member, module, and project; export reports                         |
-| **Compliance Reports**      | Generate SOC2, ISO27001, GDPR, HIPAA-aligned reports                               |
-| **Audit Logs**              | Full history of member actions, configuration changes, and scans                   |
-| **Webhooks**                | Real-time notifications for scan events and findings                               |
-
-**Get started:** Visit [vulnera.studio](https://vulnera.studio) → Sign up → Create organization → Invite team.
-
----
-
 ## Architecture
 
 </text>
-
-<old_text line=73>
 | [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan |
 | [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html) | Command-line usage |
 | [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html) | Environment variables and TOML config |
@@ -118,7 +97,6 @@ cargo run
 ```
 
 **Verify:** `curl http://localhost:3000/health` • **API Docs:** <http://localhost:3000/docs>
-
 
 ---
 

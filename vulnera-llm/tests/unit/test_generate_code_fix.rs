@@ -3,12 +3,13 @@
 use rstest::rstest;
 use std::sync::Arc;
 use vulnera_llm::application::use_cases::GenerateCodeFixUseCase;
+use vulnera_llm::domain::LlmError;
 
 mod common {
     include!("../common/mod.rs");
 }
 
-use common::{create_test_config, MockLlmProvider};
+use common::{MockLlmProvider, create_test_config};
 
 /// Test successful code fix generation with valid JSON response
 #[tokio::test]
@@ -76,7 +77,9 @@ This ensures safe HTML handling."#;
 /// Test error handling when provider returns an error
 #[tokio::test]
 async fn test_generate_code_fix_provider_error() {
-    let provider = Arc::new(MockLlmProvider::new().with_error("API rate limit exceeded"));
+    let provider = Arc::new(
+        MockLlmProvider::new().with_error(LlmError::rate_limited("API rate limit exceeded")),
+    );
     let config = create_test_config();
     let use_case = GenerateCodeFixUseCase::new(provider, config);
 
