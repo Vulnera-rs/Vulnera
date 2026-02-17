@@ -15,6 +15,8 @@ use common::accuracy::AccuracyReport;
 use common::fixture_runner;
 use common::fixture_types::CveFixture;
 use std::path::PathBuf;
+use vulnera_core::config::{AnalysisDepth, SastConfig};
+use vulnera_sast::{AnalysisConfig, ScanProjectUseCase};
 
 /// Discover all YAML fixture files under `tests/data/cve-fixtures/`.
 fn discover_fixtures() -> Vec<PathBuf> {
@@ -36,6 +38,25 @@ fn discover_fixtures() -> Vec<PathBuf> {
         .collect()
 }
 
+fn read_linux_status_value_kb(field_name: &str) -> Option<u64> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    status.lines().find_map(|line| {
+        if !line.starts_with(field_name) {
+            return None;
+        }
+
+        let value_kb = line
+            .split_whitespace()
+            .nth(1)
+            .and_then(|v| v.parse::<u64>().ok());
+        value_kb
+    })
+}
+
 #[tokio::test]
 async fn accuracy_report_all_fixtures() {
     let fixture_paths = discover_fixtures();
@@ -44,8 +65,10 @@ async fn accuracy_report_all_fixtures() {
         return;
     }
 
+    let quality_gates = SastConfig::default().quality_gates;
     let mut report = AccuracyReport::new();
     let mut fixture_failures: Vec<String> = Vec::new();
+    let mut covered_cwes: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for path in &fixture_paths {
         let fixture = match CveFixture::from_file(path) {
@@ -55,6 +78,10 @@ async fn accuracy_report_all_fixtures() {
                 continue;
             }
         };
+
+        for cwe in &fixture.cwe {
+            covered_cwes.insert(cwe.trim().to_string());
+        }
 
         let result = fixture_runner::run_fixture(&fixture).await;
         let metrics = report.metrics_for(&fixture.language);
@@ -90,13 +117,12 @@ async fn accuracy_report_all_fixtures() {
         "\nAggregate: Precision={precision:.3} Recall={recall:.3} F1={f1:.3} (TP={} TN={} FP={} FN={})",
         agg.true_positives, agg.true_negatives, agg.false_positives, agg.false_negatives
     );
+    eprintln!("CWE coverage: {} unique IDs", covered_cwes.len());
 
-    // CI Gate thresholds — lenient during bootstrap, tighten over time:
-    //   Phase 4 initial: P ≥ 0.70, R ≥ 0.50
-    //   Phase 5 target:  P ≥ 0.85, R ≥ 0.70
-    //   Phase 6 target:  P ≥ 0.90, R ≥ 0.80
-    let min_precision = 0.70;
-    let min_recall = 0.50;
+    // CI Gate thresholds are centralized in SastConfig::quality_gates and can be
+    // tightened over time without changing test logic.
+    let min_precision = quality_gates.min_precision;
+    let min_recall = quality_gates.min_recall;
 
     assert!(
         precision >= min_precision,
@@ -106,6 +132,37 @@ async fn accuracy_report_all_fixtures() {
         recall >= min_recall,
         "CI GATE: Aggregate recall {recall:.3} < {min_recall} threshold"
     );
+    assert!(
+        covered_cwes.len() >= quality_gates.min_cwe_coverage,
+        "CI GATE: CWE coverage {} < {} threshold",
+        covered_cwes.len(),
+        quality_gates.min_cwe_coverage
+    );
+
+    if quality_gates.enforce_per_language_gates {
+        assert!(
+            report.per_language.len() >= quality_gates.min_languages_with_fixtures,
+            "CI GATE: fixture language coverage {} < {} threshold",
+            report.per_language.len(),
+            quality_gates.min_languages_with_fixtures
+        );
+
+        for (lang, metrics) in &report.per_language {
+            let lang_precision = metrics.precision().unwrap_or(0.0);
+            let lang_recall = metrics.recall().unwrap_or(0.0);
+
+            assert!(
+                lang_precision >= quality_gates.per_language_min_precision,
+                "CI GATE: language '{lang}' precision {lang_precision:.3} < {:.3}",
+                quality_gates.per_language_min_precision
+            );
+            assert!(
+                lang_recall >= quality_gates.per_language_min_recall,
+                "CI GATE: language '{lang}' recall {lang_recall:.3} < {:.3}",
+                quality_gates.per_language_min_recall
+            );
+        }
+    }
 
     // Soft check: warn (but don't fail) if any single language is below threshold
     for (lang, metrics) in &report.per_language {
@@ -122,6 +179,7 @@ async fn accuracy_report_all_fixtures() {
 #[tokio::test]
 async fn accuracy_report_has_minimum_fixture_coverage() {
     let fixture_paths = discover_fixtures();
+    let quality_gates = SastConfig::default().quality_gates;
 
     // We expect at least fixtures for the primary languages
     assert!(
@@ -142,8 +200,9 @@ async fn accuracy_report_has_minimum_fixture_coverage() {
         .collect();
 
     assert!(
-        languages.len() >= 3,
-        "Expected fixtures covering at least 3 languages, found {}: {:?}",
+        languages.len() >= quality_gates.min_languages_with_fixtures,
+        "Expected fixtures covering at least {} languages, found {}: {:?}",
+        quality_gates.min_languages_with_fixtures,
         languages.len(),
         languages
     );
@@ -176,4 +235,138 @@ fn accuracy_metrics_unit_test_aggregation() {
     assert!((agg.precision().unwrap() - 18.0 / 19.0).abs() < 0.001);
     // R = 18/(18+5) ≈ 0.783
     assert!((agg.recall().unwrap() - 18.0 / 23.0).abs() < 0.001);
+}
+
+#[tokio::test]
+async fn incremental_scan_latency_quality_gate() {
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let state_path = temp_dir.path().join("incremental-state.json");
+
+    // Create a moderately-sized synthetic repo to exercise incremental skipping.
+    for idx in 0..120usize {
+        let file_path = temp_dir.path().join(format!("module_{idx}.py"));
+        std::fs::write(
+            &file_path,
+            format!(
+                "def fn_{idx}(x):\n    y = x + 1\n    return y\n\nvalue_{idx} = fn_{idx}(41)\n"
+            ),
+        )
+        .expect("Failed to write synthetic source file");
+    }
+
+    let sast_config = SastConfig {
+        analysis_depth: AnalysisDepth::Quick,
+        enable_data_flow: false,
+        enable_call_graph: false,
+        enable_incremental: Some(true),
+        incremental_state_path: Some(state_path),
+        ..Default::default()
+    };
+    let quality_gates = sast_config.quality_gates.clone();
+
+    let first_use_case =
+        ScanProjectUseCase::with_config(&sast_config, AnalysisConfig::from(&sast_config));
+
+    let first = first_use_case
+        .execute(temp_dir.path())
+        .await
+        .expect("First scan should succeed");
+    // Create a fresh use-case so incremental state is reloaded from disk and becomes
+    // the previous-state baseline for the second run.
+    let second_use_case =
+        ScanProjectUseCase::with_config(&sast_config, AnalysisConfig::from(&sast_config));
+    let second = second_use_case
+        .execute(temp_dir.path())
+        .await
+        .expect("Second scan should succeed");
+
+    let ratio = if first.duration_ms == 0 {
+        0.0
+    } else {
+        second.duration_ms as f64 / first.duration_ms as f64
+    };
+
+    eprintln!(
+        "Incremental timing: first={}ms second={}ms ratio={:.3}",
+        first.duration_ms, second.duration_ms, ratio
+    );
+
+    assert!(
+        second.files_skipped >= first.files_scanned.saturating_sub(1),
+        "Expected second incremental scan to skip most files. first_scanned={}, second_skipped={}",
+        first.files_scanned,
+        second.files_skipped
+    );
+
+    assert!(
+        ratio <= quality_gates.max_incremental_duration_ratio,
+        "CI GATE: incremental scan ratio {:.3} exceeds threshold {:.3}",
+        ratio,
+        quality_gates.max_incremental_duration_ratio
+    );
+}
+
+#[tokio::test]
+async fn deep_scan_memory_budget_quality_gate() {
+    if !cfg!(target_os = "linux") {
+        eprintln!("⚠ deep_scan_memory_budget_quality_gate skipped: non-Linux target");
+        return;
+    }
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+
+    // Build a moderate synthetic project to exercise deep-scan memory behavior.
+    for idx in 0..180usize {
+        let file_path = temp_dir.path().join(format!("deep_{idx}.py"));
+        std::fs::write(
+            &file_path,
+            format!(
+                "import os\n\ndef source_{idx}():\n    return os.environ.get('USER_INPUT')\n\ndef sink_{idx}(v):\n    eval(v)\n\nx_{idx} = source_{idx}()\nsink_{idx}(x_{idx})\n"
+            ),
+        )
+        .expect("Failed to write deep scan fixture file");
+    }
+
+    let sast_config = SastConfig {
+        analysis_depth: AnalysisDepth::Deep,
+        enable_data_flow: true,
+        enable_call_graph: true,
+        ..Default::default()
+    };
+    let quality_gates = sast_config.quality_gates.clone();
+
+    let baseline_rss_kb = read_linux_status_value_kb("VmRSS:").unwrap_or(0);
+
+    let use_case =
+        ScanProjectUseCase::with_config(&sast_config, AnalysisConfig::from(&sast_config));
+    let result = use_case
+        .execute(temp_dir.path())
+        .await
+        .expect("Deep scan should succeed");
+
+    let final_rss_kb = read_linux_status_value_kb("VmRSS:").unwrap_or(0);
+    let peak_hwm_kb = read_linux_status_value_kb("VmHWM:").unwrap_or(final_rss_kb);
+
+    let baseline_rss_mb = baseline_rss_kb as f64 / 1024.0;
+    let final_rss_mb = final_rss_kb as f64 / 1024.0;
+    let peak_hwm_mb = peak_hwm_kb as f64 / 1024.0;
+    let delta_rss_mb = ((final_rss_kb.saturating_sub(baseline_rss_kb)) as f64) / 1024.0;
+
+    eprintln!(
+        "Deep memory gate: scanned={} findings={} baseline_rss={:.1}MB final_rss={:.1}MB delta={:.1}MB peak_hwm={:.1}MB budget={}MB",
+        result.files_scanned,
+        result.findings.len(),
+        baseline_rss_mb,
+        final_rss_mb,
+        delta_rss_mb,
+        peak_hwm_mb,
+        quality_gates.max_resident_memory_mb
+    );
+
+    assert!(
+        peak_hwm_mb <= quality_gates.max_resident_memory_mb as f64,
+        "CI GATE: peak resident memory {:.1}MB exceeds threshold {}MB",
+        peak_hwm_mb,
+        quality_gates.max_resident_memory_mb
+    );
 }

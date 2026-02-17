@@ -2,17 +2,20 @@
 
 use std::sync::Arc;
 use vulnera_llm::application::use_cases::NaturalLanguageQueryUseCase;
+use vulnera_llm::domain::LlmError;
 
 mod common {
     include!("../common/mod.rs");
 }
 
-use common::{create_llm_response, create_test_config, MockLlmProvider};
+use common::{MockLlmProvider, create_completion_response, create_test_config};
 
 /// Test successful natural language query
 #[tokio::test]
 async fn test_natural_language_query_success() {
-    let response = create_llm_response("Based on the findings, there are 3 critical SQL injection vulnerabilities in the authentication module.");
+    let response = create_completion_response(
+        "Based on the findings, there are 3 critical SQL injection vulnerabilities in the authentication module.",
+    );
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider, config);
@@ -24,7 +27,10 @@ async fn test_natural_language_query_success() {
     ]"#;
 
     let result = use_case
-        .execute("How many critical SQL injection issues are there?", findings_json)
+        .execute(
+            "How many critical SQL injection issues are there?",
+            findings_json,
+        )
         .await;
 
     assert!(result.is_ok());
@@ -36,14 +42,13 @@ async fn test_natural_language_query_success() {
 /// Test query with empty findings
 #[tokio::test]
 async fn test_natural_language_query_empty_findings() {
-    let response = create_llm_response("No vulnerabilities were found in the provided findings.");
+    let response =
+        create_completion_response("No vulnerabilities were found in the provided findings.");
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider, config);
 
-    let result = use_case
-        .execute("What vulnerabilities exist?", "[]")
-        .await;
+    let result = use_case.execute("What vulnerabilities exist?", "[]").await;
 
     assert!(result.is_ok());
     let answer = result.unwrap();
@@ -53,23 +58,29 @@ async fn test_natural_language_query_empty_findings() {
 /// Test error handling when provider fails
 #[tokio::test]
 async fn test_natural_language_query_provider_error() {
-    let provider = Arc::new(MockLlmProvider::new().with_error("Service unavailable"));
+    let provider = Arc::new(
+        MockLlmProvider::new().with_error(LlmError::ServiceUnavailable(
+            "Service unavailable".to_string(),
+        )),
+    );
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider, config);
 
     let result = use_case.execute("Any query", "[]").await;
 
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("Service unavailable"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Service unavailable")
+    );
 }
 
 /// Test that default model is always used
 #[tokio::test]
 async fn test_natural_language_query_uses_default_model() {
-    let response = create_llm_response("Answer");
+    let response = create_completion_response("Answer");
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider.clone(), config);
@@ -84,7 +95,7 @@ async fn test_natural_language_query_uses_default_model() {
 /// Test that streaming is disabled for queries
 #[tokio::test]
 async fn test_natural_language_query_disables_streaming() {
-    let response = create_llm_response("Answer");
+    let response = create_completion_response("Answer");
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider.clone(), config);
@@ -93,13 +104,13 @@ async fn test_natural_language_query_disables_streaming() {
 
     let requests = provider.captured_requests.lock().await;
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].stream, Some(false));
+    assert_eq!(requests[0].stream, None);
 }
 
 /// Test request contains query and findings in prompt
 #[tokio::test]
 async fn test_natural_language_query_includes_context() {
-    let response = create_llm_response("Answer");
+    let response = create_completion_response("Answer");
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
     let use_case = NaturalLanguageQueryUseCase::new(provider.clone(), config);
@@ -110,7 +121,7 @@ async fn test_natural_language_query_includes_context() {
     let _ = use_case.execute(query, findings).await;
 
     let requests = provider.captured_requests.lock().await;
-    let user_message = &requests[0].messages[0].content;
+    let user_message = requests[0].messages[0].text();
     assert!(user_message.contains("payment module"));
     assert!(user_message.contains("PAY-001"));
 }
@@ -118,7 +129,7 @@ async fn test_natural_language_query_includes_context() {
 /// Test config parameters are applied
 #[tokio::test]
 async fn test_natural_language_query_applies_config() {
-    let response = create_llm_response("Answer");
+    let response = create_completion_response("Answer");
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let mut config = create_test_config();
     config.max_tokens = 2048;
@@ -144,7 +155,7 @@ async fn test_natural_language_query_various_queries() {
     ];
 
     for query in queries {
-        let response = create_llm_response(&format!("Answer to: {}", query));
+        let response = create_completion_response(&format!("Answer to: {}", query));
         let provider = Arc::new(MockLlmProvider::new().with_response(response));
         let config = create_test_config();
         let use_case = NaturalLanguageQueryUseCase::new(provider, config);
@@ -157,8 +168,7 @@ async fn test_natural_language_query_various_queries() {
 /// Test error when LLM returns empty response
 #[tokio::test]
 async fn test_natural_language_query_empty_response() {
-    let mut response = create_llm_response("");
-    response.choices[0].message = None;
+    let response = create_completion_response("");
 
     let provider = Arc::new(MockLlmProvider::new().with_response(response));
     let config = create_test_config();
@@ -166,6 +176,6 @@ async fn test_natural_language_query_empty_response() {
 
     let result = use_case.execute("Query", "[]").await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("No content"));
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), "");
 }

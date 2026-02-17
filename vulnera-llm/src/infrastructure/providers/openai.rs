@@ -35,8 +35,9 @@ pub struct OpenAIProvider {
 impl OpenAIProvider {
     /// Create a new OpenAI provider
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let timeout_seconds = 120;
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(timeout_seconds))
             .build()
             .unwrap_or_else(|e| {
                 error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
@@ -61,8 +62,9 @@ impl OpenAIProvider {
         deployment: impl Into<String>,
         api_version: impl Into<String>,
     ) -> Self {
+        let timeout_seconds = 120;
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(timeout_seconds))
             .build()
             .unwrap_or_else(|e| {
                 error!(error = %e, "Failed to build Azure HTTP client with custom timeout, using default client");
@@ -85,6 +87,18 @@ impl OpenAIProvider {
     /// Set custom base URL
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Configure request timeout (in seconds)
+    pub fn with_timeout(mut self, timeout_seconds: u64) -> Self {
+        self.client = Client::builder()
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap_or_else(|e| {
+                error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
+                Client::new()
+            });
         self
     }
 
@@ -336,28 +350,28 @@ impl LlmProvider for OpenAIProvider {
                                 ));
                             }
 
-                            if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data) {
-                                if let Some(choice) = chunk.choices.into_iter().next() {
-                                    let text = choice.delta.content.clone();
-                                    let is_final = choice.finish_reason.is_some();
-                                    let stop_reason =
-                                        choice.finish_reason.as_deref().map(|r| match r {
-                                            "stop" => StopReason::EndTurn,
-                                            "length" => StopReason::MaxTokens,
-                                            _ => StopReason::Other,
-                                        });
+                            if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(data)
+                                && let Some(choice) = chunk.choices.into_iter().next()
+                            {
+                                let text = choice.delta.content.clone();
+                                let is_final = choice.finish_reason.is_some();
+                                let stop_reason =
+                                    choice.finish_reason.as_deref().map(|r| match r {
+                                        "stop" => StopReason::EndTurn,
+                                        "length" => StopReason::MaxTokens,
+                                        _ => StopReason::Other,
+                                    });
 
-                                    let chunk_result = StreamChunk {
-                                        index: idx,
-                                        delta: text.map(|t| ContentBlock::Text { text: t }),
-                                        is_final,
-                                        stop_reason,
-                                        usage: None,
-                                    };
+                                let chunk_result = StreamChunk {
+                                    index: idx,
+                                    delta: text.map(|t| ContentBlock::Text { text: t }),
+                                    is_final,
+                                    stop_reason,
+                                    usage: None,
+                                };
 
-                                    idx += 1;
-                                    return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
-                                }
+                                idx += 1;
+                                return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
                             }
                         }
                     }

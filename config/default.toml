@@ -184,6 +184,28 @@ dynamic_depth_enabled = true     # Auto-detect depth based on repo size (opt-out
 dynamic_depth_file_count_threshold = 500 # Downgrade depth above this file count
 dynamic_depth_total_bytes_threshold = 52428800 # Downgrade depth above 50 MB
 tree_cache_max_entries = 1024    # Max parsed trees cached per worker
+js_ts_frontend = "oxc_preferred" # tree_sitter | oxc_preferred
+min_finding_severity = "info"   # critical | high | medium | low | info
+min_finding_confidence = "low"  # high | medium | low
+require_data_flow_evidence_for_dataflow = false
+require_recommendation = false
+
+[sast.quality_gates]
+# Minimum aggregate precision/recall for fixture-based SAST accuracy tests
+min_precision = 0.70
+min_recall = 0.50
+# Minimum unique CWE identifiers represented by CVE fixtures
+min_cwe_coverage = 12
+# Maximum allowed second/first scan duration ratio for incremental mode
+max_incremental_duration_ratio = 1.20
+# Maximum resident memory (RSS, MB) during deep-scan quality-gate tests
+max_resident_memory_mb = 2048
+# Enforce precision/recall gates for each language represented in fixtures
+enforce_per_language_gates = true
+per_language_min_precision = 0.70
+per_language_min_recall = 0.50
+# Require broad multi-language coverage for benchmark validity
+min_languages_with_fixtures = 7
 
 
 # Cache TTL for popular package vulnerability listings (in hours)

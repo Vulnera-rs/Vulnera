@@ -72,10 +72,10 @@ impl SourceLocation {
             if line == self.line && column < self.column {
                 return false;
             }
-            if line == end_line {
-                if let Some(end_column) = self.end_column {
-                    return column <= end_column;
-                }
+            if line == end_line
+                && let Some(end_column) = self.end_column
+            {
+                return column <= end_column;
             }
         } else {
             // Single line location - must be on the same line

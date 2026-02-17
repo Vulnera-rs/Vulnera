@@ -478,10 +478,10 @@ impl InterProceduralContext {
             for label in &return_state.labels {
                 // Check if this label's source indicates a parameter
                 // Parameter sources are encoded as "param:N" in the source field
-                if let Some(param_str) = label.source.strip_prefix("param:") {
-                    if let Ok(param_idx) = param_str.parse::<usize>() {
-                        summary.params_to_return.insert(param_idx);
-                    }
+                if let Some(param_str) = label.source.strip_prefix("param:")
+                    && let Ok(param_idx) = param_str.parse::<usize>()
+                {
+                    summary.params_to_return.insert(param_idx);
                 }
             }
         }
@@ -517,23 +517,22 @@ impl InterProceduralContext {
 
                 // If param is tainted and return is tainted, check for flow
                 // by examining if any taint state has labels from this param
-                if summary.return_tainted {
-                    if let Some(analyzer) = self.function_contexts.get(function_id) {
-                        let param_source = format!("param:{}", param_idx);
+                if summary.return_tainted
+                    && let Some(analyzer) = self.function_contexts.get(function_id)
+                {
+                    let param_source = format!("param:{}", param_idx);
 
-                        for (_, taint_state) in
-                            analyzer.symbol_table().get_all_tainted_in_all_scopes()
-                        {
-                            // Check if this state has labels from the parameter
-                            let from_param =
-                                taint_state.labels.iter().any(|l| l.source == param_source);
+                    for (_, taint_state) in analyzer.symbol_table().get_all_tainted_in_all_scopes()
+                    {
+                        // Check if this state has labels from the parameter
+                        let from_param =
+                            taint_state.labels.iter().any(|l| l.source == param_source);
 
-                            // If any taint state from this param exists, and return is tainted,
-                            // mark parameter as flowing to return
-                            if from_param {
-                                summary.params_to_return.insert(param_idx);
-                                break;
-                            }
+                        // If any taint state from this param exists, and return is tainted,
+                        // mark parameter as flowing to return
+                        if from_param {
+                            summary.params_to_return.insert(param_idx);
+                            break;
                         }
                     }
                 }

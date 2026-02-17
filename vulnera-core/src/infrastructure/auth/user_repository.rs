@@ -195,12 +195,12 @@ impl IUserRepository for SqlxUserRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error creating user: {}", e);
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("users_email_key") {
-                    return AuthError::EmailAlreadyExists {
-                        email: email_str.to_string(),
-                    };
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("users_email_key")
+            {
+                return AuthError::EmailAlreadyExists {
+                    email: email_str.to_string(),
+                };
             }
             AuthError::InvalidEmail {
                 email: email_str.to_string(),
@@ -249,12 +249,12 @@ impl IUserRepository for SqlxUserRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error updating user: {}", e);
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("users_email_key") {
-                    return AuthError::EmailAlreadyExists {
-                        email: email_str.to_string(),
-                    };
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("users_email_key")
+            {
+                return AuthError::EmailAlreadyExists {
+                    email: email_str.to_string(),
+                };
             }
             AuthError::UserIdNotFound {
                 user_id: user.user_id.as_str(),

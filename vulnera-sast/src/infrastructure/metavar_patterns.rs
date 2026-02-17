@@ -216,34 +216,35 @@ fn detect_structure(tokens: &[MetavarToken]) -> PatternStructure {
     }
 
     // Check for function call: name(...) or $VAR(...)
-    if filtered.len() >= 3 {
-        if let (first, MetavarToken::OpenParen) = (&filtered[0], &filtered[1]) {
-            match first {
-                MetavarToken::Identifier(name) => {
-                    return PatternStructure::FunctionCall {
-                        name: name.clone(),
-                        is_metavar: false,
-                    };
-                }
-                MetavarToken::Metavar(name) => {
-                    return PatternStructure::FunctionCall {
-                        name: name.clone(),
-                        is_metavar: true,
-                    };
-                }
-                _ => {}
+    if filtered.len() >= 3
+        && let (first, MetavarToken::OpenParen) = (&filtered[0], &filtered[1])
+    {
+        match first {
+            MetavarToken::Identifier(name) => {
+                return PatternStructure::FunctionCall {
+                    name: name.clone(),
+                    is_metavar: false,
+                };
             }
+            MetavarToken::Metavar(name) => {
+                return PatternStructure::FunctionCall {
+                    name: name.clone(),
+                    is_metavar: true,
+                };
+            }
+            _ => {}
         }
     }
 
     // Check for binary expression: expr op expr
     for (i, token) in filtered.iter().enumerate() {
-        if let MetavarToken::Operator(op) = token {
-            if i > 0 && i < filtered.len() - 1 {
-                return PatternStructure::BinaryExpression {
-                    operator: op.clone(),
-                };
-            }
+        if let MetavarToken::Operator(op) = token
+            && i > 0
+            && i < filtered.len() - 1
+        {
+            return PatternStructure::BinaryExpression {
+                operator: op.clone(),
+            };
         }
     }
 
@@ -268,11 +269,11 @@ fn extract_metavar_indices(tokens: &[MetavarToken]) -> HashMap<String, usize> {
     let mut counter = 0;
 
     for token in tokens {
-        if let MetavarToken::Metavar(name) = token {
-            if !indices.contains_key(name) {
-                indices.insert(name.clone(), counter);
-                counter += 1;
-            }
+        if let MetavarToken::Metavar(name) = token
+            && !indices.contains_key(name)
+        {
+            indices.insert(name.clone(), counter);
+            counter += 1;
         }
     }
 

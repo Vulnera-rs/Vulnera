@@ -1,6 +1,7 @@
 //! AST Context extraction using tree-sitter to provide semantic metadata for secret detection.
 
 use crate::domain::value_objects::SemanticContext;
+use std::collections::HashMap;
 use std::path::Path;
 use tree_sitter::{Language, Node, Parser, Point};
 
@@ -21,63 +22,114 @@ impl AstContextExtractor {
         column: u32,
         file_path: &Path,
     ) -> SemanticContext {
-        let mut context = SemanticContext {
-            is_test_context: Self::is_test_file(file_path),
-            ..Default::default()
-        };
+        let contexts = Self::extract_contexts(source, &[(line, column)], file_path);
+        contexts
+            .get(&(line, column))
+            .cloned()
+            .unwrap_or_else(|| SemanticContext {
+                is_test_context: Self::is_test_file(file_path),
+                ..Default::default()
+            })
+    }
+
+    /// Extract semantic contexts for multiple locations in one parse pass.
+    pub fn extract_contexts(
+        source: &str,
+        positions: &[(u32, u32)],
+        file_path: &Path,
+    ) -> HashMap<(u32, u32), SemanticContext> {
+        let is_test_context = Self::is_test_file(file_path);
+        let mut contexts = HashMap::new();
+
+        if positions.is_empty() {
+            return contexts;
+        }
 
         // Determine language from extension
         let extension = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
         let language = match Self::get_language(extension) {
             Some(l) => l,
-            None => return context, // Fallback if language not supported
+            None => {
+                for (line, column) in positions {
+                    contexts.insert(
+                        (*line, *column),
+                        SemanticContext {
+                            is_test_context,
+                            ..Default::default()
+                        },
+                    );
+                }
+                return contexts;
+            }
         };
 
         // Initialize parser
+        let context = SemanticContext {
+            is_test_context,
+            ..Default::default()
+        };
         let mut parser = Parser::new();
         if parser.set_language(&language).is_err() {
-            return context;
+            for (line, column) in positions {
+                contexts.insert((*line, *column), context.clone());
+            }
+            return contexts;
         }
 
         // Parse source
         let tree = match parser.parse(source, None) {
             Some(t) => t,
-            None => return context,
+            None => {
+                for (line, column) in positions {
+                    contexts.insert((*line, *column), context.clone());
+                }
+                return contexts;
+            }
         };
 
-        // Convert 1-based coordinates to 0-based Point for tree-sitter
-        let row = line.saturating_sub(1) as usize;
-        let col = column.saturating_sub(1) as usize;
-        let start_point = Point::new(row, col);
-        let end_point = Point::new(row, col + 1);
-
-        // Find the most specific node at the position (including anonymous nodes like comments)
         let root = tree.root_node();
-        if let Some(node) = root.named_descendant_for_point_range(start_point, end_point) {
-            context.node_type = node.kind().to_string();
 
-            // Check if we're inside a comment by walking up the tree
-            let mut current = Some(node);
-            while let Some(n) = current {
-                let kind = n.kind();
-                if kind == "comment"
-                    || kind == "line_comment"
-                    || kind == "block_comment"
-                    || kind == "string_comment"
-                {
-                    context.node_type = kind.to_string();
-                    break;
+        for (line, column) in positions {
+            let mut current_context = SemanticContext {
+                is_test_context,
+                ..Default::default()
+            };
+
+            // Convert 1-based coordinates to 0-based Point for tree-sitter
+            let row = line.saturating_sub(1) as usize;
+            let col = column.saturating_sub(1) as usize;
+            let start_point = Point::new(row, col);
+            let end_point = Point::new(row, col + 1);
+
+            // Find the most specific node at the position (including anonymous nodes like comments)
+            if let Some(node) = root.named_descendant_for_point_range(start_point, end_point) {
+                current_context.node_type = node.kind().to_string();
+
+                // Check if we're inside a comment by walking up the tree
+                let mut current = Some(node);
+                while let Some(n) = current {
+                    let kind = n.kind();
+                    if kind == "comment"
+                        || kind == "line_comment"
+                        || kind == "block_comment"
+                        || kind == "string_comment"
+                    {
+                        current_context.node_type = kind.to_string();
+                        break;
+                    }
+                    current = n.parent();
                 }
-                current = n.parent();
+
+                let (lhs, rhs) = Self::find_assignment_context(node, source);
+                current_context.lhs_variable = lhs;
+                current_context.rhs_value = rhs;
             }
 
-            let (lhs, rhs) = Self::find_assignment_context(node, source);
-            context.lhs_variable = lhs;
-            context.rhs_value = rhs;
+            contexts.insert((*line, *column), current_context);
         }
 
-        context
+        contexts
     }
 
     /// Maps file extensions to tree-sitter languages.
@@ -178,18 +230,16 @@ impl AstContextExtractor {
                         | "short_var_declaration"
                 )
             {
-                if let Some(first) = parent.named_child(0) {
-                    if first.start_byte() < node.start_byte() {
-                        lhs_variable =
-                            Some(source[first.start_byte()..first.end_byte()].to_string());
-                    }
+                if let Some(first) = parent.named_child(0)
+                    && first.start_byte() < node.start_byte()
+                {
+                    lhs_variable = Some(source[first.start_byte()..first.end_byte()].to_string());
                 }
                 if let Some(last) =
                     parent.named_child(parent.named_child_count().saturating_sub(1) as u32)
+                    && last.start_byte() >= node.start_byte()
                 {
-                    if last.start_byte() >= node.start_byte() {
-                        rhs_value = Some(source[last.start_byte()..last.end_byte()].to_string());
-                    }
+                    rhs_value = Some(source[last.start_byte()..last.end_byte()].to_string());
                 }
                 if lhs_variable.is_some() || rhs_value.is_some() {
                     break;
@@ -209,5 +259,36 @@ impl AstContextExtractor {
         });
 
         (lhs_variable, rhs_value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AstContextExtractor;
+    use std::path::Path;
+
+    #[test]
+    fn batch_extraction_matches_single_extraction() {
+        let source = "const api_key = \"ghp_123456789012345678901234567890123456\";\n// comment";
+        let path = Path::new("src/main.js");
+
+        let single = AstContextExtractor::extract_context(source, 1, 7, path);
+        let batch = AstContextExtractor::extract_contexts(source, &[(1, 7)], path);
+        let batch_ctx = batch.get(&(1, 7)).cloned().unwrap_or_default();
+
+        assert_eq!(single.node_type, batch_ctx.node_type);
+        assert_eq!(single.lhs_variable, batch_ctx.lhs_variable);
+        assert_eq!(single.rhs_value, batch_ctx.rhs_value);
+        assert_eq!(single.is_test_context, batch_ctx.is_test_context);
+    }
+
+    #[test]
+    fn batch_extraction_marks_test_context() {
+        let source = "const token = \"dummy\";";
+        let path = Path::new("tests/sample.test.js");
+        let contexts = AstContextExtractor::extract_contexts(source, &[(1, 7)], path);
+        let context = contexts.get(&(1, 7)).cloned().unwrap_or_default();
+
+        assert!(context.is_test_context);
     }
 }

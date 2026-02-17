@@ -45,13 +45,13 @@ impl IOrganizationMemberRepository for SqlxOrganizationMemberRepository {
         .await
         .map_err(|e| {
             tracing::error!("Database error adding member: {}", e);
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.constraint() == Some("idx_organization_members_org_user") {
-                    return OrganizationError::AlreadyMember {
-                        user_id: user_id.to_string(),
-                        org_id: org_id.to_string(),
-                    };
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.constraint() == Some("idx_organization_members_org_user")
+            {
+                return OrganizationError::AlreadyMember {
+                    user_id: user_id.to_string(),
+                    org_id: org_id.to_string(),
+                };
             }
             OrganizationError::DatabaseError {
                 message: e.to_string(),

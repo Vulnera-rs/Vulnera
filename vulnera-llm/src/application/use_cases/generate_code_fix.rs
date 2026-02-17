@@ -2,6 +2,7 @@
 
 use crate::domain::{CodeFix, CompletionRequest, LlmError, LlmProvider};
 use crate::infrastructure::prompts::CODE_FIX_SYSTEM_PROMPT;
+use crate::infrastructure::response_parser::ResponseParser;
 use std::sync::Arc;
 use vulnera_core::config::LlmConfig;
 
@@ -43,22 +44,6 @@ impl GenerateCodeFixUseCase {
         let response = self.provider.complete(request).await?;
         let content = response.text();
 
-        // Parse JSON from content (handling potential markdown code blocks)
-        let json_str = if let Some(start) = content.find("```json") {
-            if let Some(_end) = content[start..].find("```") {
-                let start_brace = content.find('{').unwrap_or(0);
-                let end_brace = content.rfind('}').unwrap_or(content.len());
-                &content[start_brace..=end_brace]
-            } else {
-                &content
-            }
-        } else if let Some(start) = content.find('{') {
-            let end = content.rfind('}').unwrap_or(content.len());
-            &content[start..=end]
-        } else {
-            &content
-        };
-
         #[derive(serde::Deserialize)]
         struct LlmOutput {
             explanation: String,
@@ -66,7 +51,7 @@ impl GenerateCodeFixUseCase {
             diff: String,
         }
 
-        let output: LlmOutput = serde_json::from_str(json_str).map_err(|e| {
+        let output: LlmOutput = ResponseParser::parse_json(&content).map_err(|e| {
             LlmError::InvalidResponse(format!("Failed to parse code fix response: {}", e))
         })?;
 

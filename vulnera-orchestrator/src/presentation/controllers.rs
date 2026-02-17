@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::{extract::State, response::Json};
+use chrono::Utc;
 use vulnera_core::application::analytics::use_cases::{
     CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
 };
@@ -47,14 +48,16 @@ use crate::presentation::auth::extractors::{
 use crate::presentation::models::{
     AffectedPackageDto, AnalysisMetadataDto, AnalysisRequest, BatchAnalysisMetadata,
     BatchDependencyAnalysisRequest, BatchDependencyAnalysisResponse, DependencyGraphDto,
-    DependencyGraphEdgeDto, DependencyGraphNodeDto, FileAnalysisResult, JobAcceptedResponse,
-    PackageDto, SeverityBreakdownDto, VersionRecommendationDto, VulnerabilityDto,
+    DependencyGraphEdgeDto, DependencyGraphNodeDto, ErrorResponse, FileAnalysisResult,
+    JobAcceptedResponse, PackageDto, SeverityBreakdownDto, VersionRecommendationDto,
+    VulnerabilityDto,
 };
 use axum::extract::Query;
 use axum::http::StatusCode;
 use serde::Deserialize;
 use tokio::task::JoinSet;
 use tracing::{error, info};
+use uuid::Uuid;
 use vulnera_core::domain::vulnerability::{
     entities::{AnalysisReport, Package, Vulnerability},
     value_objects::Ecosystem,
@@ -560,6 +563,7 @@ async fn convert_analysis_report_to_response(
     };
 
     FileAnalysisResult {
+        file_id: None,
         filename,
         ecosystem: ecosystem.canonical_name().to_string(),
         vulnerabilities,
@@ -575,7 +579,7 @@ async fn convert_analysis_report_to_response(
 
 /// POST /api/v1/dependencies/analyze - Analyze dependency files (synchronous, batch support)
 ///
-/// This endpoint accepts optional API key authentication via the `X-API-Key` header or `Authorization: ApiKey <key>` header.
+/// This endpoint accepts optional API key authentication via the `X-API-Key` header.
 /// Authenticated requests have higher rate limits and batch size limits.
 /// Unauthenticated requests are limited to 10 analyzes per day and 10 files per batch.
 ///
@@ -608,19 +612,59 @@ pub async fn analyze_dependencies(
     Query(query): Query<DependencyAnalysisQuery>,
     OptionalApiKeyAuth(maybe_api_key): OptionalApiKeyAuth,
     Json(request): Json<BatchDependencyAnalysisRequest>,
-) -> Result<Json<BatchDependencyAnalysisResponse>, (StatusCode, String)> {
+) -> Result<Json<BatchDependencyAnalysisResponse>, (StatusCode, Json<ErrorResponse>)> {
+    fn dependency_error(
+        status: StatusCode,
+        code: &str,
+        message: impl Into<String>,
+        details: Option<serde_json::Value>,
+    ) -> (StatusCode, Json<ErrorResponse>) {
+        (
+            status,
+            Json(ErrorResponse {
+                code: code.to_string(),
+                message: message.into(),
+                details,
+                request_id: Uuid::new_v4(),
+                timestamp: Utc::now(),
+            }),
+        )
+    }
+
     let start_time = std::time::Instant::now();
+    let request_id = Uuid::new_v4().to_string();
     let is_authenticated = maybe_api_key.is_some();
+    let compact_mode = request.compact_mode;
+    let enable_cache = request.enable_cache;
+    let files = request.files;
 
     info!(
+        request_id = %request_id,
         authenticated = is_authenticated,
-        file_count = request.files.len(),
+        file_count = files.len(),
+        compact_mode,
+        enable_cache,
         "Starting batch dependency analysis"
     );
 
     // Parse detail level
-    let detail_level =
-        DetailLevel::from_str(&query.detail_level).map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    let detail_level = DetailLevel::from_str(&query.detail_level).map_err(|e| {
+        dependency_error(
+            StatusCode::BAD_REQUEST,
+            "INVALID_DETAIL_LEVEL",
+            e,
+            Some(serde_json::json!({
+                "detail_level": query.detail_level,
+                "allowed": ["minimal", "standard", "full"],
+            })),
+        )
+    })?;
+
+    let detail_level = if compact_mode {
+        DetailLevel::Minimal
+    } else {
+        detail_level
+    };
 
     // Validate batch size limits
     let max_files = if is_authenticated {
@@ -629,35 +673,51 @@ pub async fn analyze_dependencies(
         10 // Stricter for unauthenticated
     };
 
-    if request.files.len() > max_files {
-        return Err((
+    if files.len() > max_files {
+        return Err(dependency_error(
             StatusCode::BAD_REQUEST,
+            "BATCH_SIZE_EXCEEDED",
             format!(
-                "Batch size exceeds limit: {} files (max: {} for {}, {} for authenticated)",
-                request.files.len(),
-                max_files,
-                if is_authenticated {
-                    "authenticated"
-                } else {
-                    "unauthenticated"
-                },
-                state.config.analysis.max_concurrent_packages * 2
+                "Batch size exceeds limit: {} files (max: {})",
+                files.len(),
+                max_files
             ),
+            Some(serde_json::json!({
+                "provided_file_count": files.len(),
+                "max_file_count": max_files,
+                "authenticated": is_authenticated,
+            })),
         ));
     }
 
     // Process files in parallel
-    let mut join_set: JoinSet<Result<FileAnalysisResult, String>> = JoinSet::new();
+    let mut join_set: JoinSet<(usize, FileAnalysisResult)> = JoinSet::new();
     let use_case = state.dependencies.dependency_analysis_use_case.clone();
-    let total_files = request.files.len();
+    let total_files = files.len();
 
     let version_resolution_service = state.dependencies.version_resolution_service.clone();
 
-    for file_request in request.files {
+    for (file_index, file_request) in files.into_iter().enumerate() {
         let use_case_clone = use_case.clone();
         let detail_level_clone = detail_level;
         let version_resolution_service_clone = version_resolution_service.clone();
+        let file_id = file_request.file_id.clone();
+        let filename = file_request.filename.clone();
+        let ecosystem_name = file_request.ecosystem.clone();
         let workspace_path = file_request.workspace_path.clone();
+        let empty_metadata = AnalysisMetadataDto {
+            total_packages: 0,
+            vulnerable_packages: 0,
+            total_vulnerabilities: 0,
+            severity_breakdown: SeverityBreakdownDto {
+                critical: 0,
+                high: 0,
+                medium: 0,
+                low: 0,
+            },
+            analysis_duration_ms: 0,
+            sources_queried: vec![],
+        };
 
         join_set.spawn(async move {
             // Parse ecosystem
@@ -669,7 +729,22 @@ pub async fn analyze_dependencies(
                 "go" => Ecosystem::Go,
                 "packagist" | "composer" | "php" => Ecosystem::Packagist,
                 _ => {
-                    return Err(format!("Invalid ecosystem: {}", file_request.ecosystem));
+                    return (
+                        file_index,
+                        FileAnalysisResult {
+                            file_id,
+                            filename,
+                            ecosystem: ecosystem_name,
+                            vulnerabilities: vec![],
+                            packages: None,
+                            dependency_graph: None,
+                            version_recommendations: None,
+                            metadata: empty_metadata,
+                            error: Some(format!("Invalid ecosystem: {}", file_request.ecosystem)),
+                            cache_hit: if enable_cache { Some(false) } else { None },
+                            workspace_path,
+                        },
+                    );
                 }
             };
 
@@ -686,8 +761,6 @@ pub async fn analyze_dependencies(
                 .await
             {
                 Ok((report, dependency_graph)) => {
-                    let was_cached =
-                        report.metadata.analysis_duration < std::time::Duration::from_millis(50);
                     let mut result = convert_analysis_report_to_response(
                         &report,
                         filename_for_response,
@@ -697,20 +770,47 @@ pub async fn analyze_dependencies(
                         version_resolution_service_clone,
                     )
                     .await;
+
+                    if compact_mode {
+                        result.packages = None;
+                        result.dependency_graph = None;
+                        result.version_recommendations = None;
+                    }
+
+                    result.file_id = file_id;
                     result.workspace_path = workspace_path;
-                    result.cache_hit = Some(was_cached);
-                    Ok(result)
+                    result.cache_hit = if enable_cache {
+                        Some(result.cache_hit.unwrap_or(false))
+                    } else {
+                        None
+                    };
+
+                    (file_index, result)
                 }
                 Err(e) => {
                     error!("Analysis failed: {}", e);
-                    Err(format!("Analysis failed: {}", e))
+                    (
+                        file_index,
+                        FileAnalysisResult {
+                            file_id,
+                            filename,
+                            ecosystem: ecosystem_name,
+                            vulnerabilities: vec![],
+                            packages: None,
+                            dependency_graph: None,
+                            version_recommendations: None,
+                            metadata: empty_metadata,
+                            error: Some(format!("Analysis failed: {}", e)),
+                            cache_hit: if enable_cache { Some(false) } else { None },
+                            workspace_path,
+                        },
+                    )
                 }
             }
         });
     }
 
     // Collect results
-    let mut results = Vec::new();
     let mut successful = 0;
     let mut failed = 0;
     let mut total_vulnerabilities = 0;
@@ -718,9 +818,17 @@ pub async fn analyze_dependencies(
     let mut critical_count = 0;
     let mut high_count = 0;
 
+    let mut indexed_results = Vec::new();
+
     while let Some(result) = join_set.join_next().await {
         match result {
-            Ok(Ok(file_result)) => {
+            Ok((index, file_result)) => {
+                if file_result.error.is_some() {
+                    failed += 1;
+                    indexed_results.push((index, file_result));
+                    continue;
+                }
+
                 successful += 1;
                 total_vulnerabilities += file_result.vulnerabilities.len();
 
@@ -739,74 +847,56 @@ pub async fn analyze_dependencies(
                     // If packages not included, we can't count them
                     // This is fine for minimal detail level
                 }
-                results.push(file_result);
-            }
-            Ok(Err(error_msg)) => {
-                failed += 1;
-                results.push(FileAnalysisResult {
-                    filename: None,
-                    ecosystem: "unknown".to_string(),
-                    vulnerabilities: vec![],
-                    packages: None,
-                    dependency_graph: None,
-                    version_recommendations: None,
-                    metadata: AnalysisMetadataDto {
-                        total_packages: 0,
-                        vulnerable_packages: 0,
-                        total_vulnerabilities: 0,
-                        severity_breakdown: SeverityBreakdownDto {
-                            critical: 0,
-                            high: 0,
-                            medium: 0,
-                            low: 0,
-                        },
-                        analysis_duration_ms: 0,
-                        sources_queried: vec![],
-                    },
-                    error: Some(error_msg),
-                    cache_hit: None,
-                    workspace_path: None,
-                });
+                indexed_results.push((index, file_result));
             }
             Err(e) => {
                 failed += 1;
                 error!("Join error: {}", e);
-                results.push(FileAnalysisResult {
-                    filename: None,
-                    ecosystem: "unknown".to_string(),
-                    vulnerabilities: vec![],
-                    packages: None,
-                    dependency_graph: None,
-                    version_recommendations: None,
-                    metadata: AnalysisMetadataDto {
-                        total_packages: 0,
-                        vulnerable_packages: 0,
-                        total_vulnerabilities: 0,
-                        severity_breakdown: SeverityBreakdownDto {
-                            critical: 0,
-                            high: 0,
-                            medium: 0,
-                            low: 0,
+                indexed_results.push((
+                    usize::MAX,
+                    FileAnalysisResult {
+                        file_id: None,
+                        filename: None,
+                        ecosystem: "unknown".to_string(),
+                        vulnerabilities: vec![],
+                        packages: None,
+                        dependency_graph: None,
+                        version_recommendations: None,
+                        metadata: AnalysisMetadataDto {
+                            total_packages: 0,
+                            vulnerable_packages: 0,
+                            total_vulnerabilities: 0,
+                            severity_breakdown: SeverityBreakdownDto {
+                                critical: 0,
+                                high: 0,
+                                medium: 0,
+                                low: 0,
+                            },
+                            analysis_duration_ms: 0,
+                            sources_queried: vec![],
                         },
-                        analysis_duration_ms: 0,
-                        sources_queried: vec![],
+                        error: Some(format!("Internal error: {}", e)),
+                        cache_hit: None,
+                        workspace_path: None,
                     },
-                    error: Some(format!("Internal error: {}", e)),
-                    cache_hit: None,
-                    workspace_path: None,
-                });
+                ));
             }
         }
     }
 
+    let results = ordered_batch_results(indexed_results);
+
     let duration = start_time.elapsed();
 
-    let cache_hits = {
+    let cache_hits = if enable_cache {
         let hits = results.iter().filter(|r| r.cache_hit == Some(true)).count();
         if hits > 0 { Some(hits) } else { None }
+    } else {
+        None
     };
 
     info!(
+        request_id = %request_id,
         authenticated = is_authenticated,
         successful,
         failed,
@@ -817,6 +907,7 @@ pub async fn analyze_dependencies(
     Ok(Json(BatchDependencyAnalysisResponse {
         results,
         metadata: BatchAnalysisMetadata {
+            request_id: Some(request_id),
             total_files,
             successful,
             failed,
@@ -835,3 +926,82 @@ pub use health::*;
 
 // Re-export repository controller(s)
 pub use repository::analyze_repository;
+
+fn ordered_batch_results(
+    mut indexed_results: Vec<(usize, FileAnalysisResult)>,
+) -> Vec<FileAnalysisResult> {
+    indexed_results.sort_by_key(|(index, _)| *index);
+    indexed_results
+        .into_iter()
+        .map(|(_, result)| result)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AnalysisMetadataDto, FileAnalysisResult, SeverityBreakdownDto, ordered_batch_results,
+    };
+
+    fn make_result(file_id: &str) -> FileAnalysisResult {
+        FileAnalysisResult {
+            file_id: Some(file_id.to_string()),
+            filename: Some("package.json".to_string()),
+            ecosystem: "npm".to_string(),
+            vulnerabilities: vec![],
+            packages: None,
+            dependency_graph: None,
+            version_recommendations: None,
+            metadata: AnalysisMetadataDto {
+                total_packages: 0,
+                vulnerable_packages: 0,
+                total_vulnerabilities: 0,
+                severity_breakdown: SeverityBreakdownDto {
+                    critical: 0,
+                    high: 0,
+                    medium: 0,
+                    low: 0,
+                },
+                analysis_duration_ms: 0,
+                sources_queried: vec![],
+            },
+            error: None,
+            cache_hit: Some(false),
+            workspace_path: None,
+        }
+    }
+
+    #[test]
+    fn ordered_batch_results_restores_request_order() {
+        let indexed = vec![
+            (2, make_result("file:///three")),
+            (0, make_result("file:///one")),
+            (1, make_result("file:///two")),
+        ];
+
+        let ordered = ordered_batch_results(indexed);
+        let ids = ordered
+            .iter()
+            .map(|r| r.file_id.as_deref().unwrap_or(""))
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["file:///one", "file:///two", "file:///three"]);
+    }
+
+    #[test]
+    fn ordered_batch_results_keeps_internal_errors_last() {
+        let indexed = vec![
+            (1, make_result("file:///two")),
+            (usize::MAX, make_result("file:///internal-error")),
+            (0, make_result("file:///one")),
+        ];
+
+        let ordered = ordered_batch_results(indexed);
+        let last_id = ordered
+            .last()
+            .and_then(|r| r.file_id.as_deref())
+            .unwrap_or("");
+
+        assert_eq!(last_id, "file:///internal-error");
+    }
+}

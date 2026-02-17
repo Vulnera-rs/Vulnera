@@ -287,3 +287,71 @@ async fn test_git_scanner() {
         "Should find AWS Access Key in git repo"
     );
 }
+
+#[tokio::test]
+async fn test_allowlist_suppression_and_metadata() {
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    create_test_file(
+        &temp_dir,
+        "secrets.env",
+        r#"github_token=ghp_123456789012345678901234567890123456
+api_key=ALLOWED_PLACEHOLDER_TOKEN_VALUE_123456
+"#,
+    )
+    .await;
+
+    let mut config = SecretDetectionConfig::default();
+    config.enable_entropy_detection = false;
+    config.global_allowlist_patterns = vec![r"ALLOWED_PLACEHOLDER_TOKEN_VALUE_[0-9]+".to_string()];
+    config.rule_allowlist_patterns = std::collections::HashMap::from([(
+        "github-token".to_string(),
+        vec![r"ghp_123456789012345678901234567890123456".to_string()],
+    )]);
+
+    let module = SecretDetectionModule::with_config(&config);
+
+    let module_config = ModuleConfig {
+        job_id: Uuid::new_v4(),
+        project_id: "test-project".to_string(),
+        source_uri: temp_dir.path().to_string_lossy().to_string(),
+        config: std::collections::HashMap::new(),
+    };
+
+    let result = module
+        .execute(&module_config)
+        .await
+        .expect("Module execution failed");
+
+    assert!(
+        result.findings.is_empty(),
+        "All findings should be suppressed by allowlists"
+    );
+
+    assert_eq!(
+        result
+            .metadata
+            .additional_info
+            .get("allowlist_suppressed")
+            .cloned(),
+        Some("2".to_string())
+    );
+
+    assert_eq!(
+        result
+            .metadata
+            .additional_info
+            .get("suppressed:allowlist:rule:github-token")
+            .cloned(),
+        Some("1".to_string())
+    );
+
+    assert_eq!(
+        result
+            .metadata
+            .additional_info
+            .get("suppressed:allowlist:global")
+            .cloned(),
+        Some("1".to_string())
+    );
+}

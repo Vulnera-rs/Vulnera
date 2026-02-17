@@ -212,11 +212,11 @@ impl YarnPestParser {
                     if found.is_none() {
                         // Fallback: scan raw text
                         let raw = p.as_str();
-                        if let Some(start) = raw.find('"') {
-                            if let Some(end_off) = raw[start + 1..].find('"') {
-                                let end = start + 1 + end_off;
-                                found = Some(raw[start + 1..end].to_string());
-                            }
+                        if let Some(start) = raw.find('"')
+                            && let Some(end_off) = raw[start + 1..].find('"')
+                        {
+                            let end = start + 1 + end_off;
+                            found = Some(raw[start + 1..end].to_string());
                         }
                     }
                     version = found;
@@ -388,10 +388,10 @@ impl YarnPestParser {
             let s = spec.trim();
             // Drop surrounding quotes if present
             let s = s.trim_matches('"');
-            if let Some(name) = Self::extract_name_from_key_spec(s) {
-                if !out.contains(&name) {
-                    out.push(name);
-                }
+            if let Some(name) = Self::extract_name_from_key_spec(s)
+                && !out.contains(&name)
+            {
+                out.push(name);
             }
         }
         out
@@ -401,13 +401,12 @@ impl YarnPestParser {
     fn fallback_extract_version_from_entry(entry_text: &str) -> Option<String> {
         for line in entry_text.lines() {
             let t = line.trim_start();
-            if t.starts_with("version ") {
-                if let Some(start) = t.find('"') {
-                    if let Some(end_off) = t[start + 1..].find('"') {
-                        let end = start + 1 + end_off;
-                        return Some(t[start + 1..end].to_string());
-                    }
-                }
+            if t.starts_with("version ")
+                && let Some(start) = t.find('"')
+                && let Some(end_off) = t[start + 1..].find('"')
+            {
+                let end = start + 1 + end_off;
+                return Some(t[start + 1..end].to_string());
             }
         }
         None
@@ -448,13 +447,12 @@ impl YarnPestParser {
 
             // Version line (indented)
             let t = line.trim_start();
-            if t.starts_with("version ") {
-                if let Some(start) = t.find('"') {
-                    if let Some(end_off) = t[start + 1..].find('"') {
-                        let end = start + 1 + end_off;
-                        current_version = Some(t[start + 1..end].to_string());
-                    }
-                }
+            if t.starts_with("version ")
+                && let Some(start) = t.find('"')
+                && let Some(end_off) = t[start + 1..].find('"')
+            {
+                let end = start + 1 + end_off;
+                current_version = Some(t[start + 1..end].to_string());
             }
         }
 
@@ -501,14 +499,14 @@ impl PackageFileParser for YarnPestParser {
                                 });
 
                                 for name in &parsed.names {
-                                    if seen.insert((name.clone(), version.to_string())) {
-                                        if let Ok(pkg) = Package::new(
+                                    if seen.insert((name.clone(), version.to_string()))
+                                        && let Ok(pkg) = Package::new(
                                             name.clone(),
                                             version.clone(),
                                             Ecosystem::Npm,
-                                        ) {
-                                            packages.push(pkg);
-                                        }
+                                        )
+                                    {
+                                        packages.push(pkg);
                                     }
                                 }
                             }
@@ -525,12 +523,11 @@ impl PackageFileParser for YarnPestParser {
                         });
 
                         for name in &parsed.names {
-                            if seen.insert((name.clone(), version.to_string())) {
-                                if let Ok(pkg) =
+                            if seen.insert((name.clone(), version.to_string()))
+                                && let Ok(pkg) =
                                     Package::new(name.clone(), version.clone(), Ecosystem::Npm)
-                                {
-                                    packages.push(pkg);
-                                }
+                            {
+                                packages.push(pkg);
                             }
                         }
                     }

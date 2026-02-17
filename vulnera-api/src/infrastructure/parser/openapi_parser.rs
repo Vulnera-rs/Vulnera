@@ -881,25 +881,25 @@ impl OpenApiParser {
             Some(spec)
         };
 
-        if let Some(obj) = target {
-            if let Some(security_array) = obj.get("security").and_then(|s| s.as_array()) {
-                for security_item in security_array {
-                    if let Some(security_obj) = security_item.as_object() {
-                        for (scheme_name, scopes_value) in security_obj {
-                            let scopes = if let Some(scopes_array) = scopes_value.as_array() {
-                                scopes_array
-                                    .iter()
-                                    .filter_map(|s| s.as_str().map(|s| s.to_string()))
-                                    .collect()
-                            } else {
-                                Vec::new()
-                            };
+        if let Some(obj) = target
+            && let Some(security_array) = obj.get("security").and_then(|s| s.as_array())
+        {
+            for security_item in security_array {
+                if let Some(security_obj) = security_item.as_object() {
+                    for (scheme_name, scopes_value) in security_obj {
+                        let scopes = if let Some(scopes_array) = scopes_value.as_array() {
+                            scopes_array
+                                .iter()
+                                .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
 
-                            requirements.push(SecurityRequirement {
-                                scheme_name: scheme_name.clone(),
-                                scopes,
-                            });
-                        }
+                        requirements.push(SecurityRequirement {
+                            scheme_name: scheme_name.clone(),
+                            scopes,
+                        });
                     }
                 }
             }
@@ -933,39 +933,35 @@ impl OpenApiParser {
                     for op_method in &[
                         "get", "post", "put", "delete", "patch", "head", "options", "trace",
                     ] {
-                        if let Some(op_value) = path_obj.get(*op_method) {
-                            if let Some(op_obj) = op_value.as_object() {
-                                if let Some(security_array) =
-                                    op_obj.get("security").and_then(|s| s.as_array())
-                                {
-                                    let mut op_requirements = Vec::new();
-                                    for security_item in security_array {
-                                        if let Some(security_obj) = security_item.as_object() {
-                                            for (scheme_name, scopes_value) in security_obj {
-                                                let scopes = if let Some(scopes_array) =
-                                                    scopes_value.as_array()
-                                                {
-                                                    scopes_array
-                                                        .iter()
-                                                        .filter_map(|s| {
-                                                            s.as_str().map(|s| s.to_string())
-                                                        })
-                                                        .collect()
-                                                } else {
-                                                    Vec::new()
-                                                };
+                        if let Some(op_value) = path_obj.get(*op_method)
+                            && let Some(op_obj) = op_value.as_object()
+                            && let Some(security_array) =
+                                op_obj.get("security").and_then(|s| s.as_array())
+                        {
+                            let mut op_requirements = Vec::new();
+                            for security_item in security_array {
+                                if let Some(security_obj) = security_item.as_object() {
+                                    for (scheme_name, scopes_value) in security_obj {
+                                        let scopes = if let Some(scopes_array) =
+                                            scopes_value.as_array()
+                                        {
+                                            scopes_array
+                                                .iter()
+                                                .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                                                .collect()
+                                        } else {
+                                            Vec::new()
+                                        };
 
-                                                op_requirements.push(SecurityRequirement {
-                                                    scheme_name: scheme_name.clone(),
-                                                    scopes,
-                                                });
-                                            }
-                                        }
-                                    }
-                                    if !op_requirements.is_empty() {
-                                        path_ops.insert(op_method.to_string(), op_requirements);
+                                        op_requirements.push(SecurityRequirement {
+                                            scheme_name: scheme_name.clone(),
+                                            scopes,
+                                        });
                                     }
                                 }
+                            }
+                            if !op_requirements.is_empty() {
+                                path_ops.insert(op_method.to_string(), op_requirements);
                             }
                         }
                     }
@@ -987,59 +983,38 @@ impl OpenApiParser {
     ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
         let mut result = std::collections::HashMap::new();
 
-        if let Some(components) = spec.get("components") {
-            if let Some(security_schemes) = components.get("securitySchemes") {
-                if let Some(schemes_obj) = security_schemes.as_object() {
-                    for (scheme_name, scheme_value) in schemes_obj {
-                        if let Some(scheme_obj) = scheme_value.as_object() {
-                            if let Some(type_str) = scheme_obj.get("type").and_then(|t| t.as_str())
-                            {
-                                if type_str == "oauth2" {
-                                    if let Some(flows_obj) =
-                                        scheme_obj.get("flows").and_then(|f| f.as_object())
-                                    {
-                                        let mut flow_urls = std::collections::HashMap::new();
+        if let Some(components) = spec.get("components")
+            && let Some(security_schemes) = components.get("securitySchemes")
+            && let Some(schemes_obj) = security_schemes.as_object()
+        {
+            for (scheme_name, scheme_value) in schemes_obj {
+                if let Some(scheme_obj) = scheme_value.as_object()
+                    && let Some(type_str) = scheme_obj.get("type").and_then(|t| t.as_str())
+                    && type_str == "oauth2"
+                    && let Some(flows_obj) = scheme_obj.get("flows").and_then(|f| f.as_object())
+                {
+                    let mut flow_urls = std::collections::HashMap::new();
 
-                                        // Extract clientCredentials token URL
-                                        if let Some(client_creds) =
-                                            flows_obj.get("clientCredentials")
-                                        {
-                                            if let Some(client_creds_obj) = client_creds.as_object()
-                                            {
-                                                if let Some(token_url) = client_creds_obj
-                                                    .get("tokenUrl")
-                                                    .and_then(|u| u.as_str())
-                                                {
-                                                    flow_urls.insert(
-                                                        "clientCredentials".to_string(),
-                                                        token_url.to_string(),
-                                                    );
-                                                }
-                                            }
-                                        }
+                    // Extract clientCredentials token URL
+                    if let Some(client_creds) = flows_obj.get("clientCredentials")
+                        && let Some(client_creds_obj) = client_creds.as_object()
+                        && let Some(token_url) =
+                            client_creds_obj.get("tokenUrl").and_then(|u| u.as_str())
+                    {
+                        flow_urls.insert("clientCredentials".to_string(), token_url.to_string());
+                    }
 
-                                        // Extract password token URL
-                                        if let Some(password) = flows_obj.get("password") {
-                                            if let Some(password_obj) = password.as_object() {
-                                                if let Some(token_url) = password_obj
-                                                    .get("tokenUrl")
-                                                    .and_then(|u| u.as_str())
-                                                {
-                                                    flow_urls.insert(
-                                                        "password".to_string(),
-                                                        token_url.to_string(),
-                                                    );
-                                                }
-                                            }
-                                        }
+                    // Extract password token URL
+                    if let Some(password) = flows_obj.get("password")
+                        && let Some(password_obj) = password.as_object()
+                        && let Some(token_url) =
+                            password_obj.get("tokenUrl").and_then(|u| u.as_str())
+                    {
+                        flow_urls.insert("password".to_string(), token_url.to_string());
+                    }
 
-                                        if !flow_urls.is_empty() {
-                                            result.insert(scheme_name.clone(), flow_urls);
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if !flow_urls.is_empty() {
+                        result.insert(scheme_name.clone(), flow_urls);
                     }
                 }
             }
@@ -1052,11 +1027,11 @@ impl OpenApiParser {
     fn extract_schemas_from_json(spec: &JsonValue) -> SchemaMap {
         let mut schemas = SchemaMap::new();
 
-        if let Some(components) = spec.get("components") {
-            if let Some(schemas_obj) = components.get("schemas").and_then(|s| s.as_object()) {
-                for (schema_name, schema_def) in schemas_obj {
-                    schemas.insert(schema_name.clone(), schema_def.clone());
-                }
+        if let Some(components) = spec.get("components")
+            && let Some(schemas_obj) = components.get("schemas").and_then(|s| s.as_object())
+        {
+            for (schema_name, schema_def) in schemas_obj {
+                schemas.insert(schema_name.clone(), schema_def.clone());
             }
         }
 

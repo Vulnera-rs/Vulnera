@@ -154,11 +154,11 @@ impl GradlePestParser {
                 pest_impl::Rule::enclosed_coord => {
                     // enclosed_coord contains a quoted_string
                     for inner in p.into_inner() {
-                        if let pest_impl::Rule::quoted_string = inner.as_rule() {
-                            if let Some(t) = Self::parse_coord_string(inner.as_str()) {
-                                result = Some(t);
-                                break;
-                            }
+                        if let pest_impl::Rule::quoted_string = inner.as_rule()
+                            && let Some(t) = Self::parse_coord_string(inner.as_str())
+                        {
+                            result = Some(t);
+                            break;
                         }
                     }
                     if result.is_some() {
@@ -219,10 +219,10 @@ impl GradlePestParser {
                 let name = format!("{}:{}", g, a);
                 let cleaned = Self::clean_version(v);
                 let version = Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                if seen.insert((name.clone(), version.to_string())) {
-                    if let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven) {
-                        out.push(pkg);
-                    }
+                if seen.insert((name.clone(), version.to_string()))
+                    && let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                {
+                    out.push(pkg);
                 }
             }
         }
@@ -243,10 +243,10 @@ impl GradlePestParser {
                 let name = format!("{}:{}", g, a);
                 let cleaned = Self::clean_version(v);
                 let version = Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                if seen.insert((name.clone(), version.to_string())) {
-                    if let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven) {
-                        out.push(pkg);
-                    }
+                if seen.insert((name.clone(), version.to_string()))
+                    && let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                {
+                    out.push(pkg);
                 }
             }
         }
@@ -267,10 +267,10 @@ impl GradlePestParser {
                 let name = format!("{}:{}", g, a);
                 let cleaned = Self::clean_version(v);
                 let version = Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                if seen.insert((name.clone(), version.to_string())) {
-                    if let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven) {
-                        out.push(pkg);
-                    }
+                if seen.insert((name.clone(), version.to_string()))
+                    && let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                {
+                    out.push(pkg);
                 }
             }
         }
@@ -291,10 +291,10 @@ impl GradlePestParser {
                 let name = format!("{}:{}", g, a);
                 let cleaned = Self::clean_version(v);
                 let version = Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                if seen.insert((name.clone(), version.to_string())) {
-                    if let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven) {
-                        out.push(pkg);
-                    }
+                if seen.insert((name.clone(), version.to_string()))
+                    && let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                {
+                    out.push(pkg);
                 }
             }
         }
@@ -315,10 +315,10 @@ impl GradlePestParser {
                 let name = format!("{}:{}", g, a);
                 let cleaned = Self::clean_version(v);
                 let version = Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                if seen.insert((name.clone(), version.to_string())) {
-                    if let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven) {
-                        out.push(pkg);
-                    }
+                if seen.insert((name.clone(), version.to_string()))
+                    && let Ok(pkg) = Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                {
+                    out.push(pkg);
                 }
             }
         }
@@ -345,21 +345,21 @@ impl PackageFileParser for GradlePestParser {
                         match inner.as_rule() {
                             pest_impl::Rule::dependencies_block => {
                                 for stmt in inner.into_inner() {
-                                    if stmt.as_rule() == pest_impl::Rule::dep_stmt {
-                                        if let Some((g, a, v)) = Self::process_dep_stmt(stmt) {
-                                            let name = format!("{}:{}", g, a);
-                                            let cleaned = Self::clean_version(&v);
-                                            let version = Version::parse(&cleaned)
-                                                .unwrap_or_else(|_| Version::new(0, 0, 0));
-                                            if seen.insert((name.clone(), version.to_string())) {
-                                                if let Ok(pkg) = Package::new(
-                                                    name.clone(),
-                                                    version.clone(),
-                                                    Ecosystem::Maven,
-                                                ) {
-                                                    packages.push(pkg);
-                                                }
-                                            }
+                                    if stmt.as_rule() == pest_impl::Rule::dep_stmt
+                                        && let Some((g, a, v)) = Self::process_dep_stmt(stmt)
+                                    {
+                                        let name = format!("{}:{}", g, a);
+                                        let cleaned = Self::clean_version(&v);
+                                        let version = Version::parse(&cleaned)
+                                            .unwrap_or_else(|_| Version::new(0, 0, 0));
+                                        if seen.insert((name.clone(), version.to_string()))
+                                            && let Ok(pkg) = Package::new(
+                                                name.clone(),
+                                                version.clone(),
+                                                Ecosystem::Maven,
+                                            )
+                                        {
+                                            packages.push(pkg);
                                         }
                                     }
                                 }
@@ -370,14 +370,14 @@ impl PackageFileParser for GradlePestParser {
                                     let cleaned = Self::clean_version(&v);
                                     let version = Version::parse(&cleaned)
                                         .unwrap_or_else(|_| Version::new(0, 0, 0));
-                                    if seen.insert((name.clone(), version.to_string())) {
-                                        if let Ok(pkg) = Package::new(
+                                    if seen.insert((name.clone(), version.to_string()))
+                                        && let Ok(pkg) = Package::new(
                                             name.clone(),
                                             version.clone(),
                                             Ecosystem::Maven,
-                                        ) {
-                                            packages.push(pkg);
-                                        }
+                                        )
+                                    {
+                                        packages.push(pkg);
                                     }
                                 }
                             }
@@ -387,21 +387,18 @@ impl PackageFileParser for GradlePestParser {
                 }
                 pest_impl::Rule::dependencies_block => {
                     for stmt in top.into_inner() {
-                        if stmt.as_rule() == pest_impl::Rule::dep_stmt {
-                            if let Some((g, a, v)) = Self::process_dep_stmt(stmt) {
-                                let name = format!("{}:{}", g, a);
-                                let cleaned = Self::clean_version(&v);
-                                let version = Version::parse(&cleaned)
-                                    .unwrap_or_else(|_| Version::new(0, 0, 0));
-                                if seen.insert((name.clone(), version.to_string())) {
-                                    if let Ok(pkg) = Package::new(
-                                        name.clone(),
-                                        version.clone(),
-                                        Ecosystem::Maven,
-                                    ) {
-                                        packages.push(pkg);
-                                    }
-                                }
+                        if stmt.as_rule() == pest_impl::Rule::dep_stmt
+                            && let Some((g, a, v)) = Self::process_dep_stmt(stmt)
+                        {
+                            let name = format!("{}:{}", g, a);
+                            let cleaned = Self::clean_version(&v);
+                            let version =
+                                Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
+                            if seen.insert((name.clone(), version.to_string()))
+                                && let Ok(pkg) =
+                                    Package::new(name.clone(), version.clone(), Ecosystem::Maven)
+                            {
+                                packages.push(pkg);
                             }
                         }
                     }
@@ -412,12 +409,11 @@ impl PackageFileParser for GradlePestParser {
                         let cleaned = Self::clean_version(&v);
                         let version =
                             Version::parse(&cleaned).unwrap_or_else(|_| Version::new(0, 0, 0));
-                        if seen.insert((name.clone(), version.to_string())) {
-                            if let Ok(pkg) =
+                        if seen.insert((name.clone(), version.to_string()))
+                            && let Ok(pkg) =
                                 Package::new(name.clone(), version.clone(), Ecosystem::Maven)
-                            {
-                                packages.push(pkg);
-                            }
+                        {
+                            packages.push(pkg);
                         }
                     }
                 }

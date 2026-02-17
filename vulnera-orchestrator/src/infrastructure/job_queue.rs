@@ -192,14 +192,13 @@ async fn process_job(
         .and_then(|inv| inv.user_id);
 
     // Record scan started event (if we have analytics context)
-    if let Some(ref subject) = analytics_subject {
-        if let Err(e) = ctx
+    if let Some(ref subject) = analytics_subject
+        && let Err(e) = ctx
             .analytics_recorder
             .on_scan_started(subject.clone(), user_id, job_id)
             .await
-        {
-            warn!(job_id = %job_id, error = %e, "Failed to record scan started analytics");
-        }
+    {
+        warn!(job_id = %job_id, error = %e, "Failed to record scan started analytics");
     }
 
     // ── Workflow: Pending → Running ──────────────────────────────────
@@ -306,14 +305,13 @@ async fn process_job(
             }
 
             // Record scan failed (with zero findings)
-            if let Some(ref subject) = analytics_subject {
-                if let Err(e) = ctx
+            if let Some(ref subject) = analytics_subject
+                && let Err(e) = ctx
                     .analytics_recorder
                     .on_scan_completed(subject.clone(), user_id, job_id, FindingsSummary::default())
                     .await
-                {
-                    warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
-                }
+            {
+                warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
             }
 
             // Deliver webhook for failed jobs too

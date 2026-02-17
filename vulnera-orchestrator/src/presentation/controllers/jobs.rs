@@ -41,20 +41,18 @@ pub async fn get_job(
         Ok(Some(snapshot)) => {
             // Validate job ownership: only the user who created the job can access it
             // Master key bypass: allow master key authentication to access any job
-            if !auth.is_master_key {
-                if let Some(ref ctx) = snapshot.invocation_context {
-                    if let Some(ref job_user_id) = ctx.user_id {
-                        if job_user_id != &auth.user_id {
-                            warn!(
-                                job_id = %id,
-                                requesting_user = %auth.user_id.as_str(),
-                                job_owner = %job_user_id.as_str(),
-                                "Unauthorized job access attempt"
-                            );
-                            return Err(StatusCode::FORBIDDEN);
-                        }
-                    }
-                }
+            if !auth.is_master_key
+                && let Some(ref ctx) = snapshot.invocation_context
+                && let Some(ref job_user_id) = ctx.user_id
+                && job_user_id != &auth.user_id
+            {
+                warn!(
+                    job_id = %id,
+                    requesting_user = %auth.user_id.as_str(),
+                    job_owner = %job_user_id.as_str(),
+                    "Unauthorized job access attempt"
+                );
+                return Err(StatusCode::FORBIDDEN);
             }
 
             Ok(Json(JobStatusResponse::from(snapshot)))

@@ -392,7 +392,7 @@ pub fn match_to_finding(
         confidence: calculate_confidence(rule, match_result),
         description: format_description(rule, match_result, &snippet),
         recommendation,
-        data_flow_path: None,
+        semantic_path: None,
         snippet: Some(snippet),
         bindings,
     }

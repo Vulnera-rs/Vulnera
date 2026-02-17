@@ -394,10 +394,10 @@ impl PyProjectTomlParser {
         if let Some(project) = toml_value.get("project") {
             if let Some(deps) = project.get("dependencies").and_then(|d| d.as_array()) {
                 for dep in deps {
-                    if let Some(dep_str) = dep.as_str() {
-                        if let Some(package) = self.parse_dependency_string(dep_str)? {
-                            packages.push(package);
-                        }
+                    if let Some(dep_str) = dep.as_str()
+                        && let Some(package) = self.parse_dependency_string(dep_str)?
+                    {
+                        packages.push(package);
                     }
                 }
             }
@@ -410,10 +410,10 @@ impl PyProjectTomlParser {
                 for (_, deps_array) in optional_deps {
                     if let Some(deps) = deps_array.as_array() {
                         for dep in deps {
-                            if let Some(dep_str) = dep.as_str() {
-                                if let Some(package) = self.parse_dependency_string(dep_str)? {
-                                    packages.push(package);
-                                }
+                            if let Some(dep_str) = dep.as_str()
+                                && let Some(package) = self.parse_dependency_string(dep_str)?
+                            {
+                                packages.push(package);
                             }
                         }
                     }
@@ -422,39 +422,37 @@ impl PyProjectTomlParser {
         }
 
         // Extract from tool.poetry.dependencies (Poetry format)
-        if let Some(tool) = toml_value.get("tool") {
-            if let Some(poetry) = tool.get("poetry") {
-                if let Some(deps) = poetry.get("dependencies").and_then(|d| d.as_table()) {
-                    for (name, version_info) in deps {
-                        if name == "python" {
-                            continue; // Skip Python version requirement
-                        }
-
-                        let version_str = match version_info {
-                            toml::Value::String(v) => v.clone(),
-                            toml::Value::Table(t) => {
-                                if let Some(version) = t.get("version").and_then(|v| v.as_str()) {
-                                    version.to_string()
-                                } else {
-                                    "0.0.0".to_string()
-                                }
-                            }
-                            _ => "0.0.0".to_string(),
-                        };
-
-                        let clean_version = self.clean_poetry_version(&version_str)?;
-
-                        let version =
-                            Version::parse(&clean_version).map_err(|_| ParseError::Version {
-                                version: version_str.clone(),
-                            })?;
-
-                        let package = Package::new(name.clone(), version, Ecosystem::PyPI)
-                            .map_err(|e| ParseError::MissingField { field: e })?;
-
-                        packages.push(package);
-                    }
+        if let Some(tool) = toml_value.get("tool")
+            && let Some(poetry) = tool.get("poetry")
+            && let Some(deps) = poetry.get("dependencies").and_then(|d| d.as_table())
+        {
+            for (name, version_info) in deps {
+                if name == "python" {
+                    continue; // Skip Python version requirement
                 }
+
+                let version_str = match version_info {
+                    toml::Value::String(v) => v.clone(),
+                    toml::Value::Table(t) => {
+                        if let Some(version) = t.get("version").and_then(|v| v.as_str()) {
+                            version.to_string()
+                        } else {
+                            "0.0.0".to_string()
+                        }
+                    }
+                    _ => "0.0.0".to_string(),
+                };
+
+                let clean_version = self.clean_poetry_version(&version_str)?;
+
+                let version = Version::parse(&clean_version).map_err(|_| ParseError::Version {
+                    version: version_str.clone(),
+                })?;
+
+                let package = Package::new(name.clone(), version, Ecosystem::PyPI)
+                    .map_err(|e| ParseError::MissingField { field: e })?;
+
+                packages.push(package);
             }
         }
 

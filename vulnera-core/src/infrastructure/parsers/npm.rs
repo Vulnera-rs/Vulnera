@@ -315,17 +315,14 @@ impl PackageLockParser {
 
                 // Recursively process nested dependencies (physical tree)
                 // Skip for lockfileVersion 2/3 as they use a flat packages structure instead of nested dependencies
-                if !is_packages_section {
-                    if let Some(nested_deps) = dep_info.get("dependencies") {
-                        // Recurse when v1 dependencies map contains nested package objects.
-                        if let Some(deps_obj) = nested_deps.as_object() {
-                            if deps_obj.values().any(Value::is_object) {
-                                let nested_result =
-                                    Self::extract_lockfile_data(nested_deps, false)?;
-                                packages.extend(nested_result.packages);
-                                dependencies.extend(nested_result.dependencies);
-                            }
-                        }
+                if !is_packages_section && let Some(nested_deps) = dep_info.get("dependencies") {
+                    // Recurse when v1 dependencies map contains nested package objects.
+                    if let Some(deps_obj) = nested_deps.as_object()
+                        && deps_obj.values().any(Value::is_object)
+                    {
+                        let nested_result = Self::extract_lockfile_data(nested_deps, false)?;
+                        packages.extend(nested_result.packages);
+                        dependencies.extend(nested_result.dependencies);
                     }
                 }
             }
@@ -464,31 +461,31 @@ impl YarnLockParser {
             if indent == 0 {
                 // New entry
                 // Save previous
-                if let Some(version) = &current_version {
-                    if let Ok(parsed_version) = Version::parse(version) {
-                        for name in &current_package_names {
-                            // Name might be "pkg@range", extract just name
-                            let pkg_name = if let Some(at_pos) = name.rfind('@') {
-                                if at_pos > 0 { &name[..at_pos] } else { name }
-                            } else {
-                                name
-                            };
+                if let Some(version) = &current_version
+                    && let Ok(parsed_version) = Version::parse(version)
+                {
+                    for name in &current_package_names {
+                        // Name might be "pkg@range", extract just name
+                        let pkg_name = if let Some(at_pos) = name.rfind('@') {
+                            if at_pos > 0 { &name[..at_pos] } else { name }
+                        } else {
+                            name
+                        };
 
-                            if let Ok(package) = Package::new(
-                                pkg_name.to_string(),
-                                parsed_version.clone(),
-                                Ecosystem::Npm,
-                            ) {
-                                packages.push(package.clone());
+                        if let Ok(package) = Package::new(
+                            pkg_name.to_string(),
+                            parsed_version.clone(),
+                            Ecosystem::Npm,
+                        ) {
+                            packages.push(package.clone());
 
-                                // Add dependencies
-                                for (dep_name, dep_req) in &current_dependencies {
-                                    pending_dependencies.push((
-                                        package.clone(),
-                                        dep_name.clone(),
-                                        dep_req.clone(),
-                                    ));
-                                }
+                            // Add dependencies
+                            for (dep_name, dep_req) in &current_dependencies {
+                                pending_dependencies.push((
+                                    package.clone(),
+                                    dep_name.clone(),
+                                    dep_req.clone(),
+                                ));
                             }
                         }
                     }
@@ -532,26 +529,26 @@ impl YarnLockParser {
         }
 
         // Save last
-        if let Some(version) = &current_version {
-            if let Ok(parsed_version) = Version::parse(version) {
-                for name in &current_package_names {
-                    let pkg_name = if let Some(at_pos) = name.rfind('@') {
-                        if at_pos > 0 { &name[..at_pos] } else { name }
-                    } else {
-                        name
-                    };
+        if let Some(version) = &current_version
+            && let Ok(parsed_version) = Version::parse(version)
+        {
+            for name in &current_package_names {
+                let pkg_name = if let Some(at_pos) = name.rfind('@') {
+                    if at_pos > 0 { &name[..at_pos] } else { name }
+                } else {
+                    name
+                };
 
-                    if let Ok(package) =
-                        Package::new(pkg_name.to_string(), parsed_version.clone(), Ecosystem::Npm)
-                    {
-                        packages.push(package.clone());
-                        for (dep_name, dep_req) in &current_dependencies {
-                            pending_dependencies.push((
-                                package.clone(),
-                                dep_name.clone(),
-                                dep_req.clone(),
-                            ));
-                        }
+                if let Ok(package) =
+                    Package::new(pkg_name.to_string(), parsed_version.clone(), Ecosystem::Npm)
+                {
+                    packages.push(package.clone());
+                    for (dep_name, dep_req) in &current_dependencies {
+                        pending_dependencies.push((
+                            package.clone(),
+                            dep_name.clone(),
+                            dep_req.clone(),
+                        ));
                     }
                 }
             }

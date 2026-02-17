@@ -25,8 +25,9 @@ pub struct GoogleAIProvider {
 impl GoogleAIProvider {
     /// Create a new Google AI provider
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let timeout_seconds = 120;
         let client = Client::builder()
-            .timeout(Duration::from_secs(120))
+            .timeout(Duration::from_secs(timeout_seconds))
             .build()
             .unwrap_or_else(|e| {
                 error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
@@ -44,6 +45,18 @@ impl GoogleAIProvider {
     /// Create with custom base URL (for testing or proxies)
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// Configure request timeout (in seconds)
+    pub fn with_timeout(mut self, timeout_seconds: u64) -> Self {
+        self.client = Client::builder()
+            .timeout(Duration::from_secs(timeout_seconds))
+            .build()
+            .unwrap_or_else(|e| {
+                error!(error = %e, "Failed to build HTTP client with custom timeout, using default client");
+                Client::new()
+            });
         self
     }
 
@@ -276,51 +289,50 @@ impl LlmProvider for GoogleAIProvider {
                         }
 
                         // Parse the JSON chunk
-                        if let Ok(chunk) = serde_json::from_str::<GeminiStreamChunk>(&line) {
-                            if let Some(candidate) = chunk.candidates.into_iter().next() {
-                                let text = candidate
-                                    .content
-                                    .parts
-                                    .into_iter()
-                                    .filter_map(|p| match p {
-                                        GeminiPart::Text { text } => Some(text),
-                                        _ => None,
-                                    })
-                                    .collect::<String>();
+                        if let Ok(chunk) = serde_json::from_str::<GeminiStreamChunk>(&line)
+                            && let Some(candidate) = chunk.candidates.into_iter().next()
+                        {
+                            let text = candidate
+                                .content
+                                .parts
+                                .into_iter()
+                                .filter_map(|p| match p {
+                                    GeminiPart::Text { text } => Some(text),
+                                    _ => None,
+                                })
+                                .collect::<String>();
 
-                                let is_final = candidate.finish_reason.is_some();
-                                let stop_reason =
-                                    candidate.finish_reason.as_deref().map(|r| match r {
-                                        "STOP" => StopReason::EndTurn,
-                                        "MAX_TOKENS" => StopReason::MaxTokens,
-                                        _ => StopReason::Other,
-                                    });
+                            let is_final = candidate.finish_reason.is_some();
+                            let stop_reason = candidate.finish_reason.as_deref().map(|r| match r {
+                                "STOP" => StopReason::EndTurn,
+                                "MAX_TOKENS" => StopReason::MaxTokens,
+                                _ => StopReason::Other,
+                            });
 
-                                let chunk_result = StreamChunk {
-                                    index: idx,
-                                    delta: if text.is_empty() {
-                                        None
-                                    } else {
-                                        Some(ContentBlock::Text { text })
-                                    },
-                                    is_final,
-                                    stop_reason,
-                                    usage: chunk.usage_metadata.map(|u| Usage {
-                                        prompt_tokens: u.prompt_token_count,
-                                        completion_tokens: u.candidates_token_count,
-                                        total_tokens: u.total_token_count,
-                                        cached_tokens: u.cached_content_token_count,
-                                    }),
-                                };
+                            let chunk_result = StreamChunk {
+                                index: idx,
+                                delta: if text.is_empty() {
+                                    None
+                                } else {
+                                    Some(ContentBlock::Text { text })
+                                },
+                                is_final,
+                                stop_reason,
+                                usage: chunk.usage_metadata.map(|u| Usage {
+                                    prompt_tokens: u.prompt_token_count,
+                                    completion_tokens: u.candidates_token_count,
+                                    total_tokens: u.total_token_count,
+                                    cached_tokens: u.cached_content_token_count,
+                                }),
+                            };
 
-                                idx += 1;
+                            idx += 1;
 
-                                if is_final {
-                                    return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
-                                }
-
+                            if is_final {
                                 return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
                             }
+
+                            return Some((Ok(chunk_result), (byte_stream, buffer, idx)));
                         }
                     }
 
@@ -427,10 +439,10 @@ struct GeminiStreamChunk {
 /// or data URI prefix. Falls back to `image/jpeg` for unknown formats.
 fn detect_image_mime_type(url: &str) -> String {
     // Handle data URIs: data:image/png;base64,...
-    if let Some(rest) = url.strip_prefix("data:") {
-        if let Some(mime_end) = rest.find(';').or_else(|| rest.find(',')) {
-            return rest[..mime_end].to_string();
-        }
+    if let Some(rest) = url.strip_prefix("data:")
+        && let Some(mime_end) = rest.find(';').or_else(|| rest.find(','))
+    {
+        return rest[..mime_end].to_string();
     }
 
     // Extract extension from URL path (strip query string / fragment first)

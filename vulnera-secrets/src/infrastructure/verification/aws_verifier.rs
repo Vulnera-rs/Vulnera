@@ -118,17 +118,17 @@ impl SecretVerifier for AwsVerifier {
         if let Some(ctx) = context {
             match secret_type {
                 SecretType::AwsAccessKey => {
-                    if let Some(secret_key) = ctx.get(&SecretType::AwsSecretKey) {
-                        if Self::validate_secret_key_format(secret_key) {
-                            debug!("Found both AWS access key and secret key with valid formats");
-                        }
+                    if let Some(secret_key) = ctx.get(&SecretType::AwsSecretKey)
+                        && Self::validate_secret_key_format(secret_key)
+                    {
+                        debug!("Found both AWS access key and secret key with valid formats");
                     }
                 }
                 SecretType::AwsSecretKey => {
-                    if let Some(access_key) = ctx.get(&SecretType::AwsAccessKey) {
-                        if Self::validate_access_key_format(access_key) {
-                            debug!("Found both AWS access key and secret key with valid formats");
-                        }
+                    if let Some(access_key) = ctx.get(&SecretType::AwsAccessKey)
+                        && Self::validate_access_key_format(access_key)
+                    {
+                        debug!("Found both AWS access key and secret key with valid formats");
                     }
                 }
                 _ => {}

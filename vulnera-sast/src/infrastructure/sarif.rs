@@ -208,27 +208,27 @@ impl SarifExporter {
             .map(|r| SarifLevel::from(&r.severity))
             .unwrap_or(SarifLevel::from(&finding.severity));
 
-        // Build code flows from data flow path if available
-        let code_flows = finding.data_flow_path.as_ref().map(|path| {
+        // Build code flows from semantic path if available
+        let code_flows = finding.semantic_path.as_ref().map(|path| {
             vec![SarifCodeFlow {
                 thread_flows: vec![SarifThreadFlow {
-                    locations: path
-                        .steps
-                        .iter()
-                        .map(|step| SarifThreadFlowLocation {
+                    locations: std::iter::once(&path.source)
+                        .chain(path.steps.iter())
+                        .chain(std::iter::once(&path.sink))
+                        .map(|node| SarifThreadFlowLocation {
                             location: SarifLocation {
                                 physical_location: SarifPhysicalLocation {
                                     artifact_location: SarifArtifactLocation {
-                                        uri: step.location.file_path.clone(),
+                                        uri: node.location.file_path.clone(),
                                         uri_base_id: self.config.uri_base_id.clone(),
                                     },
                                     region: Some(SarifRegion {
-                                        start_line: step.location.line,
-                                        start_column: step.location.column,
-                                        end_line: step.location.end_line,
-                                        end_column: step.location.end_column,
+                                        start_line: node.location.line,
+                                        start_column: node.location.column,
+                                        end_line: node.location.end_line,
+                                        end_column: node.location.end_column,
                                         snippet: Some(SarifSnippet {
-                                            text: step.expression.clone(),
+                                            text: node.expression.clone(),
                                         }),
                                     }),
                                 },
@@ -273,18 +273,18 @@ impl SarifExporter {
     /// Extract code snippet from finding description
     fn extract_snippet_from_description(&self, description: &str) -> Option<String> {
         // Look for code blocks in the description
-        if let Some(start) = description.find("```") {
-            if let Some(end) = description[start + 3..].find("```") {
-                let code = &description[start + 3..start + 3 + end];
-                // Remove language identifier if present
-                let code = code
-                    .lines()
-                    .skip_while(|l| l.chars().all(|c| c.is_alphanumeric()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if !code.trim().is_empty() {
-                    return Some(code.trim().to_string());
-                }
+        if let Some(start) = description.find("```")
+            && let Some(end) = description[start + 3..].find("```")
+        {
+            let code = &description[start + 3..start + 3 + end];
+            // Remove language identifier if present
+            let code = code
+                .lines()
+                .skip_while(|l| l.chars().all(|c| c.is_alphanumeric()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !code.trim().is_empty() {
+                return Some(code.trim().to_string());
             }
         }
 
@@ -348,7 +348,7 @@ mod tests {
             description: "SQL injection vulnerability.\n\nMatched code:\ncursor.execute(query)"
                 .to_string(),
             recommendation: Some("Use parameterized queries".to_string()),
-            data_flow_path: None,
+            semantic_path: None,
             snippet: None,
             bindings: None,
         }

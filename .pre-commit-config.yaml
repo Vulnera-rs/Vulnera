@@ -1,0 +1,23 @@
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: cargo fmt --all
+        language: system
+        pass_filenames: false
+      - id: cargo-check
+        name: cargo check
+        entry: cargo check
+        language: system
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: cargo clippy --all-targets --all-features -- -D warnings
+        language: system
+        pass_filenames: false
+      - id: cargo-test
+        name: cargo test
+        entry: cargo test --lib --tests
+        language: system
+        pass_filenames: false

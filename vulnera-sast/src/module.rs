@@ -4,10 +4,11 @@ use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
 
-use vulnera_core::config::SastConfig;
+use vulnera_core::config::{AnalysisDepth as SastAnalysisDepth, SastConfig};
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
+    VulnerabilityFindingMetadata, VulnerabilitySemanticNode, VulnerabilitySemanticPath,
 };
 
 use crate::application::use_cases::{AnalysisConfig, ScanProjectUseCase};
@@ -23,6 +24,9 @@ use crate::infrastructure::ast_cache::AstCacheService;
 /// ```
 pub struct SastModule {
     use_case: Arc<ScanProjectUseCase>,
+    sast_config: SastConfig,
+    analysis_config: AnalysisConfig,
+    ast_cache: Option<Arc<dyn AstCacheService>>,
 }
 
 /// Builder for [`SastModule`].
@@ -68,16 +72,22 @@ impl SastModuleBuilder {
 
     /// Build the `SastModule`.
     pub fn build(self) -> SastModule {
-        let use_case = if let Some(uc) = self.use_case_override {
+        let SastModuleBuilder {
+            sast_config,
+            analysis_config,
+            ast_cache,
+            use_case_override,
+        } = self;
+
+        let sast_config = sast_config.unwrap_or_default();
+        let analysis_config = analysis_config.unwrap_or_else(|| AnalysisConfig::from(&sast_config));
+        let ast_cache_for_use_case = ast_cache.clone();
+
+        let use_case = if let Some(uc) = use_case_override {
             uc
         } else {
-            let sast_cfg = self.sast_config.unwrap_or_default();
-            let analysis_cfg = self
-                .analysis_config
-                .unwrap_or_else(|| AnalysisConfig::from(&sast_cfg));
-
-            let uc = ScanProjectUseCase::with_config(&sast_cfg, analysis_cfg);
-            let uc = if let Some(cache) = self.ast_cache {
+            let uc = ScanProjectUseCase::with_config(&sast_config, analysis_config.clone());
+            let uc = if let Some(cache) = ast_cache_for_use_case {
                 uc.with_ast_cache(cache)
             } else {
                 uc
@@ -85,7 +95,12 @@ impl SastModuleBuilder {
             Arc::new(uc)
         };
 
-        SastModule { use_case }
+        SastModule {
+            use_case,
+            sast_config,
+            analysis_config,
+            ast_cache,
+        }
     }
 }
 
@@ -131,17 +146,56 @@ impl AnalysisModule for SastModule {
             )));
         }
 
-        // Execute scan
         let scan_result = self
-            .use_case
-            .execute(source_path)
+            .execute_scan_with_depth_override(config, source_path)
             .await
             .map_err(|e| ModuleExecutionError::ExecutionFailed(e.to_string()))?;
+
+        let policy = SastFindingPolicy::from_config(&self.sast_config, config)?;
+        let mut filtered_by_severity = 0usize;
+        let mut filtered_by_confidence = 0usize;
+        let mut filtered_by_dataflow = 0usize;
+        let mut filtered_by_quality = 0usize;
 
         // Convert SAST findings to orchestrator findings
         let findings: Vec<Finding> = scan_result
             .findings
             .into_iter()
+            .filter(|f| {
+                if f.description.trim().is_empty() {
+                    filtered_by_quality += 1;
+                    return false;
+                }
+
+                if policy.require_recommendation
+                    && f.recommendation
+                        .as_ref()
+                        .is_none_or(|r| r.trim().is_empty())
+                {
+                    filtered_by_quality += 1;
+                    return false;
+                }
+
+                if severity_rank(&f.severity) < severity_rank(&policy.min_severity) {
+                    filtered_by_severity += 1;
+                    return false;
+                }
+
+                if confidence_rank(&f.confidence) < confidence_rank(&policy.min_confidence) {
+                    filtered_by_confidence += 1;
+                    return false;
+                }
+
+                if policy.require_data_flow_evidence_for_dataflow
+                    && is_data_flow_rule(&f.rule_id)
+                    && f.semantic_path.is_none()
+                {
+                    filtered_by_dataflow += 1;
+                    return false;
+                }
+
+                true
+            })
             .map(|f| Finding {
                 id: f.id,
                 r#type: FindingType::Vulnerability,
@@ -165,13 +219,94 @@ impl AnalysisModule for SastModule {
                     crate::domain::value_objects::Confidence::Medium => FindingConfidence::Medium,
                     crate::domain::value_objects::Confidence::Low => FindingConfidence::Low,
                 },
-                description: f.description,
-                recommendation: f.recommendation,
+                description: f.description.trim().to_string(),
+                recommendation: f
+                    .recommendation
+                    .map(|r| r.trim().to_string())
+                    .filter(|r| !r.is_empty()),
+                secret_metadata: None,
+                vulnerability_metadata: VulnerabilityFindingMetadata {
+                    snippet: f.snippet,
+                    bindings: f.bindings,
+                    semantic_path: f.semantic_path.map(|path| VulnerabilitySemanticPath {
+                        source: VulnerabilitySemanticNode {
+                            location: Location {
+                                path: path.source.location.file_path,
+                                line: Some(path.source.location.line),
+                                column: path.source.location.column,
+                                end_line: path.source.location.end_line,
+                                end_column: path.source.location.end_column,
+                            },
+                            description: path.source.description,
+                            expression: path.source.expression,
+                        },
+                        steps: path
+                            .steps
+                            .into_iter()
+                            .map(|step| VulnerabilitySemanticNode {
+                                location: Location {
+                                    path: step.location.file_path,
+                                    line: Some(step.location.line),
+                                    column: step.location.column,
+                                    end_line: step.location.end_line,
+                                    end_column: step.location.end_column,
+                                },
+                                description: step.description,
+                                expression: step.expression,
+                            })
+                            .collect(),
+                        sink: VulnerabilitySemanticNode {
+                            location: Location {
+                                path: path.sink.location.file_path,
+                                line: Some(path.sink.location.line),
+                                column: path.sink.location.column,
+                                end_line: path.sink.location.end_line,
+                                end_column: path.sink.location.end_column,
+                            },
+                            description: path.sink.description,
+                            expression: path.sink.expression,
+                        },
+                    }),
+                },
                 enrichment: None,
             })
             .collect();
 
         let duration = start_time.elapsed();
+
+        let mut additional_info = std::collections::HashMap::new();
+        additional_info.insert(
+            "policy_min_severity".to_string(),
+            format!("{}", policy.min_severity),
+        );
+        additional_info.insert(
+            "policy_min_confidence".to_string(),
+            confidence_name(&policy.min_confidence).to_string(),
+        );
+        additional_info.insert(
+            "policy_require_data_flow_evidence_for_dataflow".to_string(),
+            policy.require_data_flow_evidence_for_dataflow.to_string(),
+        );
+        additional_info.insert(
+            "policy_require_recommendation".to_string(),
+            policy.require_recommendation.to_string(),
+        );
+        additional_info.insert(
+            "filtered_by_severity".to_string(),
+            filtered_by_severity.to_string(),
+        );
+        additional_info.insert(
+            "filtered_by_confidence".to_string(),
+            filtered_by_confidence.to_string(),
+        );
+        additional_info.insert(
+            "filtered_by_data_flow_evidence".to_string(),
+            filtered_by_dataflow.to_string(),
+        );
+        additional_info.insert(
+            "filtered_by_quality".to_string(),
+            filtered_by_quality.to_string(),
+        );
 
         Ok(ModuleResult {
             job_id: config.job_id,
@@ -180,15 +315,244 @@ impl AnalysisModule for SastModule {
             metadata: ModuleResultMetadata {
                 files_scanned: scan_result.files_scanned,
                 duration_ms: duration.as_millis() as u64,
-                additional_info: std::collections::HashMap::new(),
+                additional_info,
             },
             error: None,
         })
     }
 }
 
+impl SastModule {
+    async fn execute_scan_with_depth_override(
+        &self,
+        module_config: &ModuleConfig,
+        source_path: &Path,
+    ) -> Result<crate::application::use_cases::ScanResult, crate::application::use_cases::ScanError>
+    {
+        let Some(depth_override) = parse_analysis_depth_override(module_config)
+            .map_err(|e| crate::application::use_cases::ScanError::Config(e.to_string()))?
+        else {
+            return self.use_case.execute(source_path).await;
+        };
+
+        let mut effective_analysis = self.analysis_config.clone();
+        effective_analysis.analysis_depth = depth_override;
+
+        let use_case = if let Some(cache) = &self.ast_cache {
+            ScanProjectUseCase::with_config(&self.sast_config, effective_analysis)
+                .with_ast_cache(Arc::clone(cache))
+        } else {
+            ScanProjectUseCase::with_config(&self.sast_config, effective_analysis)
+        };
+
+        use_case.execute(source_path).await
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SastFindingPolicy {
+    min_severity: SastSeverity,
+    min_confidence: crate::domain::value_objects::Confidence,
+    require_data_flow_evidence_for_dataflow: bool,
+    require_recommendation: bool,
+}
+
+impl SastFindingPolicy {
+    fn from_config(
+        default_config: &SastConfig,
+        module_config: &ModuleConfig,
+    ) -> Result<Self, ModuleExecutionError> {
+        let default_min_severity = default_config
+            .min_finding_severity
+            .as_deref()
+            .map(parse_severity)
+            .transpose()?;
+
+        let default_min_confidence = default_config
+            .min_finding_confidence
+            .as_deref()
+            .map(parse_confidence)
+            .transpose()?;
+
+        let min_severity = module_config
+            .config
+            .get("sast.min_severity")
+            .and_then(serde_json::Value::as_str)
+            .map(parse_severity)
+            .transpose()?
+            .or(default_min_severity)
+            .unwrap_or(SastSeverity::Info);
+
+        let min_confidence = module_config
+            .config
+            .get("sast.min_confidence")
+            .and_then(serde_json::Value::as_str)
+            .map(parse_confidence)
+            .transpose()?
+            .or(default_min_confidence)
+            .unwrap_or(crate::domain::value_objects::Confidence::Low);
+
+        let require_data_flow_evidence_for_dataflow = module_config
+            .config
+            .get("sast.require_data_flow_evidence_for_dataflow")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(default_config.require_data_flow_evidence_for_dataflow);
+
+        let require_recommendation = module_config
+            .config
+            .get("sast.require_recommendation")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(default_config.require_recommendation);
+
+        Ok(Self {
+            min_severity,
+            min_confidence,
+            require_data_flow_evidence_for_dataflow,
+            require_recommendation,
+        })
+    }
+}
+
+fn parse_severity(input: &str) -> Result<SastSeverity, ModuleExecutionError> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "critical" => Ok(SastSeverity::Critical),
+        "high" => Ok(SastSeverity::High),
+        "medium" => Ok(SastSeverity::Medium),
+        "low" => Ok(SastSeverity::Low),
+        "info" => Ok(SastSeverity::Info),
+        other => Err(ModuleExecutionError::InvalidConfig(format!(
+            "Invalid SAST severity threshold: {other}"
+        ))),
+    }
+}
+
+fn parse_confidence(
+    input: &str,
+) -> Result<crate::domain::value_objects::Confidence, ModuleExecutionError> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "high" => Ok(crate::domain::value_objects::Confidence::High),
+        "medium" => Ok(crate::domain::value_objects::Confidence::Medium),
+        "low" => Ok(crate::domain::value_objects::Confidence::Low),
+        other => Err(ModuleExecutionError::InvalidConfig(format!(
+            "Invalid SAST confidence threshold: {other}"
+        ))),
+    }
+}
+
+fn severity_rank(severity: &SastSeverity) -> u8 {
+    match severity {
+        SastSeverity::Info => 0,
+        SastSeverity::Low => 1,
+        SastSeverity::Medium => 2,
+        SastSeverity::High => 3,
+        SastSeverity::Critical => 4,
+    }
+}
+
+fn confidence_rank(confidence: &crate::domain::value_objects::Confidence) -> u8 {
+    match confidence {
+        crate::domain::value_objects::Confidence::Low => 0,
+        crate::domain::value_objects::Confidence::Medium => 1,
+        crate::domain::value_objects::Confidence::High => 2,
+    }
+}
+
+fn confidence_name(confidence: &crate::domain::value_objects::Confidence) -> &'static str {
+    match confidence {
+        crate::domain::value_objects::Confidence::Low => "low",
+        crate::domain::value_objects::Confidence::Medium => "medium",
+        crate::domain::value_objects::Confidence::High => "high",
+    }
+}
+
+fn is_data_flow_rule(rule_id: &str) -> bool {
+    rule_id.starts_with("data-flow-") || rule_id.contains("dataflow") || rule_id.contains("taint")
+}
+
+fn parse_analysis_depth_override(
+    module_config: &ModuleConfig,
+) -> Result<Option<SastAnalysisDepth>, ModuleExecutionError> {
+    let Some(raw) = module_config
+        .config
+        .get("sast.analysis_depth")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(None);
+    };
+
+    let parsed = match raw.trim().to_ascii_lowercase().as_str() {
+        "deep" => SastAnalysisDepth::Deep,
+        "standard" => SastAnalysisDepth::Standard,
+        "quick" => SastAnalysisDepth::Quick,
+        other => {
+            return Err(ModuleExecutionError::InvalidConfig(format!(
+                "Invalid SAST analysis depth override: {other}"
+            )));
+        }
+    };
+
+    Ok(Some(parsed))
+}
+
 impl Default for SastModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn module_config_with_depth(value: Option<&str>) -> ModuleConfig {
+        let mut config = HashMap::new();
+        if let Some(v) = value {
+            config.insert(
+                "sast.analysis_depth".to_string(),
+                serde_json::Value::String(v.to_string()),
+            );
+        }
+
+        ModuleConfig {
+            job_id: uuid::Uuid::new_v4(),
+            project_id: "test-project".to_string(),
+            source_uri: ".".to_string(),
+            config,
+        }
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_accepts_known_values() {
+        let deep = parse_analysis_depth_override(&module_config_with_depth(Some("deep")))
+            .expect("deep should parse");
+        let standard = parse_analysis_depth_override(&module_config_with_depth(Some("standard")))
+            .expect("standard should parse");
+        let quick = parse_analysis_depth_override(&module_config_with_depth(Some("quick")))
+            .expect("quick should parse");
+
+        assert_eq!(deep, Some(SastAnalysisDepth::Deep));
+        assert_eq!(standard, Some(SastAnalysisDepth::Standard));
+        assert_eq!(quick, Some(SastAnalysisDepth::Quick));
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_absent_returns_none() {
+        let parsed = parse_analysis_depth_override(&module_config_with_depth(None))
+            .expect("absence should not fail");
+        assert_eq!(parsed, None);
+    }
+
+    #[test]
+    fn parse_analysis_depth_override_rejects_invalid_value() {
+        let err = parse_analysis_depth_override(&module_config_with_depth(Some("ultra")))
+            .expect_err("invalid value should fail");
+
+        match err {
+            ModuleExecutionError::InvalidConfig(message) => {
+                assert!(message.contains("Invalid SAST analysis depth override"));
+            }
+            other => panic!("unexpected error variant: {other}"),
+        }
     }
 }

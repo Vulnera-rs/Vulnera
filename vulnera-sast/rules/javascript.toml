@@ -279,6 +279,36 @@ value = '''
 '''
 
 [[rules]]
+id = "js-lodash-prototype-pollution"
+name = "Lodash Merge Prototype Pollution"
+description = "Unsafe object merge via lodash-style helpers can allow prototype pollution"
+severity = "High"
+languages = ["JavaScript"]
+cwe_ids = ["CWE-1321"]
+owasp_categories = ["A03:2021 - Injection"]
+tags = ["prototype-pollution", "lodash", "javascript"]
+message = "Avoid merging untrusted objects directly. Strip __proto__, constructor, and prototype keys before merge operations."
+
+[rules.pattern]
+type = "TreeSitterQuery"
+value = '''
+[
+  (call_expression
+    function: (member_expression
+      object: (identifier) @obj
+      property: (property_identifier) @fn
+    )
+    (#match? @obj "^(_|lodash)$")
+    (#match? @fn "^(merge|mergeWith|defaultsDeep)$")
+  ) @call
+  (call_expression
+    function: (identifier) @fn
+    (#match? @fn "^(merge|mergeWith|defaultsDeep)$")
+  ) @call
+]
+'''
+
+[[rules]]
 id = "js-open-redirect"
 name = "Open Redirect"
 description = "Potential open redirect vulnerability"

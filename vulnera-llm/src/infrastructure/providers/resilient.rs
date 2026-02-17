@@ -223,10 +223,10 @@ impl<P: LlmProvider> ResilientProvider<P> {
                     }
 
                     // Honor retry-after if provided
-                    if let Some(retry_after) = e.retry_after() {
-                        if retry_after.as_millis() < self.config.max_backoff_ms as u128 {
-                            backoff = retry_after.as_millis() as u64;
-                        }
+                    if let Some(retry_after) = e.retry_after()
+                        && retry_after.as_millis() < self.config.max_backoff_ms as u128
+                    {
+                        backoff = retry_after.as_millis() as u64;
                     }
 
                     last_error = Some(e);

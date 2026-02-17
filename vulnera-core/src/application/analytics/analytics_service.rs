@@ -256,29 +256,27 @@ impl AnalyticsAggregationService {
         .await?;
 
         // Also track personal stats when subject is organization and user_id is available
-        if let (StatsSubject::Organization(_), Some(user)) = (&subject, &user_id) {
-            if self.enable_user_level_tracking {
-                if let Err(e) = self
-                    .add_findings_for_subject(
-                        &StatsSubject::User(*user),
-                        &year_month,
-                        findings.critical,
-                        findings.high,
-                        findings.medium,
-                        findings.low,
-                        findings.info,
-                    )
-                    .await
-                {
-                    // Log but don't fail - personal stats are secondary
-                    tracing::warn!(
-                        job_id = %job_id,
-                        user_id = %user,
-                        error = %e,
-                        "Failed to record personal stats (non-fatal)"
-                    );
-                }
-            }
+        if let (StatsSubject::Organization(_), Some(user)) = (&subject, &user_id)
+            && self.enable_user_level_tracking
+            && let Err(e) = self
+                .add_findings_for_subject(
+                    &StatsSubject::User(*user),
+                    &year_month,
+                    findings.critical,
+                    findings.high,
+                    findings.medium,
+                    findings.low,
+                    findings.info,
+                )
+                .await
+        {
+            // Log but don't fail - personal stats are secondary
+            tracing::warn!(
+                job_id = %job_id,
+                user_id = %user,
+                error = %e,
+                "Failed to record personal stats (non-fatal)"
+            );
         }
 
         Ok(())

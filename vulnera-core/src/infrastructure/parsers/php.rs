@@ -292,12 +292,11 @@ impl ComposerLockParser {
                 continue;
             }
 
-            if let Some(inferred_version) = Self::infer_dependency_version(&dep_req) {
-                if let Ok(inferred_target) =
+            if let Some(inferred_version) = Self::infer_dependency_version(&dep_req)
+                && let Ok(inferred_target) =
                     Package::new(dep_name, inferred_version, Ecosystem::Packagist)
-                {
-                    dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
-                }
+            {
+                dependencies.push(Dependency::new(from, inferred_target, dep_req, false));
             }
         }
 

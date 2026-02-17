@@ -120,6 +120,7 @@ pub async fn create_app(
     let create_job_use_case = Arc::new(CreateAnalysisJobUseCase::new(
         project_detector,
         module_selector,
+        modules.registry.registered_modules(),
     ));
     let execute_job_use_case = Arc::new(ExecuteAnalysisJobUseCase::new(
         modules.registry.clone(),

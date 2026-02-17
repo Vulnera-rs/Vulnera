@@ -50,24 +50,23 @@ impl DirectoryScanner {
             let path = entry.path();
 
             // Skip excluded directories
-            if entry.file_type().is_dir() {
-                if let Some(dir_name) = path.file_name().and_then(|n| n.to_str()) {
-                    if self.exclude_patterns.iter().any(|p| dir_name.contains(p)) {
-                        trace!(directory = %dir_name, "Excluding directory");
-                        excluded_count += 1;
-                        continue;
-                    }
-                }
+            if entry.file_type().is_dir()
+                && let Some(dir_name) = path.file_name().and_then(|n| n.to_str())
+                && self.exclude_patterns.iter().any(|p| dir_name.contains(p))
+            {
+                trace!(directory = %dir_name, "Excluding directory");
+                excluded_count += 1;
+                continue;
             }
 
-            if entry.file_type().is_file() {
-                if let Some(language) = Language::from_filename(path.to_string_lossy().as_ref()) {
-                    trace!(file = %path.display(), language = ?language, "Found scannable file");
-                    files.push(ScanFile {
-                        path: path.to_path_buf(),
-                        language,
-                    });
-                }
+            if entry.file_type().is_file()
+                && let Some(language) = Language::from_filename(path.to_string_lossy().as_ref())
+            {
+                trace!(file = %path.display(), language = ?language, "Found scannable file");
+                files.push(ScanFile {
+                    path: path.to_path_buf(),
+                    language,
+                });
             }
         }
 

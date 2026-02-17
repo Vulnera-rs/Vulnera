@@ -267,6 +267,29 @@ impl ProviderRegistry {
     pub fn from_llm_config(config: &vulnera_core::config::LlmConfig) -> Result<Self, LlmError> {
         let mut registry = Self::new();
 
+        let resilience = if config.resilience.enabled {
+            Some(ResilienceConfig {
+                max_retries: config.resilience.max_retries,
+                initial_backoff_ms: config.resilience.initial_backoff_ms,
+                max_backoff_ms: config.resilience.max_backoff_ms,
+                circuit_breaker_threshold: config.resilience.circuit_breaker_threshold,
+                circuit_breaker_timeout_secs: config.resilience.circuit_breaker_timeout_secs,
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+
+        fn wrap_with_resilience<P: LlmProvider + 'static>(
+            provider: P,
+            resilience: &Option<ResilienceConfig>,
+        ) -> Arc<dyn LlmProvider> {
+            match resilience {
+                Some(cfg) => Arc::new(ResilientProvider::new(provider, cfg.clone())),
+                None => Arc::new(provider),
+            }
+        }
+
         let provider: Arc<dyn LlmProvider> = match config.provider.to_lowercase().as_str() {
             "google_ai" | "gemini" | "google" => {
                 let api_key = config
@@ -280,11 +303,12 @@ impl ProviderRegistry {
                         )
                     })?;
 
-                let mut provider = GoogleAIProvider::new(&api_key, &config.default_model);
+                let mut provider = GoogleAIProvider::new(&api_key, &config.default_model)
+                    .with_timeout(config.timeout_seconds);
                 if !config.google_ai.base_url.is_empty() {
                     provider = provider.with_base_url(&config.google_ai.base_url);
                 }
-                Arc::new(provider)
+                wrap_with_resilience(provider, &resilience)
             }
             "openai" | "gpt" => {
                 let api_key = config
@@ -298,7 +322,8 @@ impl ProviderRegistry {
                         )
                     })?;
 
-                let mut provider = OpenAIProvider::new(&api_key, &config.default_model);
+                let mut provider = OpenAIProvider::new(&api_key, &config.default_model)
+                    .with_timeout(config.timeout_seconds);
                 if !config.openai.base_url.is_empty()
                     && config.openai.base_url != "https://api.openai.com/v1"
                 {
@@ -307,7 +332,7 @@ impl ProviderRegistry {
                 if let Some(ref org) = config.openai.organization_id {
                     provider = provider.with_organization(org);
                 }
-                Arc::new(provider)
+                wrap_with_resilience(provider, &resilience)
             }
             "azure" | "azure_openai" => {
                 let api_key = config
@@ -332,12 +357,15 @@ impl ProviderRegistry {
                     ));
                 }
 
-                Arc::new(OpenAIProvider::azure(
+                let provider = OpenAIProvider::azure(
                     &config.azure.endpoint,
                     &api_key,
                     &config.azure.deployment,
                     &config.azure.api_version,
-                ))
+                )
+                .with_timeout(config.timeout_seconds);
+
+                wrap_with_resilience(provider, &resilience)
             }
             other => {
                 return Err(LlmError::ProviderNotFound(format!(

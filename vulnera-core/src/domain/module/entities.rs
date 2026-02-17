@@ -69,9 +69,77 @@ pub struct Finding {
     pub description: String,
     /// Recommended remediation (if available)
     pub recommendation: Option<String>,
+    /// Secret-specific metadata (populated only for secret findings)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret_metadata: Option<SecretFindingMetadata>,
+    /// Vulnerability-specific metadata (populated by vulnerability analyzers such as SAST)
+    pub vulnerability_metadata: VulnerabilityFindingMetadata,
     /// LLM-generated enrichment data (populated on-demand via enrichment endpoint)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enrichment: Option<FindingEnrichment>,
+}
+
+/// Vulnerability-specific metadata attached to vulnerability findings
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct VulnerabilityFindingMetadata {
+    /// Code snippet at the finding location
+    pub snippet: Option<String>,
+    /// Rule metavariable bindings captured during matching
+    pub bindings: Option<std::collections::HashMap<String, String>>,
+    /// Optional semantic trace for taint/dataflow findings
+    pub semantic_path: Option<VulnerabilitySemanticPath>,
+}
+
+/// Semantic path showing source-to-sink propagation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VulnerabilitySemanticPath {
+    /// Source location where taint originated
+    pub source: VulnerabilitySemanticNode,
+    /// Intermediate propagation steps
+    pub steps: Vec<VulnerabilitySemanticNode>,
+    /// Sink location where taint is consumed
+    pub sink: VulnerabilitySemanticNode,
+}
+
+/// Semantic node metadata for vulnerability traces
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct VulnerabilitySemanticNode {
+    /// Location in source code
+    pub location: Location,
+    /// Description of the node operation
+    pub description: String,
+    /// Expression tracked at this node
+    pub expression: String,
+}
+
+/// Secret-specific metadata attached to secret findings
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SecretFindingMetadata {
+    /// Secret detector identifier
+    pub detector_id: String,
+    /// Verification state returned by the verifier subsystem
+    pub verification_state: SecretVerificationState,
+    /// Redacted secret snippet (safe for display)
+    pub redacted_secret: String,
+    /// Optional entropy value when entropy detector contributed to the finding
+    pub entropy: Option<f64>,
+    /// Optional evidence notes used during scoring and triage
+    pub evidence: Vec<String>,
+}
+
+/// Verification state for detected secrets
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum SecretVerificationState {
+    /// Secret was successfully verified against provider/API
+    Verified,
+    /// Secret was checked and determined invalid
+    Invalid,
+    /// Verification attempted but result is indeterminate (timeouts/network/provider errors)
+    Unknown,
+    /// Verification available but not attempted for this finding
+    Unverified,
+    /// No verifier exists for this secret type
+    NotSupported,
 }
 
 /// Finding type

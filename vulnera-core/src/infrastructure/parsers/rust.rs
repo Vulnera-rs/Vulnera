@@ -240,38 +240,36 @@ impl CargoLockParser {
 
                     if let Some(source_pkg) =
                         package_map.get(&(name.to_string(), version_str.to_string()))
-                    {
-                        if let Some(deps) =
+                        && let Some(deps) =
                             package_table.get("dependencies").and_then(|d| d.as_array())
-                        {
-                            for dep_val in deps {
-                                if let Some(dep_str) = dep_val.as_str() {
-                                    // Format: "name version" or just "name"
-                                    let parts: Vec<&str> = dep_str.split_whitespace().collect();
-                                    let dep_name = parts[0];
+                    {
+                        for dep_val in deps {
+                            if let Some(dep_str) = dep_val.as_str() {
+                                // Format: "name version" or just "name"
+                                let parts: Vec<&str> = dep_str.split_whitespace().collect();
+                                let dep_name = parts[0];
 
-                                    // If version is specified, use it. If not, we have to guess or find the only one.
-                                    // Cargo.lock usually specifies version if ambiguous.
-                                    let target_pkg: Option<Package> = if parts.len() >= 2 {
-                                        let dep_version = parts[1];
-                                        package_map
-                                            .get(&(dep_name.to_string(), dep_version.to_string()))
-                                            .cloned()
-                                    } else {
-                                        package_map
-                                            .iter()
-                                            .find(|((n, _), _)| n == dep_name)
-                                            .map(|(_, p)| p.clone())
-                                    };
+                                // If version is specified, use it. If not, we have to guess or find the only one.
+                                // Cargo.lock usually specifies version if ambiguous.
+                                let target_pkg: Option<Package> = if parts.len() >= 2 {
+                                    let dep_version = parts[1];
+                                    package_map
+                                        .get(&(dep_name.to_string(), dep_version.to_string()))
+                                        .cloned()
+                                } else {
+                                    package_map
+                                        .iter()
+                                        .find(|((n, _), _)| n == dep_name)
+                                        .map(|(_, p)| p.clone())
+                                };
 
-                                    if let Some(target) = target_pkg {
-                                        dependencies.push(Dependency::new(
-                                            source_pkg.clone(),
-                                            target.clone(),
-                                            target.version.to_string(), // Requirement is effectively the locked version
-                                            false, // We don't know if it's transitive from here easily, but in a lockfile everything is explicit
-                                        ));
-                                    }
+                                if let Some(target) = target_pkg {
+                                    dependencies.push(Dependency::new(
+                                        source_pkg.clone(),
+                                        target.clone(),
+                                        target.version.to_string(), // Requirement is effectively the locked version
+                                        false, // We don't know if it's transitive from here easily, but in a lockfile everything is explicit
+                                    ));
                                 }
                             }
                         }

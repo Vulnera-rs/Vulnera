@@ -1,6 +1,8 @@
 //! Detector engine that orchestrates multiple detectors
 
-use crate::domain::entities::{Location, SecretFinding, SecretType, Severity};
+use crate::domain::entities::{
+    Location, SecretFinding, SecretType, SecretVerificationState, Severity,
+};
 use crate::domain::value_objects::{Confidence, SecretRule, ValidationResult};
 use crate::infrastructure::detectors::ast_extractor::AstContextExtractor;
 use crate::infrastructure::detectors::semantic_validator::{HeuristicValidator, SemanticValidator};
@@ -9,6 +11,7 @@ use crate::infrastructure::rules::RuleRepository;
 use crate::infrastructure::verification::{VerificationResult, VerificationService};
 use globset::{Glob, GlobMatcher};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::debug;
@@ -132,15 +135,26 @@ impl DetectorEngine {
             }
         }
 
+        // Build semantic contexts in one parse pass for all candidate positions
+        let mut positions = HashSet::new();
+        for (line_number, regex_match) in &all_regex_matches {
+            positions.insert((*line_number, regex_match.start_pos as u32 + 1));
+        }
+        for (line_number, entropy_match) in &all_entropy_matches {
+            positions.insert((*line_number, entropy_match.start_pos as u32 + 1));
+        }
+        let positions_vec: Vec<(u32, u32)> = positions.into_iter().collect();
+        let semantic_contexts =
+            AstContextExtractor::extract_contexts(content, &positions_vec, file_path);
+
         // Pass 2: Process regex findings with verification using collected context
         for (line_number, regex_match) in all_regex_matches {
             // Stage 2: AST Analysis
-            let semantic_context = AstContextExtractor::extract_context(
-                content,
-                line_number,
-                regex_match.start_pos as u32 + 1,
-                file_path,
-            );
+            let column = regex_match.start_pos as u32 + 1;
+            let semantic_context = semantic_contexts
+                .get(&(line_number, column))
+                .cloned()
+                .unwrap_or_default();
 
             let mut confidence = self.calculate_confidence_for_regex_match(&regex_match);
             let severity = self.determine_severity(&regex_match.rule.secret_type);
@@ -149,6 +163,7 @@ impl DetectorEngine {
             let mut temp_finding = SecretFinding {
                 id: String::new(),
                 rule_id: regex_match.rule_id.clone(),
+                detector_id: regex_match.rule_id.clone(),
                 secret_type: regex_match.rule.secret_type.clone(),
                 location: Location {
                     file_path: file_path_str.clone(),
@@ -159,10 +174,12 @@ impl DetectorEngine {
                 },
                 severity: severity.clone(),
                 confidence,
+                verification_state: SecretVerificationState::Unverified,
                 description: regex_match.rule.description.clone(),
                 recommendation: None,
                 matched_secret: regex_match.matched_text.clone(),
                 entropy: None,
+                evidence: vec![],
             };
 
             let validation_result = self
@@ -182,7 +199,8 @@ impl DetectorEngine {
             confidence = temp_finding.confidence;
 
             // Verify secret if verification is enabled
-            let mut is_verified = false;
+            let mut verification_state = SecretVerificationState::Unverified;
+            let mut evidence = vec![];
             if let Some(ref verification_service) = self.verification_service {
                 let verification_result = verification_service
                     .verify_secret(
@@ -194,24 +212,35 @@ impl DetectorEngine {
 
                 match verification_result {
                     VerificationResult::Verified => {
-                        is_verified = true;
+                        verification_state = SecretVerificationState::Verified;
                         confidence = Confidence::High; // Verified secrets get high confidence
+                        evidence.push("verification:provider_verified".to_string());
                     }
                     VerificationResult::Invalid => {
+                        verification_state = SecretVerificationState::Invalid;
                         // Invalid secrets might be false positives, lower confidence
                         if confidence == Confidence::High {
                             confidence = Confidence::Medium;
                         }
+                        evidence.push("verification:provider_invalid".to_string());
                     }
-                    _ => {
-                        // Failed or not supported - keep original confidence
+                    VerificationResult::Failed => {
+                        verification_state = SecretVerificationState::Unknown;
+                        evidence.push("verification:provider_indeterminate".to_string());
+                    }
+                    VerificationResult::NotSupported => {
+                        verification_state = SecretVerificationState::NotSupported;
+                        evidence.push("verification:not_supported".to_string());
                     }
                 }
+            } else {
+                evidence.push("verification:disabled".to_string());
             }
 
             findings.push(SecretFinding {
                 id: format!("{}-{}-{}", regex_match.rule_id, file_path_str, line_number),
                 rule_id: regex_match.rule_id.clone(),
+                detector_id: regex_match.rule_id.clone(),
                 secret_type: regex_match.rule.secret_type.clone(),
                 location: Location {
                     file_path: file_path_str.clone(),
@@ -222,9 +251,10 @@ impl DetectorEngine {
                 },
                 severity,
                 confidence,
+                verification_state,
                 description: {
                     let mut desc = regex_match.rule.description.clone();
-                    if is_verified {
+                    if matches!(verification_state, SecretVerificationState::Verified) {
                         desc.push_str(" (VERIFIED - Secret is active)");
                     }
                     desc
@@ -233,20 +263,20 @@ impl DetectorEngine {
                     "Remove or rotate the exposed {}",
                     regex_match.rule.name
                 )),
-                matched_secret: Self::redact_secret(&regex_match.matched_text),
+                matched_secret: regex_match.matched_text.clone(),
                 entropy: None,
+                evidence,
             });
         }
 
         // Pass 3: Process entropy findings (check overlap with regex findings)
         for (line_number, entropy_match) in all_entropy_matches {
             // Stage 2: AST Analysis for entropy
-            let semantic_context = AstContextExtractor::extract_context(
-                content,
-                line_number,
-                entropy_match.start_pos as u32 + 1,
-                file_path,
-            );
+            let column = entropy_match.start_pos as u32 + 1;
+            let semantic_context = semantic_contexts
+                .get(&(line_number, column))
+                .cloned()
+                .unwrap_or_default();
 
             // Check if this entropy match overlaps with any regex match
             let overlaps = findings.iter().any(|f| {
@@ -272,6 +302,7 @@ impl DetectorEngine {
                         file_path_str, line_number, entropy_match.start_pos
                     ),
                     rule_id: format!("entropy-{:?}", entropy_match.encoding),
+                    detector_id: "entropy".to_string(),
                     secret_type,
                     location: Location {
                         file_path: file_path_str.clone(),
@@ -288,6 +319,7 @@ impl DetectorEngine {
                     } else {
                         Confidence::Low
                     },
+                    verification_state: SecretVerificationState::NotSupported,
                     description: format!(
                         "High-entropy {:?} string detected (entropy: {:.2})",
                         entropy_match.encoding, entropy_match.entropy
@@ -295,8 +327,9 @@ impl DetectorEngine {
                     recommendation: Some(
                         "Review this high-entropy string - it may be a secret or token".to_string(),
                     ),
-                    matched_secret: Self::redact_secret(&entropy_match.matched_text),
+                    matched_secret: entropy_match.matched_text.clone(),
                     entropy: Some(entropy_match.entropy),
+                    evidence: vec!["detection:entropy".to_string()],
                 };
 
                 // Stage 3: Semantic Validation for entropy
@@ -367,6 +400,7 @@ impl DetectorEngine {
             findings.push(SecretFinding {
                 id: format!("{}-{}-{}", regex_match.rule_id, file_path_str, line_number),
                 rule_id: regex_match.rule_id.clone(),
+                detector_id: regex_match.rule_id.clone(),
                 secret_type: regex_match.rule.secret_type.clone(),
                 location: Location {
                     file_path: file_path_str.clone(),
@@ -377,13 +411,15 @@ impl DetectorEngine {
                 },
                 severity,
                 confidence,
+                verification_state: SecretVerificationState::Unverified,
                 description: regex_match.rule.description.clone(),
                 recommendation: Some(format!(
                     "Remove or rotate the exposed {}",
                     regex_match.rule.name
                 )),
-                matched_secret: Self::redact_secret(&regex_match.matched_text),
+                matched_secret: regex_match.matched_text.clone(),
                 entropy: None,
+                evidence: vec!["detection:regex".to_string()],
             });
         }
 
@@ -413,6 +449,7 @@ impl DetectorEngine {
                         file_path_str, line_number, entropy_match.start_pos
                     ),
                     rule_id: format!("entropy-{:?}", entropy_match.encoding),
+                    detector_id: "entropy".to_string(),
                     secret_type,
                     location: Location {
                         file_path: file_path_str.clone(),
@@ -429,6 +466,7 @@ impl DetectorEngine {
                     } else {
                         Confidence::Low
                     },
+                    verification_state: SecretVerificationState::NotSupported,
                     description: format!(
                         "High-entropy {:?} string detected (entropy: {:.2})",
                         entropy_match.encoding, entropy_match.entropy
@@ -436,8 +474,9 @@ impl DetectorEngine {
                     recommendation: Some(
                         "Review this high-entropy string - it may be a secret or token".to_string(),
                     ),
-                    matched_secret: Self::redact_secret(&entropy_match.matched_text),
+                    matched_secret: entropy_match.matched_text.clone(),
                     entropy: Some(entropy_match.entropy),
+                    evidence: vec!["detection:entropy".to_string()],
                 });
             }
         }
@@ -484,14 +523,6 @@ impl DetectorEngine {
             SecretType::HighEntropyBase64 | SecretType::HighEntropyHex => Severity::High,
             _ => Severity::Medium,
         }
-    }
-
-    /// Redact secret for safe logging/display
-    fn redact_secret(secret: &str) -> String {
-        if secret.len() <= 8 {
-            return "***".to_string();
-        }
-        format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
     }
 
     /// Check whether a rule applies to the supplied file path.

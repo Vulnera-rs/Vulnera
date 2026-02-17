@@ -8,6 +8,7 @@ use vulnera_core::config::SecretDetectionConfig;
 use vulnera_core::domain::module::{
     AnalysisModule, Finding, FindingConfidence, FindingSeverity, FindingType, Location,
     ModuleConfig, ModuleExecutionError, ModuleResult, ModuleResultMetadata, ModuleType,
+    SecretFindingMetadata, SecretVerificationState, VulnerabilityFindingMetadata,
 };
 
 use crate::application::use_cases::ScanForSecretsUseCase;
@@ -84,9 +85,46 @@ impl AnalysisModule for SecretDetectionModule {
                 },
                 description: f.description,
                 recommendation: f.recommendation,
+                secret_metadata: Some(SecretFindingMetadata {
+                    detector_id: f.detector_id,
+                    verification_state: match f.verification_state {
+                        crate::domain::entities::SecretVerificationState::Verified => {
+                            SecretVerificationState::Verified
+                        }
+                        crate::domain::entities::SecretVerificationState::Invalid => {
+                            SecretVerificationState::Invalid
+                        }
+                        crate::domain::entities::SecretVerificationState::Unknown => {
+                            SecretVerificationState::Unknown
+                        }
+                        crate::domain::entities::SecretVerificationState::Unverified => {
+                            SecretVerificationState::Unverified
+                        }
+                        crate::domain::entities::SecretVerificationState::NotSupported => {
+                            SecretVerificationState::NotSupported
+                        }
+                    },
+                    redacted_secret: redact_secret(&f.matched_secret),
+                    entropy: f.entropy,
+                    evidence: f.evidence,
+                }),
+                vulnerability_metadata: VulnerabilityFindingMetadata::default(),
                 enrichment: None,
             })
             .collect();
+
+        let mut additional_info = std::collections::HashMap::new();
+        additional_info.insert(
+            "baseline_suppressed".to_string(),
+            scan_result.baseline_suppressed.to_string(),
+        );
+        additional_info.insert(
+            "allowlist_suppressed".to_string(),
+            scan_result.allowlist_suppressed.to_string(),
+        );
+        for (reason, count) in scan_result.suppression_breakdown {
+            additional_info.insert(format!("suppressed:{}", reason), count.to_string());
+        }
 
         let duration = start_time.elapsed();
 
@@ -97,7 +135,7 @@ impl AnalysisModule for SecretDetectionModule {
             metadata: ModuleResultMetadata {
                 files_scanned: scan_result.files_scanned,
                 duration_ms: duration.as_millis() as u64,
-                additional_info: std::collections::HashMap::new(),
+                additional_info,
             },
             error: None,
         })
@@ -108,4 +146,11 @@ impl Default for SecretDetectionModule {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn redact_secret(secret: &str) -> String {
+    if secret.len() <= 8 {
+        return "***".to_string();
+    }
+    format!("{}...{}", &secret[..4], &secret[secret.len() - 4..])
 }

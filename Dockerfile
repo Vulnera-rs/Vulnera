@@ -2,7 +2,7 @@
 # Multi-stage build for Vulnera Rust
 FROM rust:slim as builder
 
-# Install system dependencies including PostgreSQL 
+# Install system dependencies 
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
@@ -29,7 +29,7 @@ COPY vulnera-secrets/Cargo.toml ./vulnera-secrets/
 COPY vulnera-api/Cargo.toml ./vulnera-api/
 COPY vulnera-llm/Cargo.toml ./vulnera-llm/
 
-# Create dummy source files to build dependencies only (layer caching optimization)
+# Create dummy source files to build dependencies only 
 RUN mkdir -p src vulnera-core/src vulnera-deps/src vulnera-orchestrator/src \
     vulnera-sast/src vulnera-secrets/src vulnera-api/src vulnera-llm/src && \
     echo "fn main() {}" > src/main.rs && \
@@ -110,8 +110,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp /usr/local/bin/sqlx /app/bin/sqlx"
 
 # Runtime stage
-# Use sid (unstable) to match GLIBC version from rust:slim builder
-# This ensures sqlx-cli binary compiled in builder stage is compatible
 FROM debian:sid-slim
 
 # Install runtime dependencies
@@ -123,18 +121,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install semgrep via pipx with proper permissions for all users
-ENV PIPX_HOME=/opt/pipx
-ENV PIPX_BIN_DIR=/usr/local/bin
-RUN pipx install semgrep \
-    && chmod -R a+rX /opt/pipx \
-    && semgrep --version
-
-# Verify semgrep is executable by non-root users
-RUN which semgrep && ls -la /usr/local/bin/semgrep && ls -la /opt/pipx/venvs/semgrep/bin/semgrep
-
-# Create app user with home directory (needed for semgrep config)
-RUN useradd -r -s /bin/false -m -d /app/home vulnera
 
 # Create app directory
 WORKDIR /app
@@ -153,7 +139,7 @@ COPY --from=builder /app/migrations ./migrations
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Create NVD data directory (for SQLite database)
+# Create NVD data directory 
 RUN mkdir -p .vulnera_data && chown vulnera:vulnera .vulnera_data
 
 # Ensure PATH includes /usr/local/bin for any other subprocess calls
@@ -188,7 +174,7 @@ ENV VULNERA__LLM__ENRICHMENT__INCLUDE_CODE_CONTEXT="true"
 # --- Sandbox Configuration ---
 # Secure isolation for SAST/secrets modules
 ENV VULNERA__SANDBOX__ENABLED="true"
-ENV VULNERA__SANDBOX__BACKEND="process"
+ENV VULNERA__SANDBOX__BACKEND="landlock"
 ENV VULNERA__SANDBOX__EXECUTION_TIMEOUT_SECS="30"
 ENV VULNERA__SANDBOX__MEMORY_LIMIT_MB="256"
 
@@ -205,6 +191,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:3000/health || exit 1
 
-# Use entrypoint script (runs migrations by default, set RUN_MIGRATIONS=false to disable)
+# Use entrypoint script
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["vulnera-rust"]

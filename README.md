@@ -5,43 +5,22 @@
 **High-Performance Vulnerability Analysis Platform**
 
 [![License: BUSL 1.1](https://img.shields.io/badge/License-BUSL_1.1-blue.svg)](LICENSE)
-[![MSRV](https://img.shields.io/badge/MSRV-1.82%2B-orange.svg)](https://www.rust-lang.org/tools/install)
-[![Rust](https://img.shields.io/badge/Rust-1.82+-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![MSRV](https://img.shields.io/badge/MSRV-1.91%2B-orange.svg)](https://www.rust-lang.org/tools/install)
+[![Rust](https://img.shields.io/badge/Rust-1.91+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://hub.docker.com/)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-green.svg?logo=openapi-initiative)](https://swagger.io/)
 
 _Multi-ecosystem vulnerability analysis with dependency scanning, SAST, secrets detection, and API security auditing_
 
-[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/)
+[Quick Start](#-quick-start) • [Web Dashboard](https://vulnera.studio) • [Documentation](https://k5602.github.io/Vulnera/) • [Workspace Index](docs/README.md)
 
 </div>
-
----
-
-## 🌐 Web Dashboard & Team Collaboration
-
-**[Vulnera Studio](https://vulnera.studio)** — Central web platform for team collaboration, security insights, and reporting:
-
-| Feature                     | Description                                                                        |
-| --------------------------- | ---------------------------------------------------------------------------------- |
-| **Organization Management** | Create teams, manage members with role-based access (Owner, Admin, Member, Viewer) |
-| **Shared Quota Pools**      | Team members share token allocations; no per-user limits                           |
-| **API Key Management**      | Generate and rotate keys for CLI and CI/CD integration                             |
-| **Integrations**            | Connect GitHub, GitLab, Slack, webhooks for automated workflows                    |
-| **Team Analytics**          | Track usage by member, module, and project; export reports                         |
-| **Compliance Reports**      | Generate SOC2, ISO27001, GDPR, HIPAA-aligned reports                               |
-| **Audit Logs**              | Full history of member actions, configuration changes, and scans                   |
-| **Webhooks**                | Real-time notifications for scan events and findings                               |
-
-**Get started:** Visit [vulnera.studio](https://vulnera.studio) → Sign up → Create organization → Invite team.
 
 ---
 
 ## Architecture
 
 </text>
-
-<old_text line=73>
 | [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan |
 | [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html) | Command-line usage |
 | [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html) | Environment variables and TOML config |
@@ -106,7 +85,7 @@ flowchart TB
 
 ### Prerequisites
 
-- Rust 1.82+ • PostgreSQL 12+ • SQLx CLI
+- Rust 1.91+ • PostgreSQL 12+ • SQLx CLI
 
 ### Install & Run
 
@@ -118,20 +97,6 @@ cargo run
 ```
 
 **Verify:** `curl http://localhost:3000/health` • **API Docs:** <http://localhost:3000/docs>
-
----
-
-## 📖 Documentation
-
-| Guide                                                                           | Description                             |
-| ------------------------------------------------------------------------------- | --------------------------------------- |
-| [Quick Start](https://k5602.github.io/Vulnera/getting-started/quick-start.html) | Installation and first scan             |
-| [CLI Reference](https://k5602.github.io/Vulnera/guide/cli-reference.html)       | Command-line usage                      |
-| [Configuration](https://k5602.github.io/Vulnera/guide/configuration.html)       | Environment variables and TOML config   |
-| [Authentication](https://k5602.github.io/Vulnera/guide/authentication.html)     | JWT and API key setup                   |
-| [Analysis Modules](https://k5602.github.io/Vulnera/modules/overview.html)       | Module-specific documentation           |
-| [Architecture](https://k5602.github.io/Vulnera/architecture/overview.html)      | System design and DDD patterns          |
-| [CI/CD Integration](https://k5602.github.io/Vulnera/integration/cicd.html)      | GitHub Actions, GitLab CI, Azure DevOps |
 
 ---
 
@@ -271,24 +236,6 @@ Azure Front Door → API Management → App Service/Container Apps
 
 ---
 
-## 👥 Team & Community
-
-| Name                     | Role                            |
-| ------------------------ | ------------------------------- |
-| **Khaled Mahmoud**       | Project Lead, Backend Developer |
-| **Abd El-Rahman Mossad** | Frontend, LSP Server Maintainer |
-| **Amr Medhat**           | Cloud Engineer                  |
-| **Gasser Mohammed**      | Frontend Engineer               |
-
-**Resources:**
-
-- **Web Dashboard:** [vulnera.studio](https://vulnera.studio) — Full-featured team collaboration platform
-- **Documentation:** [k5602.github.io/Vulnera](https://k5602.github.io/Vulnera/) — Complete guides and tutorials
-- **GitHub:** [k5602/Vulnera](https://github.com/k5602/Vulnera) — Source code and issues
-- **Community:** [GitHub Discussions](https://github.com/k5602/Vulnera/discussions) — Q&A and feedback
-
----
-
 ## 📜 License
 
 Core platform (server, analysis modules, orchestration): **Business Source License 1.1** with a
@@ -299,9 +246,3 @@ CLI , Advisors and LSP (adapter): **AGPL-3.0-or-later**.
 See [LICENSE](./LICENSE) for details and commercial licensing.
 
 ---
-
-<div align="center">
-
-**[Web Dashboard](https://vulnera.studio)** • **[Documentation](https://k5602.github.io/Vulnera/)** • **[API Reference](http://localhost:3000/docs)** • **[Contributing](CONTRIBUTING.md)** • **[Changelog](CHANGELOG.md)**
-
-</div>

@@ -46,7 +46,7 @@ pub enum ApiVulnerabilityType {
     MissingErrorHandling,
     InformationDisclosure,
     MissingPagination,
-    ResourceExhaustion, // NEW: No pagination/limits
+    ResourceExhaustion, // NEW: No pagination/limits ,the only new that not tested.
 
     // OAuth/OIDC
     InsecureOAuthFlow,

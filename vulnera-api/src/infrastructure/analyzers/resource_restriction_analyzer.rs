@@ -51,10 +51,10 @@ impl ResourceRestrictionAnalyzer {
                     for response in &operation.responses {
                         if response.status_code.starts_with('2') {
                             for content in &response.content {
-                                if let Some(schema) = &content.schema {
-                                    if Self::schema_contains_array(schema) {
-                                        returns_array = true;
-                                    }
+                                if let Some(schema) = &content.schema
+                                    && Self::schema_contains_array(schema)
+                                {
+                                    returns_array = true;
                                 }
                             }
                             // Check for rate limit headers in 2xx or 429 response

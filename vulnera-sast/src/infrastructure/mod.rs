@@ -11,9 +11,12 @@
 pub mod ast_cache;
 pub mod call_graph;
 pub mod call_graph_queries;
+pub mod cfg;
 pub mod data_flow;
 pub mod incremental;
 pub mod metavar_patterns;
+pub mod oxc_frontend;
+pub mod parser_frontend;
 pub mod parsers;
 pub mod query_engine;
 pub mod regex_cache;
@@ -27,8 +30,11 @@ pub mod taint_queries;
 
 pub use ast_cache::*;
 pub use call_graph::*;
+pub use cfg::*;
 pub use data_flow::*;
 pub use incremental::*;
+pub use oxc_frontend::*;
+pub use parser_frontend::*;
 pub use query_engine::*;
 pub use rules::RuleRepository;
 pub use sast_engine::*;

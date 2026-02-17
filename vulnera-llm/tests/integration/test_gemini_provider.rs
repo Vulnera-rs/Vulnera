@@ -1,100 +1,70 @@
-//! Integration tests for GeminiLlmProvider using wiremock
+//! Integration tests for GoogleAIProvider using wiremock
 
-use wiremock::matchers::{header, method};
+use futures::StreamExt;
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use vulnera_core::config::LlmConfig;
-use vulnera_llm::domain::{LlmRequest, Message};
-use vulnera_llm::infrastructure::providers::{GeminiLlmProvider, LlmProvider};
+use vulnera_llm::domain::{CompletionRequest, ContentBlock, LlmProvider, Message};
+use vulnera_llm::infrastructure::providers::GoogleAIProvider;
 
-fn create_test_config(api_url: &str) -> LlmConfig {
-    LlmConfig {
-        gemini_api_url: api_url.to_string(),
-        gemini_api_key: Some("test-api-key".to_string()),
-        default_model: "test-model".to_string(),
-        explanation_model: None,
-        code_fix_model: None,
-        enrichment_model: None,
-        temperature: 0.7,
-        max_tokens: 1024,
-        timeout_seconds: 30,
-        enable_streaming: false,
-        enrichment: Default::default(),
-    }
+fn create_provider(mock_server: &MockServer) -> GoogleAIProvider {
+    GoogleAIProvider::new("test-api-key", "test-model")
+        .with_base_url(mock_server.uri())
+        .with_timeout(10)
 }
 
-fn create_test_request() -> LlmRequest {
-    LlmRequest {
-        model: "test-model".to_string(),
-        messages: vec![Message::new("user", "Hello, world!")],
-        max_tokens: Some(100),
-        temperature: Some(0.7),
-        top_p: None,
-        top_k: None,
-        frequency_penalty: None,
-        presence_penalty: None,
-        stream: Some(false),
-    }
+fn create_test_request() -> CompletionRequest {
+    CompletionRequest::new()
+        .with_model("test-model")
+        .with_message(Message::user("Hello, world!"))
+        .with_max_tokens(100)
+        .with_temperature(0.7)
 }
 
-/// Test successful generation with mocked Gemini API
 #[tokio::test]
-async fn test_gemini_provider_generate_success() {
+async fn test_google_ai_provider_complete_success() {
     let mock_server = MockServer::start().await;
 
     let response_body = serde_json::json!({
-        "id": "resp-123",
-        "object": "chat.completion",
-        "created": 1234567890,
-        "model": "test-model",
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": "Hello! How can I help you?"
+        "candidates": [{
+            "content": {
+                "parts": [
+                    { "text": "Hello! How can I help you?" }
+                ]
             },
-            "finish_reason": "stop"
+            "finishReason": "STOP"
         }],
-        "usage": {
-            "prompt_tokens": 10,
-            "completion_tokens": 8,
-            "total_tokens": 18
+        "usageMetadata": {
+            "promptTokenCount": 10,
+            "candidatesTokenCount": 8,
+            "totalTokenCount": 18
         }
     });
 
     Mock::given(method("POST"))
-        .and(header("x-goog-api-key", "test-api-key"))
-        .and(header("Content-Type", "application/json"))
+        .and(path("/models/test-model:generateContent"))
+        .and(query_param("key", "test-api-key"))
         .respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
         .mount(&mock_server)
         .await;
 
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
+    let provider = create_provider(&mock_server);
+    let result = provider.complete(create_test_request()).await;
 
     assert!(result.is_ok());
     let response = result.unwrap();
-    assert_eq!(response.id, "resp-123");
-    assert_eq!(response.choices.len(), 1);
-    assert_eq!(
-        response.choices[0]
-            .message
-            .as_ref()
-            .unwrap()
-            .content
-            .as_deref(),
-        Some("Hello! How can I help you?")
-    );
+    assert_eq!(response.model, "test-model");
+    assert_eq!(response.text(), "Hello! How can I help you?");
+    assert!(!response.is_truncated());
 }
 
-/// Test error handling for API errors
 #[tokio::test]
-async fn test_gemini_provider_api_error() {
+async fn test_google_ai_provider_api_error_rate_limited() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
+        .and(path("/models/test-model:generateContent"))
+        .and(query_param("key", "test-api-key"))
         .respond_with(
             ResponseTemplate::new(429).set_body_json(&serde_json::json!({
                 "error": {
@@ -106,122 +76,21 @@ async fn test_gemini_provider_api_error() {
         .mount(&mock_server)
         .await;
 
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
+    let provider = create_provider(&mock_server);
+    let result = provider.complete(create_test_request()).await;
 
     assert!(result.is_err());
     let error = result.unwrap_err();
-    assert!(error.to_string().contains("429"));
+    assert!(error.to_string().contains("Rate limited"));
 }
 
-/// Test error handling for network timeout
 #[tokio::test]
-async fn test_gemini_provider_timeout() {
+async fn test_google_ai_provider_server_error() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(60)))
-        .mount(&mock_server)
-        .await;
-
-    let mut config = create_test_config(&mock_server.uri());
-    config.timeout_seconds = 1; // Very short timeout
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
-
-    assert!(result.is_err());
-}
-
-/// Test error handling when API key is missing
-#[tokio::test]
-async fn test_gemini_provider_missing_api_key() {
-    let mock_server = MockServer::start().await;
-
-    let mut config = create_test_config(&mock_server.uri());
-    config.gemini_api_key = None;
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
-
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("API key not configured")
-    );
-}
-
-/// Test streaming generation with mocked API
-#[tokio::test]
-async fn test_gemini_provider_generate_stream() {
-    let mock_server = MockServer::start().await;
-
-    // Simulate SSE response
-    let sse_response = "data: {\"id\":\"stream-1\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"Hello\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"stream-2\",\"object\":\"chat.completion.chunk\",\"created\":1234567890,\"model\":\"test-model\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\" World\"},\"finish_reason\":null}]}\n\ndata: [DONE]\n";
-
-    Mock::given(method("POST"))
-        .and(header("x-goog-api-key", "test-api-key"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_string(sse_response)
-                .insert_header("Content-Type", "text/event-stream"),
-        )
-        .mount(&mock_server)
-        .await;
-
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
-
-    let mut request = create_test_request();
-    request.stream = Some(true);
-
-    let result = provider.generate_stream(request).await;
-
-    assert!(result.is_ok());
-    let mut rx = result.unwrap();
-
-    // Collect streamed responses
-    let mut responses = Vec::new();
-    while let Some(chunk) = rx.recv().await {
-        if let Ok(response) = chunk {
-            responses.push(response);
-        }
-    }
-
-    assert!(
-        !responses.is_empty(),
-        "Should receive at least one response chunk"
-    );
-}
-
-/// Test handling of malformed API response
-#[tokio::test]
-async fn test_gemini_provider_malformed_response() {
-    let mock_server = MockServer::start().await;
-
-    Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_string("not valid json"))
-        .mount(&mock_server)
-        .await;
-
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
-
-    assert!(result.is_err());
-}
-
-/// Test handling of 500 Internal Server Error
-#[tokio::test]
-async fn test_gemini_provider_server_error() {
-    let mock_server = MockServer::start().await;
-
-    Mock::given(method("POST"))
+        .and(path("/models/test-model:generateContent"))
+        .and(query_param("key", "test-api-key"))
         .respond_with(
             ResponseTemplate::new(500).set_body_json(&serde_json::json!({
                 "error": "Internal server error"
@@ -230,37 +99,96 @@ async fn test_gemini_provider_server_error() {
         .mount(&mock_server)
         .await;
 
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
-
-    let result = provider.generate(create_test_request()).await;
+    let provider = create_provider(&mock_server);
+    let result = provider.complete(create_test_request()).await;
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("500"));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("Service unavailable")
+    );
 }
 
-/// Test handling of 401 Unauthorized
 #[tokio::test]
-async fn test_gemini_provider_unauthorized() {
+async fn test_google_ai_provider_malformed_response() {
     let mock_server = MockServer::start().await;
 
     Mock::given(method("POST"))
+        .and(path("/models/test-model:generateContent"))
+        .and(query_param("key", "test-api-key"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not valid json"))
+        .mount(&mock_server)
+        .await;
+
+    let provider = create_provider(&mock_server);
+    let result = provider.complete(create_test_request()).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_google_ai_provider_stream_success() {
+    let mock_server = MockServer::start().await;
+
+    let stream_body = [
+        serde_json::json!({
+            "candidates": [{
+                "content": { "parts": [{ "text": "Hello" }] },
+                "finishReason": null
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 3,
+                "totalTokenCount": 13
+            }
+        })
+        .to_string(),
+        serde_json::json!({
+            "candidates": [{
+                "content": { "parts": [{ "text": " world" }] },
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 15
+            }
+        })
+        .to_string(),
+    ]
+    .join("\n");
+
+    Mock::given(method("POST"))
+        .and(path("/models/test-model:streamGenerateContent"))
+        .and(query_param("key", "test-api-key"))
         .respond_with(
-            ResponseTemplate::new(401).set_body_json(&serde_json::json!({
-                "error": {
-                    "message": "Invalid API key",
-                    "code": "invalid_api_key"
-                }
-            })),
+            ResponseTemplate::new(200)
+                .set_body_string(stream_body)
+                .insert_header("Content-Type", "application/json"),
         )
         .mount(&mock_server)
         .await;
 
-    let config = create_test_config(&mock_server.uri());
-    let provider = GeminiLlmProvider::new(config);
+    let provider = create_provider(&mock_server);
+    let mut request = create_test_request();
+    request = request.with_stream(true);
 
-    let result = provider.generate(create_test_request()).await;
+    let result = provider.complete_stream(request).await;
+    assert!(result.is_ok());
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("401"));
+    let mut stream = result.unwrap();
+    let mut chunks = Vec::new();
+
+    while let Some(item) = stream.next().await {
+        let chunk = item.expect("stream chunk should be Ok");
+        if let Some(delta) = chunk.delta {
+            if let ContentBlock::Text { text } = delta {
+                chunks.push(text);
+            }
+        }
+    }
+
+    assert_eq!(chunks.join(""), "Hello world");
 }

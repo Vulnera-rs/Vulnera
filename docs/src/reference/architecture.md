@@ -292,7 +292,7 @@ All services instantiated and wired:
 ### Docker
 
 ```dockerfile
-FROM rust:1.82 AS builder
+FROM rust:1.91 AS builder
 # Build Vulnera binary...
 
 FROM debian:bookworm

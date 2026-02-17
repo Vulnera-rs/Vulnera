@@ -9,14 +9,27 @@ use super::value_objects::Confidence;
 pub struct SecretFinding {
     pub id: String,
     pub rule_id: String,
+    pub detector_id: String,
     pub secret_type: SecretType,
     pub location: Location,
     pub severity: Severity,
     pub confidence: Confidence,
+    pub verification_state: SecretVerificationState,
     pub description: String,
     pub recommendation: Option<String>,
     pub matched_secret: String, // Partial/redacted secret for context
     pub entropy: Option<f64>,
+    pub evidence: Vec<String>,
+}
+
+/// Verification state for a secret finding
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SecretVerificationState {
+    Verified,
+    Invalid,
+    Unknown,
+    Unverified,
+    NotSupported,
 }
 
 /// Location of a finding in source code

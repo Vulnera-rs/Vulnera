@@ -55,22 +55,23 @@ impl AuthorizationAnalyzer {
                 }
 
                 // BOLA Detection: ID in path but generic or missing scopes
-                if let Some(id_pattern) = &id_pattern {
-                    if id_pattern.is_match(&path.path) {
-                        let is_bola_prone = if !has_scopes {
-                            true
-                        } else {
-                            // Check if scopes are generic
-                            let generic_scopes = ["read", "write", "user", "access"];
-                            operation.security.iter().any(|req| {
-                                req.scopes
-                                    .iter()
-                                    .any(|s| generic_scopes.contains(&s.as_str()))
-                            })
-                        };
+                if let Some(id_pattern) = &id_pattern
+                    && id_pattern.is_match(&path.path)
+                {
+                    let is_bola_prone = if !has_scopes {
+                        true
+                    } else {
+                        // Check if scopes are generic
+                        let generic_scopes = ["read", "write", "user", "access"];
+                        operation.security.iter().any(|req| {
+                            req.scopes
+                                .iter()
+                                .any(|s| generic_scopes.contains(&s.as_str()))
+                        })
+                    };
 
-                        if is_bola_prone {
-                            findings.push(ApiFinding {
+                    if is_bola_prone {
+                        findings.push(ApiFinding {
                                 id: format!("bola-risk-{}-{}", path.path, operation.method),
                                 vulnerability_type: ApiVulnerabilityType::BolaRisk,
                                 location: ApiLocation {
@@ -88,7 +89,6 @@ impl AuthorizationAnalyzer {
                                 path: Some(path.path.clone()),
                                 method: Some(operation.method.clone()),
                             });
-                        }
                     }
                 }
             }

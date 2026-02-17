@@ -6,6 +6,7 @@
 //! - Call graph analysis for cross-function vulnerability detection
 //! - SARIF v2.1.0 export
 
+use futures::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -19,7 +20,7 @@ use vulnera_core::config::{AnalysisDepth, SastConfig};
 
 use crate::domain::call_graph::ParameterInfo;
 use crate::domain::finding::{
-    DataFlowFinding, DataFlowNode, DataFlowPath, Finding as SastFinding, Location, Severity,
+    DataFlowFinding, Finding as SastFinding, Location, SemanticNode, SemanticPath, Severity,
 };
 use crate::domain::pattern_types::PatternRule;
 use crate::domain::suppression::FileSuppressions;
@@ -28,6 +29,10 @@ use crate::infrastructure::ast_cache::AstCacheService;
 use crate::infrastructure::call_graph::CallGraphBuilder;
 use crate::infrastructure::data_flow::{DataFlowAnalyzer, InterProceduralContext, TaintMatch};
 use crate::infrastructure::incremental::IncrementalTracker;
+use crate::infrastructure::oxc_frontend::OxcFrontend;
+use crate::infrastructure::parser_frontend::{
+    JavaScriptFrontend, ParserFrontend, ParserFrontendSelector,
+};
 use crate::infrastructure::parsers::convert_tree_sitter_node;
 use crate::infrastructure::regex_cache;
 use crate::infrastructure::rules::{
@@ -35,7 +40,7 @@ use crate::infrastructure::rules::{
 };
 use crate::infrastructure::sarif::{SarifExporter, SarifExporterConfig};
 use crate::infrastructure::sast_engine::{SastEngine, SastEngineHandle};
-use crate::infrastructure::scanner::DirectoryScanner;
+use crate::infrastructure::scanner::{DirectoryScanner, ScanFile};
 use crate::infrastructure::semantic::SemanticContext;
 use crate::infrastructure::taint_queries::{
     TaintConfig, get_propagation_queries, get_sanitizer_queries,
@@ -111,6 +116,17 @@ const fn default_per_file_timeout() -> u64 {
 const fn default_max_findings_per_file() -> usize {
     100
 }
+fn default_js_ts_frontend() -> JavaScriptFrontend {
+    JavaScriptFrontend::OxcPreferred
+}
+
+fn parse_js_ts_frontend(value: Option<&str>) -> JavaScriptFrontend {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("tree_sitter") => JavaScriptFrontend::TreeSitter,
+        Some("oxc_preferred") => JavaScriptFrontend::OxcPreferred,
+        _ => default_js_ts_frontend(),
+    }
+}
 fn default_depth_file_threshold() -> Option<usize> {
     Some(500)
 }
@@ -169,6 +185,9 @@ pub struct AnalysisConfig {
     pub max_total_findings: Option<usize>,
     /// Path to incremental state file (None = full scan every time)
     pub incremental_state_path: Option<PathBuf>,
+    /// Preferred parser frontend strategy for JavaScript/TypeScript.
+    #[serde(default = "default_js_ts_frontend")]
+    pub js_ts_frontend: JavaScriptFrontend,
 }
 
 impl From<&SastConfig> for AnalysisConfig {
@@ -206,6 +225,7 @@ impl From<&SastConfig> for AnalysisConfig {
                 .unwrap_or(default_max_findings_per_file()),
             max_total_findings: config.max_total_findings,
             incremental_state_path: config.incremental_state_path.clone(),
+            js_ts_frontend: parse_js_ts_frontend(config.js_ts_frontend.as_deref()),
         }
     }
 }
@@ -242,6 +262,24 @@ struct CallAssignment {
     column: usize,
 }
 
+#[derive(Debug)]
+struct ScanPlan {
+    files: Vec<ScanFile>,
+    rules: Vec<PatternRule>,
+    effective_depth: AnalysisDepth,
+    effective_parallelism: usize,
+    ast_cache_ttl: Duration,
+}
+
+#[derive(Debug, Default)]
+struct AnalysisStageResult {
+    findings: Vec<SastFinding>,
+    files_scanned: usize,
+    files_skipped: usize,
+    files_failed: usize,
+    errors: Vec<String>,
+}
+
 /// Production-ready use case for scanning a project
 pub struct ScanProjectUseCase {
     scanner: DirectoryScanner,
@@ -257,6 +295,10 @@ pub struct ScanProjectUseCase {
     call_graph_builder: Arc<RwLock<CallGraphBuilder>>,
     /// Content-hash tracker for incremental analysis (skip unchanged files)
     incremental_tracker: Mutex<Option<IncrementalTracker>>,
+    /// OXC parser frontend for JS/TS primary parsing lane.
+    oxc_frontend: OxcFrontend,
+    /// Parser frontend selector for language-specific routing.
+    parser_frontend_selector: ParserFrontendSelector,
     /// Analysis configuration
     config: AnalysisConfig,
 }
@@ -308,6 +350,8 @@ impl ScanProjectUseCase {
             data_flow_context: Arc::new(RwLock::new(InterProceduralContext::new())),
             call_graph_builder: Arc::new(RwLock::new(CallGraphBuilder::new())),
             incremental_tracker: Mutex::new(incremental_tracker),
+            oxc_frontend: OxcFrontend,
+            parser_frontend_selector: ParserFrontendSelector::new(analysis_config.js_ts_frontend),
             config: analysis_config,
         }
     }
@@ -378,11 +422,114 @@ impl ScanProjectUseCase {
         }
     }
 
+    fn resolve_effective_parallelism(&self, file_count: usize, total_bytes: u64) -> usize {
+        let configured = self.config.max_concurrent_files.max(1);
+        let cpu_cap = std::thread::available_parallelism()
+            .map(|n| n.get().saturating_mul(2))
+            .unwrap_or(2)
+            .max(1);
+        let mut effective = configured.min(cpu_cap).max(1);
+
+        if file_count < 16 {
+            effective = 1;
+        } else if file_count < 64 {
+            effective = effective.min(4);
+        }
+
+        if total_bytes > 268_435_456 {
+            effective = (effective / 2).max(1);
+        }
+
+        effective
+    }
+
     #[instrument(skip(self), fields(root = %root.display()))]
     pub async fn execute(&self, root: &Path) -> Result<ScanResult, ScanError> {
         let start_time = std::time::Instant::now();
         info!("Starting native SAST scan");
 
+        let plan = self.build_scan_plan(root).await?;
+
+        let (parsed_files, mut stage_index_errors) = self
+            .build_parse_index_stage(
+                &plan.files,
+                plan.effective_depth,
+                plan.effective_parallelism,
+                plan.ast_cache_ttl,
+            )
+            .await;
+
+        let mut ast_cache_stats = AstCacheStats::default();
+        let mut stage_analysis = self
+            .run_analysis_stage(
+                &plan.files,
+                &plan.rules,
+                plan.effective_depth,
+                plan.ast_cache_ttl,
+                &parsed_files,
+                &mut ast_cache_stats,
+            )
+            .await;
+
+        stage_analysis.errors.append(&mut stage_index_errors);
+
+        if self.config.enable_data_flow && plan.effective_depth != AnalysisDepth::Quick {
+            Self::adjust_severity_for_data_flow(&mut stage_analysis.findings);
+        }
+
+        stage_analysis.findings = Self::deduplicate_findings(stage_analysis.findings);
+
+        {
+            let mut tracker = self.incremental_tracker.lock().unwrap();
+            if let Some(ref mut t) = *tracker {
+                t.finalize(
+                    stage_analysis.files_scanned + stage_analysis.files_skipped,
+                    stage_analysis.files_skipped,
+                );
+                if let Some(ref state_path) = self.config.incremental_state_path
+                    && let Err(e) = t.save_to_file(state_path)
+                {
+                    warn!(error = %e, "Failed to save incremental state");
+                }
+                let stats = t.stats();
+                info!(
+                    previous = stats.previous_files,
+                    analyzed = stats.files_analyzed,
+                    skipped = stats.files_skipped,
+                    "Incremental analysis stats"
+                );
+            }
+        }
+
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+        info!(
+            l1_hits = ast_cache_stats.l1_hits,
+            l1_misses = ast_cache_stats.l1_misses,
+            l2_hits = ast_cache_stats.l2_hits,
+            l2_misses = ast_cache_stats.l2_misses,
+            "SAST AST cache stats"
+        );
+        info!(
+            finding_count = stage_analysis.findings.len(),
+            files_scanned = stage_analysis.files_scanned,
+            files_skipped = stage_analysis.files_skipped,
+            files_failed = stage_analysis.files_failed,
+            effective_parallelism = plan.effective_parallelism,
+            duration_ms,
+            "SAST scan completed"
+        );
+
+        Ok(ScanResult {
+            findings: stage_analysis.findings,
+            files_scanned: stage_analysis.files_scanned,
+            files_skipped: stage_analysis.files_skipped,
+            files_failed: stage_analysis.files_failed,
+            errors: stage_analysis.errors,
+            duration_ms,
+        })
+    }
+
+    async fn build_scan_plan(&self, root: &Path) -> Result<ScanPlan, ScanError> {
         let files = self.scanner.scan(root).map_err(|e| {
             error!(error = %e, "Failed to scan directory");
             ScanError::scan_failed(root, e)
@@ -393,115 +540,183 @@ impl ScanProjectUseCase {
             .iter()
             .filter_map(|file| std::fs::metadata(&file.path).ok().map(|meta| meta.len()))
             .sum();
+
         let effective_depth = self.resolve_analysis_depth(file_count, total_bytes);
+        let effective_parallelism = self.resolve_effective_parallelism(file_count, total_bytes);
         info!(
             file_count,
             total_bytes,
             configured_depth = ?self.config.analysis_depth,
             effective_depth = ?effective_depth,
-            "Found files to scan"
+            configured_parallelism = self.config.max_concurrent_files,
+            effective_parallelism,
+            "Scan planning stage completed"
         );
 
-        let mut all_findings = Vec::new();
-        let mut files_scanned = 0;
-        let mut files_skipped = 0;
-        let mut files_failed = 0;
-        let mut errors: Vec<String> = Vec::new();
-        let mut ast_cache_stats = AstCacheStats::default();
-        let ast_cache_ttl =
-            Duration::from_secs(self.config.ast_cache_ttl_hours.saturating_mul(3600));
+        let rules = {
+            let rules_guard = self.rule_repository.read().await;
+            rules_guard.get_all_rules().to_vec()
+        };
 
-        let rules = self.rule_repository.read().await;
-        let all_rules = rules.get_all_rules();
+        Ok(ScanPlan {
+            files,
+            rules,
+            effective_depth,
+            effective_parallelism,
+            ast_cache_ttl: Duration::from_secs(
+                self.config.ast_cache_ttl_hours.saturating_mul(3600),
+            ),
+        })
+    }
 
-        // =========================================================================
-        // Phase 1: Build Call Graph & Parse All Files
-        // =========================================================================
-        // we first build the complete call graph by parsing
-        // all files, then resolve cross-file references before analysis.
-
+    async fn build_parse_index_stage(
+        &self,
+        files: &[ScanFile],
+        effective_depth: AnalysisDepth,
+        effective_parallelism: usize,
+        ast_cache_ttl: Duration,
+    ) -> (HashMap<String, (tree_sitter::Tree, String)>, Vec<String>) {
         let mut parsed_files: HashMap<String, (tree_sitter::Tree, String)> = HashMap::new();
+        let mut errors = Vec::new();
 
-        if self.config.enable_call_graph && effective_depth != AnalysisDepth::Quick {
-            debug!("Phase 1: Building call graph with cross-file resolution");
-            let mut call_graph = self.call_graph_builder.write().await;
+        if !(self.config.enable_call_graph && effective_depth != AnalysisDepth::Quick) {
+            return (parsed_files, errors);
+        }
 
-            // 1a. Parse all files and build initial graph
-            for file in &files {
-                if let Ok(content) = std::fs::read_to_string(&file.path) {
-                    let file_path_str = file.path.display().to_string();
+        debug!("Stage: parse/index with cross-file call graph");
+        let mut call_graph = self.call_graph_builder.write().await;
 
-                    let tree = match self.sast_engine.parse(&content, file.language).await {
-                        Ok(tree) => tree,
-                        Err(_) => continue,
-                    };
+        let results = stream::iter(files.iter().cloned())
+            .map(|file| async move {
+                let file_path_str = file.path.display().to_string();
+                let content = std::fs::read_to_string(&file.path).map_err(|e| {
+                    format!(
+                        "Failed to read {} in parse/index: {}",
+                        file.path.display(),
+                        e
+                    )
+                })?;
 
-                    if self.config.enable_ast_cache {
-                        if let Some(cache) = self.ast_cache.as_ref() {
-                            let content_hash = Self::compute_content_hash(&content);
-                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
-                            if let Err(e) = cache
-                                .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
-                                .await
-                            {
-                                warn!(error = %e, "Failed to write L2 AST cache");
-                            }
+                let selected_frontend = self.parser_frontend_selector.select(file.language);
+                let mut warnings = Vec::new();
+
+                if selected_frontend == ParserFrontend::Oxc
+                    && OxcFrontend::supports(file.language)
+                    && let Err(err) = self.oxc_frontend.parse_file(&file.path, &content)
+                {
+                    warnings.push(format!(
+                        "OXC parse warning for {}: {}",
+                        file.path.display(),
+                        err
+                    ));
+                }
+
+                let tree = self
+                    .sast_engine
+                    .parse(&content, file.language)
+                    .await
+                    .map_err(|e| {
+                        format!(
+                            "Parse/index stage failed for {}: {}",
+                            file.path.display(),
+                            e
+                        )
+                    })?;
+
+                Ok::<_, String>((file_path_str, file.language, content, tree, warnings))
+            })
+            .buffer_unordered(effective_parallelism.max(1))
+            .collect::<Vec<_>>()
+            .await;
+
+        for result in results {
+            match result {
+                Ok((file_path_str, language, content, tree, warnings)) => {
+                    for warning in warnings {
+                        warn!(file = %file_path_str, "{}", warning);
+                        errors.push(warning);
+                    }
+
+                    if self.config.enable_ast_cache
+                        && let Some(cache) = self.ast_cache.as_ref()
+                    {
+                        let content_hash = Self::compute_content_hash(&content);
+                        let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                        if let Err(e) = cache
+                            .set(&content_hash, &language, &ast, Some(ast_cache_ttl))
+                            .await
+                        {
+                            warn!(error = %e, "Failed to write L2 AST cache");
                         }
                     }
 
-                    // Build call graph nodes and edges
-                    call_graph.analyze_ast(&file_path_str, &tree, &file.language, &content);
+                    call_graph.analyze_ast(&file_path_str, &tree, &language, &content);
 
-                    // Cache the parsed tree for reuse in analysis phase
                     if parsed_files.len() < self.config.tree_cache_max_entries {
                         parsed_files.insert(file_path_str, (tree, content));
                     }
                 }
+                Err(error) => errors.push(error),
             }
+        }
 
-            // 1b. Resolve cross-file references
-            let resolved_count = call_graph.graph_mut().resolve_all_calls();
-            let stats = call_graph.graph().stats();
+        let resolved_count = call_graph.graph_mut().resolve_all_calls();
+        let stats = call_graph.graph().stats();
+        info!(
+            functions = stats.total_functions,
+            calls = stats.total_calls,
+            resolved = resolved_count,
+            entry_points = stats.entry_points,
+            "Parse/index stage call graph built"
+        );
 
-            info!(
-                functions = stats.total_functions,
-                calls = stats.total_calls,
-                resolved = resolved_count,
-                entry_points = stats.entry_points,
-                "Call graph built with cross-file resolution"
-            );
-
-            // Seed inter-procedural context from call graph for cross-function taint propagation
+        {
             let mut df_ctx = self.data_flow_context.write().await;
             df_ctx.seed_from_call_graph(call_graph.graph());
-            drop(df_ctx);
+        }
 
-            // Extract file-level dependencies for incremental tracking
-            {
-                let file_deps = call_graph.graph().file_dependencies();
-                if !file_deps.is_empty() {
-                    let mut tracker = self.incremental_tracker.lock().unwrap();
-                    if let Some(ref mut t) = *tracker {
-                        debug!(
-                            cross_file_edges = file_deps.len(),
-                            "Setting file dependencies from call graph"
-                        );
-                        t.set_file_dependencies(file_deps);
-                    }
+        {
+            let file_deps = call_graph.graph().file_dependencies();
+            if !file_deps.is_empty() {
+                let mut tracker = self.incremental_tracker.lock().unwrap();
+                if let Some(ref mut t) = *tracker {
+                    debug!(
+                        cross_file_edges = file_deps.len(),
+                        "Setting file dependencies from call graph"
+                    );
+                    t.set_file_dependencies(file_deps);
                 }
             }
         }
 
-        // =========================================================================
-        // Phase 2: File Analysis (Pattern Matching & Data Flow)
-        // =========================================================================
+        (parsed_files, errors)
+    }
+
+    async fn run_analysis_stage(
+        &self,
+        files: &[ScanFile],
+        all_rules: &[PatternRule],
+        effective_depth: AnalysisDepth,
+        ast_cache_ttl: Duration,
+        parsed_files: &HashMap<String, (tree_sitter::Tree, String)>,
+        ast_cache_stats: &mut AstCacheStats,
+    ) -> AnalysisStageResult {
+        let mut stage = AnalysisStageResult::default();
+
         for file in files {
-            // Check file size limit
+            let selected_frontend = self.parser_frontend_selector.select(file.language);
+            debug!(
+                file = %file.path.display(),
+                language = %file.language,
+                frontend = ?selected_frontend,
+                "Stage: file analysis routing"
+            );
+
             let file_size = match std::fs::metadata(&file.path) {
                 Ok(meta) => meta.len(),
                 Err(e) => {
                     debug!(file = %file.path.display(), error = %e, "Failed to get file metadata");
-                    files_skipped += 1;
+                    stage.files_skipped += 1;
                     continue;
                 }
             };
@@ -513,34 +728,49 @@ impl ScanProjectUseCase {
                     max_size = self.config.max_file_size_bytes,
                     "Skipping file: exceeds size limit"
                 );
-                files_skipped += 1;
+                stage.files_skipped += 1;
                 continue;
             }
-
-            debug!(file = %file.path.display(), language = ?file.language, "Scanning file");
 
             let content = match std::fs::read_to_string(&file.path) {
                 Ok(content) => content,
                 Err(e) => {
                     warn!(file = %file.path.display(), error = %e, "Failed to read file");
-                    files_failed += 1;
-                    errors.push(format!("Failed to read {}: {}", file.path.display(), e));
+                    stage.files_failed += 1;
+                    stage
+                        .errors
+                        .push(format!("Failed to read {}: {}", file.path.display(), e));
                     continue;
                 }
             };
 
+            if selected_frontend == ParserFrontend::Oxc
+                && OxcFrontend::supports(file.language)
+                && let Err(err) = self.oxc_frontend.parse_file(&file.path, &content)
+            {
+                warn!(
+                    file = %file.path.display(),
+                    language = %file.language,
+                    error = %err,
+                    "OXC parse failed, continuing with Tree-sitter compatibility lane"
+                );
+                stage.errors.push(format!(
+                    "OXC parse warning for {}: {}",
+                    file.path.display(),
+                    err
+                ));
+            }
+
             let file_path_str = file.path.display().to_string();
             let content_hash = Self::compute_content_hash(&content);
 
-            // Incremental check: skip files whose content hasn't changed
             {
                 let tracker = self.incremental_tracker.lock().unwrap();
                 if let Some(ref t) = *tracker {
                     let (needs, _) = t.needs_analysis(&file_path_str, &content);
                     if !needs {
                         debug!(file = %file_path_str, "Skipping unchanged file (incremental)");
-                        files_skipped += 1;
-                        // Still record previous findings in current state
+                        stage.files_skipped += 1;
                         drop(tracker);
                         let mut tracker = self.incremental_tracker.lock().unwrap();
                         if let Some(ref mut t) = *tracker {
@@ -573,26 +803,26 @@ impl ScanProjectUseCase {
                     match cache.get(&content_hash, &file.language).await {
                         Ok(Some(_)) => {
                             l2_hit = true;
-                            Self::update_l2_cache_stats(&mut ast_cache_stats, true)
+                            Self::update_l2_cache_stats(ast_cache_stats, true)
                         }
-                        Ok(None) => Self::update_l2_cache_stats(&mut ast_cache_stats, false),
+                        Ok(None) => Self::update_l2_cache_stats(ast_cache_stats, false),
                         Err(e) => {
                             warn!(error = %e, "Failed to read L2 AST cache");
                         }
                     }
                 }
 
-                let query_engine = &self.sast_engine;
-                if let Ok(tree) = query_engine.parse(&content, file.language).await {
-                    if self.config.enable_ast_cache && !l2_hit {
-                        if let Some(cache) = self.ast_cache.as_ref() {
-                            let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
-                            if let Err(e) = cache
-                                .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
-                                .await
-                            {
-                                warn!(error = %e, "Failed to write L2 AST cache");
-                            }
+                if let Ok(tree) = self.sast_engine.parse(&content, file.language).await {
+                    if self.config.enable_ast_cache
+                        && !l2_hit
+                        && let Some(cache) = self.ast_cache.as_ref()
+                    {
+                        let ast = convert_tree_sitter_node(tree.root_node(), &content, None);
+                        if let Err(e) = cache
+                            .set(&content_hash, &file.language, &ast, Some(ast_cache_ttl))
+                            .await
+                        {
+                            warn!(error = %e, "Failed to write L2 AST cache");
                         }
                     }
                     cached_tree = Some(tree);
@@ -601,10 +831,8 @@ impl ScanProjectUseCase {
 
             let suppressions = FileSuppressions::parse(&content);
             let is_test_context = Self::is_test_file(&file.path, &content);
+            stage.files_scanned += 1;
 
-            files_scanned += 1;
-
-            // Get rules applicable to this language
             let applicable_rules: Vec<&PatternRule> = all_rules
                 .iter()
                 .filter(|r| r.languages.contains(&file.language))
@@ -614,7 +842,6 @@ impl ScanProjectUseCase {
                 continue;
             }
 
-            // Execute tree-sitter pattern analysis
             if let Err(e) = self
                 .execute_tree_sitter_analysis(
                     &file.path,
@@ -624,19 +851,18 @@ impl ScanProjectUseCase {
                     &suppressions,
                     is_test_context,
                     cached_tree.as_ref(),
-                    &mut all_findings,
+                    &mut stage.findings,
                 )
                 .await
             {
                 warn!(file = %file.path.display(), error = %e, "Tree-sitter analysis failed");
-                errors.push(format!(
+                stage.errors.push(format!(
                     "Analysis failed for {}: {}",
                     file.path.display(),
                     e
                 ));
             }
 
-            // Phase 3: Data flow analysis
             if self.config.enable_data_flow && effective_depth != AnalysisDepth::Quick {
                 self.execute_data_flow_analysis(
                     &file.path,
@@ -644,16 +870,17 @@ impl ScanProjectUseCase {
                     &content,
                     cached_tree.as_ref(),
                     effective_depth,
-                    &mut all_findings,
+                    &mut stage.findings,
                 )
                 .await;
             }
 
-            // Check max findings per file limit
-            let file_finding_count = all_findings
+            let file_finding_count = stage
+                .findings
                 .iter()
                 .filter(|f| f.location.file_path == file.path.display().to_string())
                 .count();
+
             if file_finding_count >= self.config.max_findings_per_file {
                 debug!(
                     file = %file.path.display(),
@@ -662,28 +889,25 @@ impl ScanProjectUseCase {
                 );
             }
 
-            // Check max total findings limit
-            if let Some(max_total) = self.config.max_total_findings {
-                if all_findings.len() >= max_total {
-                    info!(
-                        total_findings = all_findings.len(),
-                        max_total, "Max total findings limit reached, stopping scan early"
+            if let Some(max_total) = self.config.max_total_findings
+                && stage.findings.len() >= max_total
+            {
+                info!(
+                    total_findings = stage.findings.len(),
+                    max_total, "Max total findings limit reached, stopping scan early"
+                );
+                let mut tracker = self.incremental_tracker.lock().unwrap();
+                if let Some(ref mut t) = *tracker {
+                    t.record_file(
+                        &file_path_str,
+                        content_hash,
+                        content.len() as u64,
+                        file_finding_count,
                     );
-                    // Record this file before breaking
-                    let mut tracker = self.incremental_tracker.lock().unwrap();
-                    if let Some(ref mut t) = *tracker {
-                        t.record_file(
-                            &file_path_str,
-                            content_hash,
-                            content.len() as u64,
-                            file_finding_count,
-                        );
-                    }
-                    break;
                 }
+                break;
             }
 
-            // Record file in incremental tracker
             {
                 let mut tracker = self.incremental_tracker.lock().unwrap();
                 if let Some(ref mut t) = *tracker {
@@ -697,54 +921,7 @@ impl ScanProjectUseCase {
             }
         }
 
-        // Phase 4: Adjust severity for data-flow confirmed findings
-        if self.config.enable_data_flow && effective_depth != AnalysisDepth::Quick {
-            Self::adjust_severity_for_data_flow(&mut all_findings);
-        }
-
-        all_findings = Self::deduplicate_findings(all_findings);
-
-        // Finalize incremental tracker and persist state
-        {
-            let mut tracker = self.incremental_tracker.lock().unwrap();
-            if let Some(ref mut t) = *tracker {
-                t.finalize(files_scanned + files_skipped, files_skipped);
-                if let Some(ref state_path) = self.config.incremental_state_path {
-                    if let Err(e) = t.save_to_file(state_path) {
-                        warn!(error = %e, "Failed to save incremental state");
-                    }
-                }
-                let stats = t.stats();
-                info!(
-                    previous = stats.previous_files,
-                    analyzed = stats.files_analyzed,
-                    skipped = stats.files_skipped,
-                    "Incremental analysis stats"
-                );
-            }
-        }
-
-        let duration_ms = start_time.elapsed().as_millis() as u64;
-        info!(
-            l1_hits = ast_cache_stats.l1_hits,
-            l1_misses = ast_cache_stats.l1_misses,
-            l2_hits = ast_cache_stats.l2_hits,
-            l2_misses = ast_cache_stats.l2_misses,
-            "SAST AST cache stats"
-        );
-        info!(
-            finding_count = all_findings.len(),
-            files_scanned, files_skipped, files_failed, duration_ms, "SAST scan completed"
-        );
-
-        Ok(ScanResult {
-            findings: all_findings,
-            files_scanned,
-            files_skipped,
-            files_failed,
-            errors,
-            duration_ms,
-        })
+        stage
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1060,6 +1237,10 @@ impl ScanProjectUseCase {
                                     target_id,
                                     argument_taints,
                                 ));
+                            } else {
+                                Self::propagate_unresolved_callback_call(
+                                    analyzer, range, &call, &file_str,
+                                );
                             }
                         }
 
@@ -1316,17 +1497,17 @@ impl ScanProjectUseCase {
 
             let sink_var = sink.variable_name.as_deref().unwrap_or(&sink.matched_text);
 
-            if analyzer.is_tainted(sink_var) {
-                if let Some(data_flow_finding) = analyzer.check_sink(
+            if analyzer.is_tainted(sink_var)
+                && let Some(data_flow_finding) = analyzer.check_sink(
                     sink_var,
                     &sink.pattern_name,
                     file_str,
                     sink.line as u32 + 1,
                     sink.column as u32,
-                ) {
-                    Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
-                    continue;
-                }
+                )
+            {
+                Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
+                continue;
             }
 
             let active_taints: Vec<String> = analyzer
@@ -1346,16 +1527,16 @@ impl ScanProjectUseCase {
                     .or_else(|_| regex_cache::get_regex(tainted_var))
                     .unwrap();
 
-                if re.is_match(&sink.matched_text) {
-                    if let Some(data_flow_finding) = analyzer.check_sink(
+                if re.is_match(&sink.matched_text)
+                    && let Some(data_flow_finding) = analyzer.check_sink(
                         tainted_var,
                         &sink.pattern_name,
                         file_str,
                         sink.line as u32 + 1,
                         sink.column as u32,
-                    ) {
-                        Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
-                    }
+                    )
+                {
+                    Self::add_finding(findings, &data_flow_finding, sink, file_str, language);
                 }
             }
         }
@@ -1371,7 +1552,7 @@ impl ScanProjectUseCase {
         let language_tag = language.to_string().to_lowercase();
         let severity = Self::data_flow_severity_for_category(&sink.category);
         // Build the finding with data flow path
-        let source_node = DataFlowNode {
+        let source_node = SemanticNode {
             location: Location {
                 file_path: data_flow_finding.source.file.clone(),
                 line: data_flow_finding.source.line,
@@ -1387,7 +1568,7 @@ impl ScanProjectUseCase {
             expression: data_flow_finding.source.expression.clone(),
         };
 
-        let sink_node = DataFlowNode {
+        let sink_node = SemanticNode {
             location: Location {
                 file_path: data_flow_finding.sink.file.clone(),
                 line: data_flow_finding.sink.line,
@@ -1403,10 +1584,10 @@ impl ScanProjectUseCase {
             expression: data_flow_finding.sink.expression.clone(),
         };
 
-        let steps: Vec<DataFlowNode> = data_flow_finding
+        let steps: Vec<SemanticNode> = data_flow_finding
             .intermediate_steps
             .iter()
-            .map(|step| DataFlowNode {
+            .map(|step| SemanticNode {
                 location: Location {
                     file_path: step.file.clone(),
                     line: step.line,
@@ -1444,7 +1625,7 @@ impl ScanProjectUseCase {
                  Consider using appropriate escaping for {} context.",
                 sink.pattern_name, sink.category
             )),
-            data_flow_path: Some(DataFlowPath {
+            semantic_path: Some(SemanticPath {
                 source: source_node,
                 sink: sink_node,
                 steps,
@@ -1480,7 +1661,7 @@ impl ScanProjectUseCase {
     /// Adjust severity for findings confirmed by data flow analysis
     fn adjust_severity_for_data_flow(findings: &mut [SastFinding]) {
         for finding in findings.iter_mut() {
-            if finding.data_flow_path.is_some() {
+            if finding.semantic_path.is_some() {
                 // Escalate severity when data flow confirms the vulnerability
                 match finding.severity {
                     Severity::Low => finding.severity = Severity::Medium,
@@ -1681,6 +1862,44 @@ impl ScanProjectUseCase {
         }
 
         None
+    }
+
+    fn propagate_unresolved_callback_call(
+        analyzer: &mut DataFlowAnalyzer,
+        function_range: &FunctionRange,
+        call: &CallAssignment,
+        file: &str,
+    ) {
+        let is_callback_param = function_range
+            .parameters
+            .iter()
+            .any(|parameter| parameter.name == call.callee);
+
+        if !is_callback_param {
+            return;
+        }
+
+        let first_tainted_argument = call
+            .args
+            .iter()
+            .find_map(|arg| Self::resolve_taint_for_expr(analyzer, arg));
+
+        if let Some(state) = first_tainted_argument {
+            analyzer.set_taint_state(
+                &call.target,
+                state,
+                file,
+                call.line as u32 + 1,
+                call.column as u32,
+            );
+
+            debug!(
+                callback = %call.callee,
+                target = %call.target,
+                line = call.line + 1,
+                "Propagated taint through unresolved callback parameter call"
+            );
+        }
     }
 
     fn extract_call_assignments(

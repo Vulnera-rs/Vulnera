@@ -4,6 +4,8 @@ use crate::domain::entities::{Location, SecretFinding};
 use crate::infrastructure::detectors::DetectorEngine;
 use chrono::{DateTime, Utc};
 use git2::{Commit, DiffDelta, DiffHunk, DiffLine, Repository};
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, instrument};
 
@@ -15,6 +17,21 @@ pub struct CommitMetadata {
     pub email: String,
     pub date: DateTime<Utc>,
     pub message: String,
+}
+
+#[derive(Debug, Clone)]
+struct GitHunkChunk {
+    file_path: PathBuf,
+    content: String,
+    added_line_map: HashMap<u32, u32>,
+}
+
+#[derive(Debug, Default)]
+struct HunkBuilder {
+    file_path: PathBuf,
+    content: String,
+    snippet_line: u32,
+    added_line_map: HashMap<u32, u32>,
 }
 
 /// Git history scanner
@@ -65,11 +82,11 @@ impl GitScanner {
 
         for oid in oids {
             // Check max commits limit
-            if let Some(max) = self.max_commits {
-                if commit_count >= max {
-                    debug!("Reached max commits limit: {}", max);
-                    break;
-                }
+            if let Some(max) = self.max_commits
+                && commit_count >= max
+            {
+                debug!("Reached max commits limit: {}", max);
+                break;
             }
 
             // Extract commit data and lines to scan synchronously
@@ -131,18 +148,28 @@ impl GitScanner {
                 );
             }
 
-            // Process collected lines asynchronously
-            for (file_path, content) in lines_to_scan {
-                let line_findings = self
+            // Process collected hunks asynchronously
+            for chunk in lines_to_scan {
+                let hunk_findings = self
                     .detector_engine
-                    .detect_in_file_async(&file_path, &content)
+                    .detect_in_file_async(&chunk.file_path, &chunk.content)
                     .await;
 
                 // Convert to git history findings with commit metadata
-                for finding in line_findings {
+                for mut finding in hunk_findings {
+                    // Keep only findings that originate from added lines in this hunk
+                    let snippet_line = finding.location.line;
+                    let Some(actual_line) = chunk.added_line_map.get(&snippet_line).copied() else {
+                        continue;
+                    };
+
+                    finding.location.line = actual_line;
+                    finding.location.end_line = Some(actual_line);
+
                     all_findings.push(SecretFinding {
                         id: format!("{}-{}", metadata.hash, finding.id),
                         rule_id: finding.rule_id,
+                        detector_id: finding.detector_id,
                         secret_type: finding.secret_type,
                         location: Location {
                             file_path: format!("{}:{}", metadata.hash, finding.location.file_path),
@@ -153,6 +180,7 @@ impl GitScanner {
                         },
                         severity: finding.severity,
                         confidence: finding.confidence,
+                        verification_state: finding.verification_state,
                         description: format!(
                             "{} (Found in commit {} by {} on {})",
                             finding.description,
@@ -163,6 +191,7 @@ impl GitScanner {
                         recommendation: finding.recommendation,
                         matched_secret: finding.matched_secret,
                         entropy: finding.entropy,
+                        evidence: finding.evidence,
                     });
                 }
             }
@@ -182,8 +211,8 @@ impl GitScanner {
         &self,
         repo: &Repository,
         commit: &Commit<'_>,
-    ) -> Result<Vec<(PathBuf, String)>, GitScanError> {
-        let mut lines_to_scan: Vec<(PathBuf, String)> = Vec::new();
+    ) -> Result<Vec<GitHunkChunk>, GitScanError> {
+        let hunk_builders: RefCell<HashMap<String, HunkBuilder>> = RefCell::new(HashMap::new());
 
         // Get parent commit for diff
         let parent = if commit.parent_count() > 0 {
@@ -203,28 +232,97 @@ impl GitScanner {
             .map_err(GitScanError::GitError)?;
 
         let mut file_cb = |_delta: DiffDelta<'_>, _progress: f32| true;
-        let mut line_cb =
-            |delta: DiffDelta<'_>, _hunk: Option<DiffHunk<'_>>, line: DiffLine<'_>| {
-                // Only scan added lines (new secrets)
-                if line.origin() == '+' {
-                    if let Ok(content) = std::str::from_utf8(line.content()) {
-                        let file_path = delta
-                            .new_file()
-                            .path()
-                            .or_else(|| delta.old_file().path())
-                            .map(|p| p.to_path_buf())
-                            .unwrap_or_else(|| PathBuf::from("unknown"));
+        let mut hunk_cb = |delta: DiffDelta<'_>, hunk: DiffHunk<'_>| {
+            let file_path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("unknown"));
 
-                        lines_to_scan.push((file_path, content.to_string()));
-                    }
-                }
-                true
+            let key = format!(
+                "{}:{}:{}",
+                file_path.display(),
+                hunk.new_start(),
+                hunk.new_lines()
+            );
+
+            hunk_builders
+                .borrow_mut()
+                .entry(key)
+                .or_insert_with(|| HunkBuilder {
+                    file_path,
+                    content: String::new(),
+                    snippet_line: 1,
+                    added_line_map: HashMap::new(),
+                });
+
+            true
+        };
+
+        let mut line_cb = |delta: DiffDelta<'_>, hunk: Option<DiffHunk<'_>>, line: DiffLine<'_>| {
+            let Some(hunk) = hunk else {
+                return true;
             };
 
-        diff.foreach(&mut file_cb, None, None, Some(&mut line_cb))
+            let file_path = delta
+                .new_file()
+                .path()
+                .or_else(|| delta.old_file().path())
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("unknown"));
+
+            let key = format!(
+                "{}:{}:{}",
+                file_path.display(),
+                hunk.new_start(),
+                hunk.new_lines()
+            );
+
+            let mut builders = hunk_builders.borrow_mut();
+            let Some(builder) = builders.get_mut(&key) else {
+                return true;
+            };
+
+            // Build a scanable hunk content stream using context and added lines.
+            // Removed lines are skipped because they do not exist in the new file version.
+            if (line.origin() == '+' || line.origin() == ' ')
+                && let Ok(content) = std::str::from_utf8(line.content())
+            {
+                builder.content.push_str(content);
+                if !content.ends_with('\n') {
+                    builder.content.push('\n');
+                }
+
+                if line.origin() == '+'
+                    && let Some(actual_line) = line.new_lineno()
+                {
+                    builder
+                        .added_line_map
+                        .insert(builder.snippet_line, actual_line);
+                }
+
+                builder.snippet_line = builder.snippet_line.saturating_add(1);
+            }
+
+            true
+        };
+
+        diff.foreach(&mut file_cb, None, Some(&mut hunk_cb), Some(&mut line_cb))
             .map_err(GitScanError::GitError)?;
 
-        Ok(lines_to_scan)
+        let chunks = hunk_builders
+            .into_inner()
+            .into_values()
+            .filter(|builder| !builder.added_line_map.is_empty() && !builder.content.is_empty())
+            .map(|builder| GitHunkChunk {
+                file_path: builder.file_path,
+                content: builder.content,
+                added_line_map: builder.added_line_map,
+            })
+            .collect();
+
+        Ok(chunks)
     }
 }
 

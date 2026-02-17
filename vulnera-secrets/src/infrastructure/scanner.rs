@@ -65,15 +65,14 @@ impl DirectoryScanner {
 
         // Use filter_entry to skip excluded directories efficiently
         let it = walker.into_iter().filter_entry(|e| {
-            if e.file_type().is_dir() {
-                if let Some(dir_name) = e.file_name().to_str() {
-                    if self.exclude_patterns.iter().any(|p| {
-                        dir_name.contains(p)
-                            || p.contains('*') && dir_name.matches(&p.replace('*', "")).count() > 0
-                    }) {
-                        return false;
-                    }
-                }
+            if e.file_type().is_dir()
+                && let Some(dir_name) = e.file_name().to_str()
+                && self.exclude_patterns.iter().any(|p| {
+                    dir_name.contains(p)
+                        || p.contains('*') && dir_name.matches(&p.replace('*', "")).count() > 0
+                })
+            {
+                return false;
             }
             true
         });

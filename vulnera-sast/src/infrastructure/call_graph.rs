@@ -39,6 +39,10 @@ pub struct UnresolvedCall {
     pub callee_name: String,
     /// Optional module hint (e.g., from import statement)
     pub module_hint: Option<String>,
+    /// Caller file path, used for locality-aware disambiguation.
+    pub caller_file_path: String,
+    /// Optional caller scope/class name (for method disambiguation).
+    pub caller_scope: Option<String>,
     /// Call location
     pub line: u32,
     pub column: u32,
@@ -114,12 +118,12 @@ impl CallGraph {
         let mut queue = vec![start_id.to_string()];
 
         while let Some(current) = queue.pop() {
-            if visited.insert(current.clone()) {
-                if let Some(calls) = self.edges.get(&current) {
-                    for call in calls {
-                        if !visited.contains(&call.target_id) {
-                            queue.push(call.target_id.clone());
-                        }
+            if visited.insert(current.clone())
+                && let Some(calls) = self.edges.get(&current)
+            {
+                for call in calls {
+                    if !visited.contains(&call.target_id) {
+                        queue.push(call.target_id.clone());
                     }
                 }
             }
@@ -134,12 +138,12 @@ impl CallGraph {
         let mut queue = vec![target_id.to_string()];
 
         while let Some(current) = queue.pop() {
-            if visited.insert(current.clone()) {
-                if let Some(callers) = self.reverse_edges.get(&current) {
-                    for caller in callers {
-                        if !visited.contains(caller) {
-                            queue.push(caller.clone());
-                        }
+            if visited.insert(current.clone())
+                && let Some(callers) = self.reverse_edges.get(&current)
+            {
+                for caller in callers {
+                    if !visited.contains(caller) {
+                        queue.push(caller.clone());
                     }
                 }
             }
@@ -297,47 +301,77 @@ impl CallGraph {
 
     /// Try to resolve a single call to its target function ID
     fn resolve_call(&self, call: &UnresolvedCall) -> Option<String> {
-        // Strategy 1: Check if there's a function with exact name match
         if let Some(candidates) = self.name_index.get(&call.callee_name) {
-            // If only one candidate, use it
             if candidates.len() == 1 {
                 return Some(candidates[0].clone());
             }
 
-            // Strategy 2: Use module hint to disambiguate
-            if let Some(ref hint) = call.module_hint {
-                for candidate in candidates {
-                    // Check if the candidate's file path contains the module hint
-                    if let Some(node) = self.nodes.get(candidate) {
-                        if node.file_path.contains(hint) {
-                            return Some(candidate.clone());
-                        }
-                    }
-                }
+            let mut ranked: Vec<(&String, i32)> = candidates
+                .iter()
+                .filter_map(|candidate| {
+                    let node = self.nodes.get(candidate)?;
+                    Some((candidate, Self::score_candidate(call, node)))
+                })
+                .collect();
+
+            ranked.sort_by(|(lhs_id, lhs_score), (rhs_id, rhs_score)| {
+                rhs_score.cmp(lhs_score).then_with(|| lhs_id.cmp(rhs_id))
+            });
+
+            if let Some((best_id, _)) = ranked.first() {
+                return Some((*best_id).clone());
             }
-
-            // Strategy 3: Prefer functions in the same directory as caller
-            if let Some(caller_node) = self.nodes.get(&call.caller_id) {
-                let caller_dir = std::path::Path::new(&caller_node.file_path)
-                    .parent()
-                    .map(|p| p.to_string_lossy().to_string());
-
-                if let Some(dir) = caller_dir {
-                    for candidate in candidates {
-                        if let Some(node) = self.nodes.get(candidate) {
-                            if node.file_path.starts_with(&dir) {
-                                return Some(candidate.clone());
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Fallback: use first candidate (ambiguous but better than nothing)
-            return Some(candidates[0].clone());
         }
 
         None
+    }
+
+    fn score_candidate(call: &UnresolvedCall, node: &CallGraphNode) -> i32 {
+        let mut score = 0;
+
+        if node.file_path == call.caller_file_path {
+            score += 120;
+        }
+
+        if let Some(caller_dir) = std::path::Path::new(&call.caller_file_path).parent()
+            && node
+                .file_path
+                .starts_with(caller_dir.to_string_lossy().as_ref())
+        {
+            score += 70;
+        }
+
+        if let Some(ref hint) = call.module_hint
+            && !hint.is_empty()
+            && (node.file_path.contains(hint)
+                || std::path::Path::new(&node.file_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|stem| stem == hint)
+                    .unwrap_or(false))
+        {
+            score += 90;
+        }
+
+        if let Some(ref scope) = call.caller_scope
+            && node.id.contains(&format!("::{}::", scope))
+        {
+            score += 100;
+        }
+
+        score + Self::path_similarity_bonus(&call.caller_file_path, &node.file_path)
+    }
+
+    fn path_similarity_bonus(lhs: &str, rhs: &str) -> i32 {
+        let lhs_components = lhs.split('/').collect::<Vec<_>>();
+        let rhs_components = rhs.split('/').collect::<Vec<_>>();
+        let common_prefix = lhs_components
+            .iter()
+            .zip(rhs_components.iter())
+            .take_while(|(l, r)| l == r)
+            .count() as i32;
+
+        common_prefix * 3
     }
 
     // =========================================================================
@@ -547,64 +581,61 @@ impl CallGraphBuilder {
 
         // 1. Extract class/struct contexts first
         let mut class_contexts: Vec<ClassContext> = Vec::new();
-        if let Some(class_query) = class_query_str {
-            if let Ok(query) =
+        if let Some(class_query) = class_query_str
+            && let Ok(query) =
                 crate::infrastructure::query_engine::compile_query(class_query, language)
-            {
-                let matches =
-                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
-                for m in matches {
-                    // Look for class.name, type.name, or struct.name depending on language
-                    let class_name = m
-                        .captures
-                        .get("class.name")
-                        .or_else(|| m.captures.get("type.name"))
-                        .or_else(|| m.captures.get("struct.name"));
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
+            for m in matches {
+                // Look for class.name, type.name, or struct.name depending on language
+                let class_name = m
+                    .captures
+                    .get("class.name")
+                    .or_else(|| m.captures.get("type.name"))
+                    .or_else(|| m.captures.get("struct.name"));
 
-                    if let Some(name_node) = class_name {
-                        let name = source[name_node.start_byte..name_node.end_byte].to_string();
-                        class_contexts.push(ClassContext {
-                            name,
-                            start_byte: m.start_byte,
-                            end_byte: m.end_byte,
-                        });
-                    }
+                if let Some(name_node) = class_name {
+                    let name = source[name_node.start_byte..name_node.end_byte].to_string();
+                    class_contexts.push(ClassContext {
+                        name,
+                        start_byte: m.start_byte,
+                        end_byte: m.end_byte,
+                    });
                 }
             }
         }
 
         // 2. Extract parameters for functions (build a map: func_name -> params)
         let mut function_params: HashMap<String, Vec<ParameterInfo>> = HashMap::new();
-        if let Some(param_query) = param_query_str {
-            if let Ok(query) =
+        if let Some(param_query) = param_query_str
+            && let Ok(query) =
                 crate::infrastructure::query_engine::compile_query(param_query, language)
-            {
-                let matches =
-                    crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
-                for m in matches {
-                    let name_node = m.captures.get("name");
-                    let param_node = m.captures.get("param.name");
-                    let type_node = m.captures.get("param.type");
+        {
+            let matches =
+                crate::infrastructure::query_engine::execute_query(&query, tree, source_bytes);
+            for m in matches {
+                let name_node = m.captures.get("name");
+                let param_node = m.captures.get("param.name");
+                let type_node = m.captures.get("param.type");
 
-                    if let (Some(name_n), Some(param_n)) = (name_node, param_node) {
-                        let func_name = source[name_n.start_byte..name_n.end_byte].to_string();
-                        let param_name = source[param_n.start_byte..param_n.end_byte].to_string();
+                if let (Some(name_n), Some(param_n)) = (name_node, param_node) {
+                    let func_name = source[name_n.start_byte..name_n.end_byte].to_string();
+                    let param_name = source[param_n.start_byte..param_n.end_byte].to_string();
 
-                        // Extract type if available
-                        let type_hint =
-                            type_node.map(|t| source[t.start_byte..t.end_byte].to_string());
+                    // Extract type if available
+                    let type_hint = type_node.map(|t| source[t.start_byte..t.end_byte].to_string());
 
-                        let param_info = ParameterInfo {
-                            name: param_name,
-                            type_hint,
-                            default_value: None, // Default values not extracted currently
-                        };
+                    let param_info = ParameterInfo {
+                        name: param_name,
+                        type_hint,
+                        default_value: None, // Default values not extracted currently
+                    };
 
-                        function_params
-                            .entry(func_name)
-                            .or_default()
-                            .push(param_info);
-                    }
+                    function_params
+                        .entry(func_name)
+                        .or_default()
+                        .push(param_info);
                 }
             }
         }
@@ -699,10 +730,22 @@ impl CallGraphBuilder {
                         .map(|f| f.id.clone());
 
                     if let Some(caller) = caller_id {
+                        let caller_scope = caller
+                            .rsplit("::")
+                            .nth(1)
+                            .filter(|segment| *segment != file_path)
+                            .map(|segment| segment.to_string());
+
                         // Check if this is a local function call
                         if local_function_names.contains(callee_name) {
-                            // Local call - create direct edge
-                            let target_id = format!("{}::{}", file_path, callee_name);
+                            // Local call - create direct edge; prefer class-scoped method if present.
+                            let class_scoped_target = caller_scope
+                                .as_ref()
+                                .map(|scope| format!("{}::{}::{}", file_path, scope, callee_name));
+                            let target_id = class_scoped_target
+                                .filter(|candidate| self.graph.get_function(candidate).is_some())
+                                .unwrap_or_else(|| format!("{}::{}", file_path, callee_name));
+
                             let call_site = CallSite {
                                 target_id,
                                 target_name: callee_name.to_string(),
@@ -722,6 +765,8 @@ impl CallGraphBuilder {
                                 caller_id: caller.clone(),
                                 callee_name: callee_name.to_string(),
                                 module_hint,
+                                caller_file_path: file_path.to_string(),
+                                caller_scope,
                                 line: m.start_position.0 as u32 + 1,
                                 column: m.start_position.1 as u32,
                             };
