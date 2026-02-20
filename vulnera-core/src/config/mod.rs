@@ -226,6 +226,8 @@ pub struct RequestCostsConfig {
     pub analysis: u32,
     /// Cost for LLM operations (explanations, code fixes)
     pub llm: u32,
+    /// Cost for free/community operations (SAST, Secrets, etc. in CLI)
+    pub free: u32,
 }
 
 impl Default for RequestCostsConfig {
@@ -235,6 +237,7 @@ impl Default for RequestCostsConfig {
             post: 2,
             analysis: 5,
             llm: 10,
+            free: 0,
         }
     }
 }

@@ -438,7 +438,12 @@ pub fn determine_request_cost(method: &Method, path: &str) -> RequestCost {
         return RequestCost::Llm;
     }
 
-    // Analysis endpoints have high cost
+    // Community-focused offline-capable modules are cost-free even if triggered via API
+    if path.contains("/sast") || path.contains("/secrets") || path.contains("/api-security") {
+        return RequestCost::Free;
+    }
+
+    // Analysis endpoints (including dependency scanning) have standard analysis cost
     if path.contains("/analyze") || path.contains("/scan") || path.contains("/check") {
         return RequestCost::Analysis;
     }

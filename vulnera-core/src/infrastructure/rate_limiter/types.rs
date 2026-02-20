@@ -159,6 +159,8 @@ pub enum RequestCost {
     Analysis,
     /// LLM operation (explanations, code fixes)
     Llm,
+    /// Zero cost operation (SAST, Secrets, API security)
+    Free,
     /// Custom cost
     Custom(u32),
 }
@@ -171,6 +173,7 @@ impl RequestCost {
             RequestCost::Post => config.post,
             RequestCost::Analysis => config.analysis,
             RequestCost::Llm => config.llm,
+            RequestCost::Free => config.free,
             RequestCost::Custom(cost) => *cost,
         }
     }
