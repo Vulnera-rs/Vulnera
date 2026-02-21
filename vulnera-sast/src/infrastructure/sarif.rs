@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn test_rule_properties() {
         let exporter = SarifExporter::new();
-        let rules = vec![sample_rule()];
+        let rules = [sample_rule()];
 
         let sarif_rule = exporter.rule_to_sarif(&rules[0]);
 

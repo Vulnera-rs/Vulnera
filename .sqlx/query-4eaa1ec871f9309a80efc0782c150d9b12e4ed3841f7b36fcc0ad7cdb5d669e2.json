@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM subscription_limits\n            WHERE organization_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4eaa1ec871f9309a80efc0782c150d9b12e4ed3841f7b36fcc0ad7cdb5d669e2"
+}

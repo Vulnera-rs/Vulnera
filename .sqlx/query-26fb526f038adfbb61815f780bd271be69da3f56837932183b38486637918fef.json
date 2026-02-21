@@ -1,0 +1,144 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT job_id, organization_id, user_id, project_id, source_type, source_uri, status,\n                   findings_json, module_results_json, summary_json, findings_by_type_json,\n                   total_findings, findings_critical, findings_high, findings_medium, findings_low, findings_info,\n                   created_at, started_at, completed_at, error_message\n            FROM persisted_job_results\n            WHERE user_id = $1\n            ORDER BY created_at DESC\n            OFFSET $2\n            LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "source_uri",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "status",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "findings_json",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "module_results_json",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "summary_json",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "findings_by_type_json",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "total_findings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "findings_critical",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "findings_high",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "findings_medium",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "findings_low",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "findings_info",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "error_message",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "26fb526f038adfbb61815f780bd271be69da3f56837932183b38486637918fef"
+}

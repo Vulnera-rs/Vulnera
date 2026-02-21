@@ -379,7 +379,7 @@ mod tests {
         graph.add_node(node);
 
         assert_eq!(graph.package_count(), 1);
-        assert!(graph.root_packages.len() > 0);
+        assert!(!graph.root_packages.is_empty());
     }
 
     #[test]

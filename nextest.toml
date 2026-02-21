@@ -27,7 +27,7 @@ junit-xml = "target/nextest/junit.xml"
 status-level = "flaky"
 
 # Run tests in a deterministic order
-run-ignored = "only"
+run-ignored = "default"
 
 [profile.default.overrides]
 # Override for slow tests (integration tests, benchmarks)
@@ -72,4 +72,3 @@ cargo-args = ["--all-features"]
 RUST_BACKTRACE = "1"
 # Set RUST_LOG for test logging
 RUST_LOG = "warn"
-

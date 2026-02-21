@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use git2::{Repository, Signature};
 use sha2::{Digest, Sha256};
@@ -8,7 +8,7 @@ use tempfile::TempDir;
 use vulnera_core::config::RulePackConfig;
 use vulnera_sast::infrastructure::rules::{RuleLoader, RulePackLoader};
 
-fn write_rule_pack(repo_path: &PathBuf, content: &str) -> PathBuf {
+fn write_rule_pack(repo_path: &Path, content: &str) -> PathBuf {
     let rules_path = repo_path.join("rules.toml");
     fs::write(&rules_path, content).expect("write rules file");
     rules_path
@@ -53,7 +53,7 @@ languages = ["Python"]
 pattern = { type = "TreeSitterQuery", value = "(identifier) @name" }
 "#;
 
-    let _rules_path = write_rule_pack(&repo_dir.path().to_path_buf(), rules_content);
+    let _rules_path = write_rule_pack(repo_dir.path(), rules_content);
     commit_all(&repo, "add rules");
 
     let mut hasher = Sha256::new();

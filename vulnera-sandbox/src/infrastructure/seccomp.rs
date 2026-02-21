@@ -310,8 +310,10 @@ mod tests {
 
     #[test]
     fn test_analysis_config_with_network() {
-        let mut policy = SandboxPolicy::default();
-        policy.allowed_ports = vec![443];
+        let policy = SandboxPolicy {
+            allowed_ports: vec![443],
+            ..Default::default()
+        };
         let config = create_analysis_config(&policy);
 
         // Should include network syscalls

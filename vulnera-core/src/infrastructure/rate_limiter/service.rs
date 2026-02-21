@@ -270,6 +270,7 @@ mod tests {
                 post: 2,
                 analysis: 5,
                 llm: 10,
+                free: 0,
             },
             auth_protection: AuthProtectionConfig {
                 enabled: true,

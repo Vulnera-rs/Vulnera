@@ -8,13 +8,11 @@ use vulnera_orchestrator::presentation::models::{
 #[tokio::test]
 async fn test_health_endpoint() {
     // Placeholder until full router harness is added.
-    assert!(true);
 }
 
 #[tokio::test]
 async fn test_metrics_endpoint() {
     // Placeholder until full router harness is added.
-    assert!(true);
 }
 
 #[test]

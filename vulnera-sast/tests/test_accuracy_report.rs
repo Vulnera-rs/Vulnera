@@ -49,11 +49,9 @@ fn read_linux_status_value_kb(field_name: &str) -> Option<u64> {
             return None;
         }
 
-        let value_kb = line
-            .split_whitespace()
+        line.split_whitespace()
             .nth(1)
-            .and_then(|v| v.parse::<u64>().ok());
-        value_kb
+            .and_then(|v| v.parse::<u64>().ok())
     })
 }
 

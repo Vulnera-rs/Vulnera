@@ -227,7 +227,7 @@ async fn test_valid_jwt_cookie_extracts_user_id() {
     // Generate valid access token
     let access_token = jwt_service
         .generate_access_token(
-            test_user.user_id.clone(),
+            test_user.user_id,
             test_user.email.clone(),
             test_user.roles.clone(),
         )
@@ -329,7 +329,7 @@ async fn test_x_api_key_header_extracts_auth_info() {
     let (api_key_raw, api_key_hash) = api_key_generator.generate();
     let api_key_entity = ApiKey::new(
         ApiKeyId::generate(),
-        test_user.user_id.clone(),
+        test_user.user_id,
         api_key_hash,
         "Test Key".to_string(),
         None, // No expiry
@@ -387,7 +387,7 @@ async fn test_authorization_apikey_header_extracts_auth_info() {
     let (api_key_raw, api_key_hash) = api_key_generator.generate();
     let api_key_entity = ApiKey::new(
         ApiKeyId::generate(),
-        test_user.user_id.clone(),
+        test_user.user_id,
         api_key_hash,
         "Test Key".to_string(),
         None,
@@ -505,7 +505,7 @@ async fn test_api_key_takes_precedence_over_cookie() {
     let (api_key_raw, api_key_hash) = api_key_generator.generate();
     let api_key_entity = ApiKey::new(
         ApiKeyId::generate(),
-        api_key_user.user_id.clone(),
+        api_key_user.user_id,
         api_key_hash,
         "Test Key".to_string(),
         None,
@@ -514,7 +514,7 @@ async fn test_api_key_takes_precedence_over_cookie() {
     // Create access token for cookie_user
     let access_token = jwt_service
         .generate_access_token(
-            cookie_user.user_id.clone(),
+            cookie_user.user_id,
             cookie_user.email.clone(),
             cookie_user.roles.clone(),
         )
@@ -705,7 +705,7 @@ async fn test_authenticated_llm_not_limited() {
 
     let access_token = jwt_service
         .generate_access_token(
-            test_user.user_id.clone(),
+            test_user.user_id,
             test_user.email.clone(),
             test_user.roles.clone(),
         )

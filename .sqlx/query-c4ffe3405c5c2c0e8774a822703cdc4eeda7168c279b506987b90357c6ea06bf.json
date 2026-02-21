@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) as \"count!\"\n            FROM analysis_events\n            WHERE organization_id = $1 \n              AND event_type = $2 \n              AND timestamp >= $3 \n              AND timestamp <= $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c4ffe3405c5c2c0e8774a822703cdc4eeda7168c279b506987b90357c6ea06bf"
+}

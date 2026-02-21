@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+type VersionMap = Mutex<HashMap<(Ecosystem, String), Result<Vec<VersionInfo>, RegistryError>>>;
 use vulnera_core::domain::vulnerability::entities::{AffectedPackage, Package, Vulnerability};
 use vulnera_core::domain::vulnerability::value_objects::{
     Ecosystem, Severity, Version, VersionRange, VulnerabilityId, VulnerabilitySource,
@@ -16,7 +18,7 @@ use vulnera_deps::types::VersionResolutionService;
 
 // Mock Registry Client
 struct MockRegistryClient {
-    versions: Mutex<HashMap<(Ecosystem, String), Result<Vec<VersionInfo>, RegistryError>>>,
+    versions: VersionMap,
 }
 
 impl MockRegistryClient {

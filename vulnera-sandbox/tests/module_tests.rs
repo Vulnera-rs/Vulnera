@@ -117,7 +117,7 @@ fn test_sandbox_enabled_by_default() {
 fn test_dynamic_limits_scale_appropriately() {
     let config = SandboxConfig::default();
 
-    let small = calculate_limits(&config, Some(1 * 1024 * 1024), ModuleType::SAST);
+    let small = calculate_limits(&config, Some(1024 * 1024), ModuleType::SAST);
     let large = calculate_limits(&config, Some(100 * 1024 * 1024), ModuleType::SAST);
 
     // Larger source should get more time

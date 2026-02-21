@@ -87,7 +87,7 @@ const dummy_password = "my-secret-password-789";
         high_conf_findings
     );
     assert!(
-        low_conf_findings.len() >= 1,
+        !low_conf_findings.is_empty(),
         "Dummy variable should have reduced confidence. Found: {:?}",
         findings
     );

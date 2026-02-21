@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_small_source_limits() {
         let config = test_config();
-        let limits = calculate_limits(&config, Some(1 * 1024 * 1024), ModuleType::SecretDetection);
+        let limits = calculate_limits(&config, Some(1024 * 1024), ModuleType::SecretDetection);
 
         // Small source should use close to base values
         assert!(limits.timeout.as_secs() <= 90); // Base 60s + small adjustment
@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn test_large_source_gets_more_resources() {
         let config = test_config();
-        let small = calculate_limits(&config, Some(1 * 1024 * 1024), ModuleType::SAST);
+        let small = calculate_limits(&config, Some(1024 * 1024), ModuleType::SAST);
         let large = calculate_limits(&config, Some(100 * 1024 * 1024), ModuleType::SAST);
 
         // Large source should get significantly more time and memory

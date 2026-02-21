@@ -414,7 +414,7 @@ async fn test_binary_file_skipped() {
     let dir = tempfile::tempdir().unwrap();
     // Binary content should be skipped (no .py/.js/.rs extension)
     let bin_path = dir.path().join("binary.dat");
-    std::fs::write(&bin_path, &[0u8, 1, 2, 3, 255, 254]).unwrap();
+    std::fs::write(&bin_path, [0u8, 1, 2, 3, 255, 254]).unwrap();
     let result = scan_dir(&dir).await;
     assert!(result.findings.is_empty(), "Binary files should be skipped");
 }

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM analysis_events\n            WHERE timestamp < $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "790232b55af03f59827de06b9b8eb045755d5e5810ba1bab33f795a7aaf5b13e"
+}

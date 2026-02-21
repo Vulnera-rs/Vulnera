@@ -228,8 +228,10 @@ mod tests {
 
     #[test]
     fn test_should_ignore_glob_patterns() {
-        let mut config = AnalysisConfig::default();
-        config.ignore_patterns = vec!["**/*.lock".to_string(), "src/generated/**".to_string()];
+        let config = AnalysisConfig {
+            ignore_patterns: vec!["**/*.lock".to_string(), "src/generated/**".to_string()],
+            ..AnalysisConfig::default()
+        };
         let ctx = AnalysisContext::with_config("/tmp/test", config);
 
         assert!(ctx.should_ignore(Path::new("/tmp/test/Cargo.lock")));

@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, organization_id, year_month, \n                   findings_count, findings_critical, findings_high, \n                   findings_medium, findings_low, findings_info,\n                   reports_generated, api_calls_used, scans_completed, scans_failed,\n                   sast_findings, secrets_findings, dependency_findings, api_findings,\n                   created_at, updated_at\n            FROM user_stats_monthly\n            WHERE organization_id = $1 AND year_month = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "year_month",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "findings_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "findings_critical",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "findings_high",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "findings_medium",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "findings_low",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "findings_info",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "reports_generated",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "api_calls_used",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "scans_completed",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "scans_failed",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "sast_findings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "secrets_findings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "dependency_findings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "api_findings",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3fc2023d1c584277534141b343ec4c10b662ecbac3d5c80e8c9fc914e53fe8bb"
+}

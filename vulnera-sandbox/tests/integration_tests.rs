@@ -132,8 +132,10 @@ fn test_seccomp_config_network_restriction() {
     assert!(!config.allowed_syscalls.contains(&libc::SYS_connect));
 
     // With network
-    let mut policy_with_net = SandboxPolicy::default();
-    policy_with_net.allowed_ports = vec![443, 80];
+    let policy_with_net = SandboxPolicy {
+        allowed_ports: vec![443, 80],
+        ..Default::default()
+    };
     let config_with_net = create_analysis_config(&policy_with_net);
     assert!(config_with_net.allowed_syscalls.contains(&libc::SYS_socket));
     assert!(

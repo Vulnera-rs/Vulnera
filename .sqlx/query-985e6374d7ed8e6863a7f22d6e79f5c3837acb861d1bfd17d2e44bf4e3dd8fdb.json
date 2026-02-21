@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO subscription_limits (\n                id, organization_id, tier,\n                max_scans_monthly, max_api_calls_monthly, max_members,\n                max_repos, max_private_repos, scan_results_retention_days,\n                features, created_at, updated_at\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Jsonb",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "985e6374d7ed8e6863a7f22d6e79f5c3837acb861d1bfd17d2e44bf4e3dd8fdb"
+}

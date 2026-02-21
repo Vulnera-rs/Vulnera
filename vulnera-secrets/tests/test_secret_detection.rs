@@ -72,9 +72,11 @@ async fn test_entropy_detection() {
     // Create test file with high entropy
     create_test_file(&temp_dir, "token.txt", sample_high_entropy()).await;
 
-    let mut config = SecretDetectionConfig::default();
-    config.enable_entropy_detection = true;
-    config.base64_entropy_threshold = 4.0; // Lower threshold for test
+    let config = SecretDetectionConfig {
+        enable_entropy_detection: true,
+        base64_entropy_threshold: 4.0, // Lower threshold for test
+        ..SecretDetectionConfig::default()
+    };
 
     let module = SecretDetectionModule::with_config(&config);
 
@@ -99,7 +101,7 @@ async fn test_entropy_detection() {
     let entropy_finding = result.findings.iter().find(|f| {
         f.rule_id
             .as_deref()
-            .map_or(false, |id| id.starts_with("entropy-"))
+            .is_some_and(|id| id.starts_with("entropy-"))
     });
     assert!(entropy_finding.is_some(), "Should find high entropy string");
 }
@@ -160,11 +162,12 @@ path_patterns = ["**/*.env"]
         .await
         .expect("Failed to write rules.toml");
 
-    let mut config = SecretDetectionConfig::default();
-    // Ensure markdown scanning is enabled for this test
-    config.exclude_extensions = vec![];
-    config.rule_file_path = Some(rules_path);
-    config.enable_entropy_detection = false; // Reduce noise for the test
+    let config = SecretDetectionConfig {
+        exclude_extensions: vec![],
+        rule_file_path: Some(rules_path),
+        enable_entropy_detection: false, // Reduce noise for the test
+        ..SecretDetectionConfig::default()
+    };
 
     let module = SecretDetectionModule::with_config(&config);
 
@@ -243,8 +246,10 @@ async fn test_git_scanner() {
     .unwrap();
 
     // Run scan with git history enabled
-    let mut config = SecretDetectionConfig::default();
-    config.scan_git_history = true;
+    let config = SecretDetectionConfig {
+        scan_git_history: true,
+        ..SecretDetectionConfig::default()
+    };
 
     let module = SecretDetectionModule::with_config(&config);
 
@@ -301,13 +306,15 @@ api_key=ALLOWED_PLACEHOLDER_TOKEN_VALUE_123456
     )
     .await;
 
-    let mut config = SecretDetectionConfig::default();
-    config.enable_entropy_detection = false;
-    config.global_allowlist_patterns = vec![r"ALLOWED_PLACEHOLDER_TOKEN_VALUE_[0-9]+".to_string()];
-    config.rule_allowlist_patterns = std::collections::HashMap::from([(
-        "github-token".to_string(),
-        vec![r"ghp_123456789012345678901234567890123456".to_string()],
-    )]);
+    let config = SecretDetectionConfig {
+        enable_entropy_detection: false,
+        global_allowlist_patterns: vec![r"ALLOWED_PLACEHOLDER_TOKEN_VALUE_[0-9]+".to_string()],
+        rule_allowlist_patterns: std::collections::HashMap::from([(
+            "github-token".to_string(),
+            vec![r"ghp_123456789012345678901234567890123456".to_string()],
+        )]),
+        ..SecretDetectionConfig::default()
+    };
 
     let module = SecretDetectionModule::with_config(&config);
 

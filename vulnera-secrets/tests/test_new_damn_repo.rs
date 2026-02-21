@@ -105,7 +105,7 @@ async fn test_new_damn_repo_detects_stripe_keys() {
         .filter(|f| {
             f.rule_id
                 .as_deref()
-                .map_or(false, |id| id.contains("stripe") || id.contains("generic"))
+                .is_some_and(|id| id.contains("stripe") || id.contains("generic"))
         })
         .collect();
 
@@ -135,9 +135,9 @@ async fn test_new_damn_repo_detects_database_credentials() {
         .findings
         .iter()
         .filter(|f| {
-            f.rule_id.as_deref().map_or(false, |id| {
-                id.contains("database") || id.contains("password")
-            })
+            f.rule_id
+                .as_deref()
+                .is_some_and(|id| id.contains("database") || id.contains("password"))
         })
         .collect();
 
@@ -165,11 +165,7 @@ async fn test_new_damn_repo_detects_github_tokens() {
     let github_findings: Vec<_> = result
         .findings
         .iter()
-        .filter(|f| {
-            f.rule_id
-                .as_deref()
-                .map_or(false, |id| id.contains("github"))
-        })
+        .filter(|f| f.rule_id.as_deref().is_some_and(|id| id.contains("github")))
         .collect();
 
     // Note: Detection depends on whether the pattern matches our test data
@@ -201,7 +197,7 @@ async fn test_new_damn_repo_detects_private_keys() {
         .filter(|f| {
             f.rule_id
                 .as_deref()
-                .map_or(false, |id| id.contains("private-key") || id.contains("ssh"))
+                .is_some_and(|id| id.contains("private-key") || id.contains("ssh"))
         })
         .collect();
 
@@ -329,7 +325,7 @@ async fn test_new_damn_repo_comprehensive_secret_coverage() {
             .location
             .path
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or("unknown")
             .to_string();
         let rule = finding.rule_id.as_deref().unwrap_or("unknown").to_string();

@@ -123,11 +123,9 @@ mod tests {
 
     #[test]
     fn test_select_noop_backend() {
-        // Test all aliases for noop backend
-        for name in ["noop"] {
-            let backend = SandboxSelector::select_by_name(name);
-            assert!(backend.is_some(), "Backend '{}' should be available", name);
-            assert_eq!(backend.unwrap().name(), "noop");
-        }
+        // Test noop backend alias
+        let backend = SandboxSelector::select_by_name("noop");
+        assert!(backend.is_some(), "Backend 'noop' should be available");
+        assert_eq!(backend.unwrap().name(), "noop");
     }
 }

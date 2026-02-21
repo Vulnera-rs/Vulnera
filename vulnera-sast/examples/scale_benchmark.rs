@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use vulnera_core::config::{AnalysisDepth, SastConfig};
@@ -91,7 +91,7 @@ fn parse_depth(input: &str) -> Result<AnalysisDepth, String> {
 
 async fn benchmark_profile(
     profile_name: &str,
-    target: &PathBuf,
+    target: &Path,
     iterations: usize,
     depth: AnalysisDepth,
     max_concurrent_files: usize,

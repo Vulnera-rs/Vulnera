@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, organization_id, tier, \n                   max_scans_monthly, max_api_calls_monthly, max_members, \n                   max_repos, max_private_repos, scan_results_retention_days,\n                   features, created_at, updated_at\n            FROM subscription_limits\n            WHERE organization_id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "organization_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "tier",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "max_scans_monthly",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "max_api_calls_monthly",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "max_members",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "max_repos",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "max_private_repos",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "scan_results_retention_days",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "features",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c0c6de480ccdb16db178526c1992331f0a5be8568478d057d09274ac7145ae33"
+}

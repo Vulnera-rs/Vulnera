@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO personal_stats_monthly (\n                id, user_id, year_month,\n                findings_count, findings_critical, findings_high,\n                findings_medium, findings_low, findings_info\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n            ON CONFLICT (user_id, year_month)\n            DO UPDATE SET \n                findings_count = personal_stats_monthly.findings_count + $4,\n                findings_critical = personal_stats_monthly.findings_critical + $5,\n                findings_high = personal_stats_monthly.findings_high + $6,\n                findings_medium = personal_stats_monthly.findings_medium + $7,\n                findings_low = personal_stats_monthly.findings_low + $8,\n                findings_info = personal_stats_monthly.findings_info + $9,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "507e17864ee0ed373015c53e0d8139542c8e281d44da4a60535749597265ff9c"
+}

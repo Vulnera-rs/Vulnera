@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE subscription_limits\n            SET tier = $2,\n                max_scans_monthly = $3,\n                max_api_calls_monthly = $4,\n                max_members = $5,\n                max_repos = $6,\n                max_private_repos = $7,\n                scan_results_retention_days = $8,\n                features = $9,\n                updated_at = $10\n            WHERE organization_id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45b753a6c038b8699e86056c652e1b6d703780f42ebe374462b17e190adfe4db"
+}

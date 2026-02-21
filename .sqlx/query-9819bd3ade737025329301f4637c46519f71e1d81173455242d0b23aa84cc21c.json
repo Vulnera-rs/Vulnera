@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO personal_stats_monthly (id, user_id, year_month, scans_completed)\n            VALUES ($1, $2, $3, 1)\n            ON CONFLICT (user_id, year_month)\n            DO UPDATE SET \n                scans_completed = personal_stats_monthly.scans_completed + 1,\n                updated_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9819bd3ade737025329301f4637c46519f71e1d81173455242d0b23aa84cc21c"
+}

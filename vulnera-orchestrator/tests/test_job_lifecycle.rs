@@ -17,5 +17,4 @@ async fn test_job_creation() {
 async fn test_job_execution() {
     // Test job execution workflow
     // Placeholder for now
-    assert!(true);
 }

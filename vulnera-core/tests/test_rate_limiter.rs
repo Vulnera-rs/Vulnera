@@ -57,6 +57,7 @@ fn default_test_config() -> TieredRateLimitConfig {
             post: 2,
             analysis: 5,
             llm: 10,
+            free: 0,
         },
         auth_protection: AuthProtectionConfig {
             enabled: true,
@@ -97,6 +98,7 @@ fn strict_test_config() -> TieredRateLimitConfig {
             post: 2,
             analysis: 5,
             llm: 10,
+            free: 0,
         },
         auth_protection: AuthProtectionConfig {
             enabled: true,
@@ -873,6 +875,7 @@ mod type_tests {
             post: 2,
             analysis: 5,
             llm: 10,
+            free: 0,
         };
 
         assert_eq!(RequestCost::Get.value(&config), 1);
