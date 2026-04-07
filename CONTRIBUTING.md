@@ -4,6 +4,18 @@ Thank you for your interest in contributing to Vulnera!
 
 Vulnera is developed by **Vulnera Industries**, a for-profit company. We welcome contributions from the community and are grateful for every pull request, bug report, and feature suggestion.
 
+## LLM and AI Assistance
+
+Vulnera accepts contributions prepared with LLM-based tooling, including tools such as Cursor, Claude Code, Copilot, ChatGPT, or similar systems. Use is allowed, but the contributor remains fully responsible for every line of code, test, comment, and design decision in the final submission.
+
+If you used LLM-based tooling in any substantial way while preparing a contribution, you must disclose that in the pull request description. The disclosure should state the approximate extent of use, such as `not at all`, `minimally`, `moderately`, or `extensively`, and briefly mention which parts were assisted if relevant.
+
+Example disclosure:
+
+- `LLM usage: moderately, used for drafting the initial patch and test outline; all code was reviewed, edited, and validated locally by me.`
+
+For the full policy, including hard requirements, review expectations, and hook-based reminders, see [LLM_POLICY.md](LLM_POLICY.md).
+
 ## Contributor License Agreement
 
 By submitting a contribution (pull request, patch, or any other form), you agree to the terms of our [Contributor License Agreement](CLA.md). In summary:
