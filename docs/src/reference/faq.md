@@ -52,10 +52,10 @@ Quota resets at 00:00 UTC every day.
 | Module       | Offline | Notes                                   |
 | ------------ | ------- | --------------------------------------- |
 | SAST         | ✅ Yes  | AST pattern matching (Python, JS, Rust) |
-| Secrets      | ✅ Yes  | ML pattern recognition + entropy        |
+| Secrets      | ✅ Yes  | Entropy + pattern matching + AST context |
 | API          | ✅ Yes  | OpenAPI schema analysis                 |
 | Dependencies | ❌ No   | Requires CVE database                   |
-| LLM          | ❌ No   | Requires Pangu API                      |
+| LLM          | ❌ No   | Requires Gemini/OpenAI/Azure API        |
 
 **CLI offline scan:**
 

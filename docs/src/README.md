@@ -82,7 +82,7 @@ The server is a single Rust binary backed by PostgreSQL and optionally Dragonfly
 
 **Minimum requirements:**
 
-- Rust 1.91+ (build only)
+- Rust 1.92+ (build only)
 - PostgreSQL 12+
 - Linux 5.13+ recommended (for Landlock sandbox; process isolation fallback works on older kernels)
 

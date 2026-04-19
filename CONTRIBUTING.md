@@ -35,7 +35,7 @@ If you'd like to financially support the project, you can do so via [GitHub Spon
 ## Getting Started
 
 1. Fork the repo and create a feature branch from `main`.
-2. Install Rust stable (MSRV 1.91+) and PostgreSQL 12+.
+2. Install Rust stable (MSRV 1.92+) and PostgreSQL 12+.
 3. Set up the development database:
 
    ```bash

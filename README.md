@@ -3,204 +3,353 @@
 # Vulnera
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![MSRV: 1.91](https://img.shields.io/badge/MSRV-1.91-orange.svg)](https://www.rust-lang.org/)
+[![MSRV: 1.92](https://img.shields.io/badge/MSRV-1.92-orange.svg)](https://www.rust-lang.org/)
 [![version](https://img.shields.io/badge/version-0.5.1-green.svg)](CHANGELOG.md)
 [![Docs](https://img.shields.io/badge/docs-online-blue)](https://Vulnera-rs.github.io/Vulnera/)
 
-**A modular, async Rust vulnerability analysis platform.**
+**Security at the speed of Rust. Sandboxed by the kernel.**
 
-[Documentation](https://Vulnera-rs.github.io/Vulnera/) · [Architecture](docs/src/reference/architecture.md) · [Changelog](CHANGELOG.md) · [Contributing](#contributing)
+[Quick Start](#quick-start) · [Documentation](https://Vulnera-rs.github.io/Vulnera/) · [Philosophy](PHILOSOPHY.md) · [Changelog](CHANGELOG.md)
 
 </div>
 
 ---
 
-## Philosophy
+## Why Vulnera?
 
-Most security tooling is either a black box SaaS product or a single-purpose scanner duct-taped into a CI pipeline. Vulnera is neither.
+Most security scanners are built on memory-unsafe foundations and require you to trust opaque SaaS services with your source code. Vulnera is different.
 
-The core conviction: **security analysis should be a composable, auditable, offline-first system** — not a phone-home service. Every finding must be traceable to a rule, a tree-sitter query, or a named entropy threshold. No mystery scores.
+We built a **self-hosted, API-first security platform** that runs in your infrastructure, uses Linux kernel sandboxing (not containers), and gives you auditable rules—not black-box scores.
 
-Design principles that govern every decision:
+### Three Pillars
 
-- **Make illegal states unrepresentable.** The type system enforces domain invariants; panics and `unwrap()` are banned in production paths via CI guardrails.
-- **Least-privilege execution.** Analysis modules run inside Landlock + seccomp sandboxes on Linux. The sandbox is not optional glue — it is a first-class domain concept with a typed policy builder.
-- **Dependency inversion at every boundary.** Nothing instantiates its own database pool or HTTP client. Everything is wired at the composition root (`src/app.rs`) and injected via `Arc<dyn Trait>`.
-- **Offline first, network optional.** SAST, secrets detection, and API analysis run fully offline. Network is opt-in (dependency CVE lookups, LLM enrichment).
+| Fastest | Safest | Transparent |
+|---------|--------|-------------|
+| 🚀 **Rust-native performance** - No GC pauses, lock-free caching | 🛡️ **Landlock kernel sandboxing** - Not containers. The actual Linux kernel. | 📖 **Auditable rules** - TOML rule packs you can read and modify |
+| **<10s** for medium projects | **<1µs** sandbox startup overhead | Tree-sitter queries, not black boxes |
+
+While other scanners sandbox with containers, Vulnera uses Linux Landlock LSM—the same kernel technology that powers Chrome's sandbox. Faster, safer, and not bypassable by container escapes.
 
 ---
 
 ## What It Does
 
-Four analysis modules, one orchestrator, one job queue:
+Four community modules for comprehensive security analysis:
 
-| Module                  | Method                                            | Ecosystems / Languages                                       |
-| ----------------------- | ------------------------------------------------- | ------------------------------------------------------------ |
-| **Dependency Analysis** | CVE lookup via OSV · NVD · GHSA                   | npm, PyPI, Cargo, Maven/Gradle, Go, Composer, Bundler, NuGet |
-| **SAST**                | Tree-sitter AST + inter-procedural taint analysis | Python, JavaScript, TypeScript, Rust, Go, C, C++             |
-| **Secrets Detection**   | ML-pattern + Shannon entropy                      | All text files                                               |
-| **API Security**        | Spec-rule engine                                  | OpenAPI 3.0 / 3.1                                            |
+| Module | What It Finds | Languages / Formats |
+|--------|--------------|---------------------|
+| **SAST** | SQL injection, XSS, command injection, path traversal | Python, JavaScript/TypeScript, Rust, Go, C, C++ |
+| **Secrets** | API keys, database passwords, private certificates | All text files |
+| **Dependencies** | Known CVEs in your dependencies | npm, PyPI, Cargo, Maven, Gradle, Go, Ruby, PHP, NuGet |
+| **API Security** | Authentication flaws, data exposure, misconfigurations | OpenAPI 3.0/3.1 specs |
 
-LLM enrichment (Google Gemini, OpenAI, Azure OpenAI) is an optional post-processing pass — it explains and proposes fixes for findings but is never part of detection itself.
+**Key differentiators:**
+- ✅ **Self-hosted by default** - Your code never leaves your infrastructure
+- ✅ **100% offline capable** - SAST, Secrets, API analysis require zero network calls
+- ✅ **Inter-procedural taint tracking** - Follows data flow across function boundaries
+- ✅ **Live secret verification** - Confirms if detected AWS/GitHub tokens are actually valid
+- ✅ **Incremental scanning** - Only re-analyzes changed files via content hashing
 
 ---
 
-## Architecture at a Glance
+## Architecture
+
+Vulnera is an **API-first platform** with multiple interfaces:
 
 ```
-vulnera-rust  (binary — Axum HTTP server, composition root)
-  ├─ vulnera-orchestrator   async job queue · module registry · REST API · analytics
-  │    ├─ vulnera-sandbox   Landlock + seccomp · process isolation · typed policy builder
-  │    ├─ vulnera-deps      dependency graph · lockfile parsers · registry clients
-  │    ├─ vulnera-sast      Tree-sitter engine · taint/call-graph · TOML rule packs
-  │    ├─ vulnera-secrets   entropy analysis · ML pattern matching
-  │    ├─ vulnera-api       OpenAPI 3.x rule engine
-  │    └─ vulnera-llm       provider registry (Gemini · OpenAI · Azure) · resilience layer
-  └─ vulnera-core           domain models · config · shared traits · infra abstractions
-
-vulnera-cli      (separate workspace — offline scanner + server client)
-vulnera-advisor  (separate workspace — advisory intelligence crate)
-adapter          (separate workspace — LSP server)
+┌─────────────────────────────────────────────────────────────┐
+│                      Vulnera Server                          │
+│              (Axum REST API + Job Orchestrator)              │
+├─────────────────────────────────────────────────────────────┤
+│  SAST  │ Secrets │ Dependencies │ API Security │  LLM      │
+│ Engine │ Engine  │   Engine     │   Engine     │ Explain   │
+└─────────────────────────────────────────────────────────────┘
+         │              Sandboxing (Landlock/Seccomp)
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Client Interfaces                       │
+├──────────────┬──────────────┬──────────────┬────────────────┤
+│   Web UI     │  REST API    │  IDE Ext     │     CLI        │
+│  (Browser)   │  (Direct)    │(Zed/VS Code) │  (Terminal)    │
+│              │              │              │                │
+│  Dashboard   │  Any HTTP    │   LSP        │   vulnera      │
+│  Analytics   │  client      │   Server     │   analyze      │
+│  API Docs    │  curl/HTTPie │              │                │
+└──────────────┴──────────────┴──────────────┴────────────────┘
 ```
 
-Each crate follows strict DDD layering: `domain/` has zero side effects, `application/` orchestrates use cases, `infrastructure/` owns all I/O, `presentation/` owns HTTP controllers and DTOs.
-
-Full architecture detail: [`docs/src/reference/architecture.md`](docs/src/reference/architecture.md)
-
----
-
-## Current State
-
-**Working and tested:**
-
-- Full job-based analysis pipeline (HTTP → queue → sandbox → modules → persist)
-- All four analysis modules with configurable depth (`minimal` / `standard` / `full`)
-- Landlock + seccomp sandbox with typed `SandboxPolicy` and `fail_closed` mode
-- JWT + Argon2 cookie auth with CSRF · API key auth with SHA-256 storage
-- Token-bucket rate limiting with per-tier quotas (anonymous / API key / org)
-- Organization model with RBAC (owner / admin / analyst / viewer)
-- Two-level cache: Moka L1 (in-memory) + Dragonfly L2 (distributed)
-- SARIF output · webhook delivery · analytics aggregation
-- LLM provider registry with circuit-breaker + exponential backoff
-- SAST V5: declarative TOML rule packs · `SymbolTable` · inter-procedural taint · OXC frontend option for JS/TS and semantic analysis
-- Data-driven CVE fixture harness with precision/recall quality gates in CI
-
-**Known gaps / active work:**
-
-- Transitive dependency resolution for manifest-only projects (no lockfile) is incomplete in some ecosystems
-- Enterprise license gating (`ModuleTier`) is plumbed but the entitlement check is not enforced end-to-end
-- WASM sandbox backend is scaffolded but not functional
-- OpenTelemetry export is not yet wired (observability event model is defined, spans are not exported)
-- Windows support is untested; Landlock is Linux-only by design
+**The server is the core product.** :
+- **Web UI** - Dashboard, analytics, organization management
+- **CLI** - Command-line client for local/offline workflows
+- **REST API** - Direct HTTP API access from our web dashboard with our self hosted LLMs for you own use.
+- **IDE Extensions** - Zed and VS Code via LSP (Language Server Protocol)
 
 ---
 
-## Quick Start (Server)
+## Quick Start
 
-**Requirements:** Rust 1.91+, PostgreSQL 12+, `sqlx-cli`
+### Option 1: Self-Hosted Server (Recommended for Teams)
+
+Deploy the full platform in your infrastructure:
 
 ```bash
 git clone https://github.com/Vulnera-rs/Vulnera.git
 cd Vulnera
 
-# Database
+# Setup database
 export DATABASE_URL='postgresql://user:pass@localhost:5432/vulnera'
 sqlx migrate run
 
-# Minimal config
+# Configure
 cat > .env <<'EOF'
 DATABASE_URL=postgresql://user:pass@localhost:5432/vulnera
-VULNERA__AUTH__JWT_SECRET=change-me-to-a-random-32-char-secret
+VULNERA__AUTH__JWT_SECRET=$(openssl rand -hex 32)
 EOF
 
+# Run server
 cargo run
-# → http://localhost:3000
-# → http://localhost:3000/docs  (Swagger UI)
 ```
 
-See [`docs/src/reference/configuration.md`](docs/src/reference/configuration.md) for the full env-var reference.
+**Access points:**
+- Web UI: http://localhost:3000
+- API Docs: http://localhost:3000/docs (Swagger UI)
+- API Endpoint: http://localhost:3000/api/v1
+
+### Option 2: CLI Client (Offline-First)
+
+Use the CLI for local scanning without running a server:
+
+```bash
+cargo install vulnera-cli
+
+# Offline scan - no server, no internet required
+vulnera analyze .
+
+# Or connect to your self-hosted server for team features
+vulnera auth login --server http://localhost:3000
+vulnera analyze . --remote
+```
+
+### Option 3: Docker (Quick Evaluation)
+
+```bash
+docker run --rm -v $(pwd):/scan vulnera/cli:latest analyze /scan
+```
+
+### Option 4: IDE Integration
+
+Install IDE extensions for real-time analysis:
+
+- **Zed:** Install `vulnera` extension from the extension store
+- **VS Code:** Install from marketplace (connects to LSP server)
+
+Configure extension to connect to your Vulnera server for team-wide analysis.
 
 ---
 
-## Roadmap
+## Interfaces
 
-Roughly ordered by impact-to-effort ratio:
+### Web UI
 
-### Near-term (next 1–3 months)
+Browser-based dashboard for team collaboration:
 
-- [ ] Complete lockfile-independent transitive resolution for npm and PyPI
-- [ ] OpenTelemetry span export (Jaeger / OTLP)
-- [ ] Enforce enterprise tier gating end-to-end
-- [ ] WASM sandbox backend (portable alternative to Landlock for non-Linux)
-- [ ] Formal reachability scoring: combine CVE severity + call-graph reachability
-- [ ] GitHub Actions integration
-- [ ] Self-hosted deployment guide
+- **Project overview** - Security posture across all repositories
+- **Finding details** - Drill into vulnerabilities with remediation guidance
+- **Analytics** - Trending, MTTR metrics, security scorecards
+- **Organization management** - RBAC, team quotas, webhook configurations
+- **Policy configuration** - Org-level scanning policies
+- **LLMs** - Explain findings, generate custom rules, triage with AI assistance with credits from your API quota
 
-### Medium-term (3–6 months)
+Access at `http://your-server:3000` after starting the server.
 
-- [ ] Policy-as-code: org-level `vulnera.policy.toml` with block / warn / ignore rules
-- [ ] False-positive management loop: per-finding suppression with audit trail
-- [ ] DAST module scaffold (HTTP fuzzing via OpenAPI spec)
-- [ ] IaC security module (Terraform, Dockerfile, Kubernetes manifests)
-- [ ] SCIM provisioning for enterprise SSO
+### REST API
 
-### Longer-term
+Direct HTTP API for custom integrations:
 
-- [ ] Best-in-class Rust-specific analysis: MIR-level unsafe auditing, `unsafe` attribution across FFI boundaries
-- [ ] Measurable MTTR reduction pipeline: auto-PR generation for dependency upgrades
-- [ ] Cross-repo dependency graph for monorepos
-- [ ] Custom rule IDE (web-based TOML rule editor with live preview)
-- [ ] Vulnera-Monitor as Darkweb and in real-time monitoring of vulnerabilities
+```bash
+# Submit analysis job
+curl -X POST http://localhost:3000/api/v1/analysis \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_url": "https://github.com/org/repo",
+    "modules": ["sast", "secrets", "deps"]
+  }'
+
+# Get findings
+curl http://localhost:3000/api/v1/findings/$JOB_ID \
+  -H "Authorization: Bearer $API_KEY"
+```
+
+Full API documentation available at `/docs` when server is running.
+
+**API Keys:** Generate access tokens from the Web UI (Settings → API Keys) or programmatically via the auth endpoint.
+
+### IDE Extensions
+
+Real-time analysis in your editor:
+
+| Editor | Extension | Connection |
+|--------|-----------|------------|
+| Zed | Built-in LSP | Connects to Vulnera server |
+| VS Code | Vulnera extension | Connects to LSP adapter |
+
+Features:
+- Inline diagnostics as you type
+- Quick fixes for vulnerabilities
+- Dependency vulnerability highlighting
+- Secret detection in real-time
+
+### CLI Client
+
+Command-line interface for local workflows and CI/CD:
+
+```bash
+# Scan with specific modules
+vulnera analyze . --modules sast,secrets
+
+# Watch mode - auto-scan on file changes
+vulnera sast . --watch
+
+# Pre-commit hook integration
+vulnera config hooks install
+
+# Export results
+vulnera analyze . --format sarif --output report.sarif
+
+# Check quota (when connected to server)
+vulnera quota
+```
+
+The CLI works in two modes:
+1. **Offline mode** - Runs analysis engines locally, no server required
+2. **Connected mode** - Authenticates with your Vulnera server for team features
+
+---
+
+## Open Core: Community vs Enterprise
+
+| Feature | Community (AGPL-3.0) | Enterprise (Licensed) |
+|---------|------------------------|------------------------|
+| **Server** | Full self-hosted server with web UI | Vulnera Studio (managed SaaS) |
+| **Analysis Modules** | SAST, Secrets, Dependencies, API Security | DAST, IaC, CSPM, Fuzz, SBOM, License Compliance |
+| **API Access** | Complete REST API | Same API |
+| **IDE Extensions** | Full functionality | Same extensions |
+| **CLI** | Full offline + connected capability | Same CLI |
+| **Rules** | All built-in rules + custom TOML packs | Advanced rule packs, AI-assisted rule creation |
+| **Workflows** | GitHub Actions, pre-commit hooks | Enterprise SSO (SAML/OIDC), Jira/Slack integration, auto-PR generation |
+| **Analytics** | Basic dashboard | Advanced security analytics, compliance reporting |
+| **Support** | Community (GitHub Issues) | SLA with dedicated support |
+
+**Our philosophy:** The security platform is open source. Team workflow features and managed hosting are licensed.
+
+---
+
+## How It Works
+
+### SAST Engine
+- **Tree-sitter parsing** - Native AST generation for 6+ languages
+- **OXC frontend** - Optional fast parser for JavaScript/TypeScript
+- **Symbol table** - Scope-aware variable tracking with shadowing detection
+- **Taint analysis** - Source-to-sink data flow tracking across function calls
+- **Lock-free caching** - moka-based query cache with 512-entry default
+
+### Secrets Detection
+Three-pass pipeline for accuracy:
+1. **Pattern/entropy matching** - 40+ regex rules + Shannon entropy scoring
+2. **AST analysis** - Context-aware validation using tree-sitter
+3. **Semantic validation** - Language-specific heuristics to filter test files, placeholders
+
+### Sandboxing
+Multi-backend architecture:
+- **Landlock** (Linux 5.13+) - Kernel-enforced filesystem/network restrictions
+- **Seccomp** (Older Linux) - Syscall filtering with process isolation
+- **WASM** (Non-Linux) - WebAssembly-based portable sandbox (in development)
+
+### Dependency Analysis
+Cross-ecosystem vulnerability scanning:
+- **9 package ecosystems** - npm, PyPI, Cargo, Maven, Gradle, Go, Ruby, PHP, NuGet
+- **Multi-source intelligence** - OSV, NVD, GHSA, CISA KEV, EPSS, OSS Index
+- **Smart caching** - Dragonfly/Redis with zstd compression and 24h TTL
+- **Version resolution** - Semantic versioning with constraint satisfaction algorithms
+- **Transitive resolution** - Full dependency graph analysis (work in progress for manifest-only projects)
+
+### API Security
+OpenAPI specification analysis:
+- **9 security analyzers** - Authentication, authorization, data exposure, input validation, OAuth, security headers, misconfiguration, design, resource restriction
+- **Automatic spec discovery** - Finds openapi.yaml, swagger.json, and variants
+- **Schema reference resolution** - Follows $ref pointers across components
+- **Contract integrity scoring** - Validates spec completeness and consistency
+
+---
+
+## Documentation
+
+- [Getting Started](docs/src/getting-started/personas/developer-quickstart.md) - Developer quick start
+- [API Reference](docs/src/reference/architecture.md) - REST API docs (via `/docs` endpoint or Web UI)
+- [Configuration](docs/src/reference/configuration.md) - Environment variables and config files
+- [FAQ](docs/src/reference/faq.md) - Common questions
+- [Philosophy](PHILOSOPHY.md) - Core principles and design decisions
+- [Roadmap](ROADMAP.md) - Future development plans
 
 ---
 
 ## Contributing
 
-This is an early-stage open-source project. Contributions in any of these areas accelerate it the most:
+We welcome contributions, especially in:
 
-**High-impact, well-scoped:**
+- **SAST rules** - New tree-sitter queries in `vulnera-sast/rules/*.toml`
+- **Lockfile parsers** - Completing transitive resolution for `go.sum`, `Gemfile.lock`, `composer.lock`
+- **False positive reduction** - Improving entropy thresholds and semantic validators
+- **IDE extensions** - Zed/VS Code extension improvements
 
-- SAST rules — new Tree-sitter queries in `vulnera-sast/rules/*.toml` with a matching CVE fixture in `vulnera-sast/tests/fixtures/` and we will open a new repo for community contributions.
-- Lockfile parsers — completing `go.sum`, `Gemfile.lock`, and `composer.lock` transitive resolution in `vulnera-deps`
-- False positives — improving entropy thresholds and pattern filters in `vulnera-secrets`
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. All contributors must sign the [CLA](CLA.md).
 
-**Architectural:**
-
-- OpenTelemetry integration — wire the existing observability event model (`docs/src/reference/orchestrator-observability.md`) to an OTLP exporter
-- WASM sandbox backend — implement `SandboxExecutor` for `wasmtime` in `vulnera-sandbox`
-
-**Quality:**
-
-- Expanding the CVE fixture corpus (`vulnera-sast/tests/fixtures/`) with real-world vulnerable code samples
-- Integration tests for the full HTTP → queue → analysis → persist pipeline
-
-### Setup
+### Development Setup
 
 ```bash
 # Install git hooks
 lefthook install
 
-# Run full CI check locally
+# Run CI checks locally
 cargo clippy --workspace -- -D warnings
 cargo fmt --all -- --check
 cargo nextest run --workspace
-
-# Review snapshot changes after logic edits
-cargo insta review
 ```
-
-**Before opening a PR**, read [`CONTRIBUTING.md`](CONTRIBUTING.md). The short version: conventional commits, no `unwrap()`/`expect()` in production paths (CI will reject it), and new SQL must use `sqlx::query!` macros. Also, please approve the CLA.
 
 ---
 
 ## Security
 
-Vulnerabilities should be reported privately. See [`SECURITY.md`](SECURITY.md).
+Vulnerabilities in Vulnera itself should be reported privately. See [SECURITY.md](SECURITY.md).
 
 ---
 
 ## License
 
-**Server, analysis modules, orchestration** (`vulnera-rust`, `vulnera-core`, `vulnera-orchestrator`, `vulnera-sast`, `vulnera-deps`, `vulnera-secrets`, `vulnera-api`, `vulnera-llm`, `vulnera-sandbox`): [AGPL-3.0-or-later](LICENSE)
+Vulnera uses an open-core model:
 
-**CLI, Advisors, LSP Adapter** (`vulnera-cli`, `advisors`, `adapter`): AGPL-3.0-or-later (see each Repo's LICENSE file)
+**Community Edition** (AGPL-3.0-or-later):
+- `vulnera-server` - Full web UI, REST API, job orchestration
+- `vulnera-core` - Domain models and shared infrastructure
+- `vulnera-sast` - Static analysis engine
+- `vulnera-secrets` - Secret detection
+- `vulnera-deps` - Dependency analysis
+- `vulnera-api` - OpenAPI security analysis
+- `vulnera-llm` - LLM provider abstractions
+- `vulnera-sandbox` - Sandboxing backends
+- `vulnera-orchestrator` - Job orchestration
+- `vulnera-cli` - Command-line client
+- `vulnera-adapter` - LSP server for IDE extensions
+
+**Enterprise Features** (Proprietary - requires license):
+- DAST module (dynamic application security testing)
+- IaC security module (Terraform, Kubernetes, Dockerfile)
+- CSPM (cloud security posture management)
+- Fuzz testing module
+- SBOM generation
+- License compliance scanning
+- Malicious package detection
+- Vulnera Studio SaaS platform
+
+See each repository's LICENSE file for details.

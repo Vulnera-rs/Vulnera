@@ -20,7 +20,7 @@ Vulnera is a **modular, async Rust platform** using domain-driven design (DDD) p
 ▼               ▼              ▼             ▼                ▼
 Dependencies  SAST         Secrets        API            LLM
 Analysis      Analysis     Detection     Analysis       Explanations
-(Node deps)   (AST rules)  (ML models)   (OpenAPI)      (Pangu)
+(Node deps)   (AST rules)  (Entropy)     (OpenAPI)      (LLM)
 ```
 
 ## Layered Architecture
@@ -65,7 +65,7 @@ Vulnera follows **domain-driven design** with four layers:
 
 - `database/` — SQLx compile-time validated SQL queries
 - `parsers/` — AST parsing, manifest parsers
-- `api_clients/` — NVD, GHSA, GitHub, Pangu LLM clients
+- `api_clients/` — NVD, GHSA, GitHub, LLM provider clients (Gemini, OpenAI, Azure)
 - `cache/` — Dragonfly/Redis caching, compression
 - `auth/` — JWT and API key handling
 
@@ -162,7 +162,7 @@ L1: In-Memory (100MB, 5-min TTL, optional compression)
       ↓ (miss)
 L2: Dragonfly/Redis (24-hour TTL, 10KB compression threshold)
       ↓ (miss)
-External: OSV, NVD, GHSA, GitHub, Pangu LLM APIs
+External: OSV, NVD, GHSA, GitHub, LLM APIs (Gemini, OpenAI, Azure)
 ```
 
 **Configuration:**
@@ -285,14 +285,14 @@ All services instantiated and wired:
 | SAST         | 500ms/file    | File complexity   |
 | API          | 50ms/spec     | Spec size         |
 | Dependencies | 1-10s/package | Registry latency  |
-| LLM          | 1-5s/request  | Pangu API latency |
+| LLM          | 1-5s/request  | Provider API latency |
 
 ## Deployment Models
 
 ### Docker
 
 ```dockerfile
-FROM rust:1.91 AS builder
+FROM rust:1.92 AS builder
 # Build Vulnera binary...
 
 FROM debian:bookworm

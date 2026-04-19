@@ -124,7 +124,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 - **Rule Repository:** Removed PostgreSQL-backed SAST rule storage; now uses file/default loaders and in-memory/Dragonfly caches.
 - **SAST Composition:** Updated composition root to no longer pass `PgPool` into `AnalysisModules::init`; decoupled database from SAST module.
 - **Severity Default:** Derived `Default` for `Severity` with `Medium` as the default variant.
-- **License:** Changed from AGPL-3.0-or-later to Proprietary in Cargo.toml.
+- **License:** Updated to clarify open-core model. Community modules remain AGPL-3.0-or-later; Enterprise tier is proprietary.
 - **MSRV:** Set Clippy MSRV to 1.85.0; increased too-many-arguments threshold to 8.
 
 ### Fixed
@@ -156,7 +156,7 @@ The format is based on Keep a Changelog and this project adheres to Semantic Ver
 
 - **Database Migration:** Older incremental migrations and the DB-backed SAST rule storage were removed. Existing databases created from the previous migration history are **not compatible** with this baseline. Initialize empty DBs with `sqlx migrate run` using the new baseline migration.
 
-- **License Change:** License changed from AGPL-3.0-or-later to Proprietary. Review licensing and compliance with legal counsel before using or redistributing this codebase.
+- **License Change:** License updated to open-core model. Community edition (SAST, Secrets, Deps, API modules) remains AGPL-3.0-or-later. Enterprise tier (DAST, IaC, CSPM, etc.) requires commercial license. See LICENSE file and README for details.
 
 - **CLI Separation:** `vulnera-cli` is now a separate workspace and repository. CLI commands and integration points differ from the main server binary.
 
