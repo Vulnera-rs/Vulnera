@@ -50,28 +50,27 @@ impl AuthenticationAnalyzer {
                             SecuritySchemeType::Http {
                                 scheme: http_scheme,
                                 ..
-                            } => {
-                                if http_scheme == "basic" {
-                                    findings.push(ApiFinding {
-                                        id: format!("auth-weak-{}-{}", path.path, operation.method),
-                                        vulnerability_type: ApiVulnerabilityType::WeakAuthentication,
-                                        location: ApiLocation {
-                                            file_path: "openapi.yaml".to_string(),
-                                            line: None,
-                                            path: Some(path.path.clone()),
-                                            operation: Some(operation.method.clone()),
-                                        },
-                                        severity: FindingSeverity::Medium,
-                                        description: format!(
-                                            "Endpoint {} {} uses HTTP Basic authentication which is weak",
-                                            operation.method, path.path
-                                        ),
-                                        recommendation: "Use OAuth2 or JWT Bearer tokens instead".to_string(),
+                            } if http_scheme == "basic" => {
+                                findings.push(ApiFinding {
+                                    id: format!("auth-weak-{}-{}", path.path, operation.method),
+                                    vulnerability_type: ApiVulnerabilityType::WeakAuthentication,
+                                    location: ApiLocation {
+                                        file_path: "openapi.yaml".to_string(),
+                                        line: None,
                                         path: Some(path.path.clone()),
-                                        method: Some(operation.method.clone()),
-                                    });
-                                }
+                                        operation: Some(operation.method.clone()),
+                                    },
+                                    severity: FindingSeverity::Medium,
+                                    description: format!(
+                                        "Endpoint {} {} uses HTTP Basic authentication which is weak",
+                                        operation.method, path.path
+                                    ),
+                                    recommendation: "Use OAuth2 or JWT Bearer tokens instead".to_string(),
+                                    path: Some(path.path.clone()),
+                                    method: Some(operation.method.clone()),
+                                });
                             }
+                            SecuritySchemeType::Http { .. } => {}
                             SecuritySchemeType::ApiKey { .. } => {
                                 findings.push(ApiFinding {
                                     id: format!("auth-apikey-{}-{}", path.path, operation.method),

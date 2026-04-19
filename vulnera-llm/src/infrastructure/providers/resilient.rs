@@ -154,12 +154,10 @@ impl<P: LlmProvider> ResilientProvider<P> {
                 state.failure_count = 0;
                 state.half_open_requests = 0;
             }
-            CircuitState::Closed => {
-                // Reset failure count on success
-                if state.failure_count > 0 {
-                    state.failure_count = 0;
-                }
+            CircuitState::Closed if state.failure_count > 0 => {
+                state.failure_count = 0;
             }
+            CircuitState::Closed => {}
             _ => {}
         }
     }
@@ -172,16 +170,17 @@ impl<P: LlmProvider> ResilientProvider<P> {
         state.last_failure_time = Some(std::time::Instant::now());
 
         match state.state {
-            CircuitState::Closed => {
-                if state.failure_count >= self.config.circuit_breaker_threshold {
-                    warn!(
-                        failures = state.failure_count,
-                        threshold = self.config.circuit_breaker_threshold,
-                        "Circuit breaker opening due to failures"
-                    );
-                    state.state = CircuitState::Open;
-                }
+            CircuitState::Closed
+                if state.failure_count >= self.config.circuit_breaker_threshold =>
+            {
+                warn!(
+                    failures = state.failure_count,
+                    threshold = self.config.circuit_breaker_threshold,
+                    "Circuit breaker opening due to failures"
+                );
+                state.state = CircuitState::Open;
             }
+            CircuitState::Closed => {}
             CircuitState::HalfOpen => {
                 debug!("Circuit breaker reopening after failure in half-open state");
                 state.state = CircuitState::Open;
