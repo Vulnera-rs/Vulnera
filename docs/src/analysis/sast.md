@@ -17,12 +17,12 @@ Common categories include:
 
 **Pipeline overview:**
 
-1. **Discovery** — Walks the project and maps files to supported languages.
-2. **Parsing** — Builds syntax trees using Tree-sitter (with OXC for JS/TS when enabled).
-3. **Rule matching** — Applies TOML rule packs to AST patterns.
-4. **Taint analysis** — Tracks source → sink flow, intra- and inter-procedural.
-5. **Call graph** — Resolves function calls across files to expand taint reachability.
-6. **Post-process** — Dedupes, scores confidence/severity, emits unified findings.
+1. **Discovery** - Walks the project and maps files to supported languages.
+2. **Parsing** - Builds syntax trees using Tree-sitter (with OXC for JS/TS when enabled).
+3. **Rule matching** - Applies TOML rule packs to AST patterns.
+4. **Taint analysis** - Tracks source -> sink flow, intra- and inter-procedural.
+5. **Call graph** - Resolves function calls across files to expand taint reachability.
+6. **Post-process** - Dedupes, scores confidence/severity, emits unified findings.
 
 ## Supported Languages
 
@@ -56,9 +56,9 @@ Rules are TOML-based and embedded at build time. You can optionally load Git-bas
 
 **Locations:**
 
-- `vulnera-sast/rules/*.toml` — core rule packs
-- `vulnera-sast/taint-patterns/*.toml` — taint sources/sinks/sanitizers
-- `vulnera-sast/tests/fixtures/` — CVE fixtures for quality gates
+- `vulnera-sast/rules/*.toml` - core rule packs
+- `vulnera-sast/taint-patterns/*.toml` - taint sources/sinks/sanitizers
+- `vulnera-sast/tests/fixtures/` - CVE fixtures for quality gates
 
 ## CLI Usage (Actual Flags)
 

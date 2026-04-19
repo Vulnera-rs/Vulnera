@@ -17,11 +17,11 @@ Common categories include:
 
 **Pipeline overview:**
 
-1. **Discovery** — Walks files within the scan root.
-2. **Regex rules** — Applies built-in secret patterns (rule pack).
-3. **Entropy detection** — Flags high-entropy strings (Base64/hex + generic heuristics).
-4. **Optional verification** — Provider-specific verification (disabled by default).
-5. **Post-process** — Dedupes and emits unified findings.
+1. **Discovery** - Walks files within the scan root.
+2. **Regex rules** - Applies built-in secret patterns (rule pack).
+3. **Entropy detection** - Flags high-entropy strings (Base64/hex + generic heuristics).
+4. **Optional verification** - Provider-specific verification (disabled by default).
+5. **Post-process** - Dedupes and emits unified findings.
 
 ## Detection Methods
 

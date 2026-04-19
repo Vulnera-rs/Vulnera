@@ -212,10 +212,10 @@ Go to **Settings → Analytics → Dashboard**
 
 1. Go to **Reports → New Report**
 2. Select report type:
-   - **Executive Summary** — High-level metrics for leadership
-   - **Detailed Technical** — Full findings for security team
-   - **Compliance** — SOC2/ISO27001/GDPR aligned
-   - **Department Summary** — Findings by team/project
+   - **Executive Summary** - High-level metrics for leadership
+   - **Detailed Technical** - Full findings for security team
+   - **Compliance** - SOC2/ISO27001/GDPR aligned
+   - **Department Summary** - Findings by team/project
 3. Configure:
    - Date range (last 30 days, last quarter, custom)
    - Modules to include (dependencies, SAST, secrets, API)
@@ -509,10 +509,10 @@ Dashboard shows: "Resolved by commit abc123def"
 
 **Setup Channels:**
 
-- `#vulnera-critical` — Real-time critical findings (mention team lead)
-- `#vulnera-security` — All findings, daily summary (team discussion)
-- `#vulnera-alerts` — Quota warnings, integration issues (ops only)
-- `#vulnera-ci` — PR scan results, CI/CD integration logs (read-only bot)
+- `#vulnera-critical` - Real-time critical findings (mention team lead)
+- `#vulnera-security` - All findings, daily summary (team discussion)
+- `#vulnera-alerts` - Quota warnings, integration issues (ops only)
+- `#vulnera-ci` - PR scan results, CI/CD integration logs (read-only bot)
 
 **Slack Automation Example:**
 
@@ -529,21 +529,21 @@ Dashboard shows: "Resolved by commit abc123def"
 ### Key Metrics to Track
 
 **Team Health:**
-- **Remediation Rate** — % of findings fixed within SLA
-- **Mean Time to Remediation (MTTR)** — Days from finding to resolved
-- **False Positive Rate** — % of dismissed as not real issue
-- **Scan Frequency** — Scans per week by team
+- **Remediation Rate** - % of findings fixed within SLA
+- **Mean Time to Remediation (MTTR)** - Days from finding to resolved
+- **False Positive Rate** - % of dismissed as not real issue
+- **Scan Frequency** - Scans per week by team
 
 **Security Posture:**
-- **Critical Findings Trend** — Month-over-month comparison
-- **Dependency Age** — Average age of dependencies
-- **Secret Exposures** — Count of exposed credentials (should be zero)
-- **Coverage** — % of repositories being scanned
+- **Critical Findings Trend** - Month-over-month comparison
+- **Dependency Age** - Average age of dependencies
+- **Secret Exposures** - Count of exposed credentials (should be zero)
+- **Coverage** - % of repositories being scanned
 
 **Quota Efficiency:**
-- **Tokens/Finding** — Cost per vulnerability found
-- **Scans/Token** — How many scans per token used
-- **Team Quota Burndown** — Days until month-end quota exhausted
+- **Tokens/Finding** - Cost per vulnerability found
+- **Scans/Token** - How many scans per token used
+- **Team Quota Burndown** - Days until month-end quota exhausted
 
 ### Monthly Review Template
 
@@ -694,10 +694,10 @@ A: 1. Remove member (Settings → Members → Remove)
 
 ## Next Steps
 
-- **Set Up Slack** — Enable real-time alerts for your team
-- **Create Weekly Sync** — Calendar recurring meeting to review findings
-- **Generate First Report** — Monthly compliance or executive summary
-- **Document Workflows** — Create team runbook for common scenarios
+- **Set Up Slack** - Enable real-time alerts for your team
+- **Create Weekly Sync** - Calendar recurring meeting to review findings
+- **Generate First Report** - Monthly compliance or executive summary
+- **Document Workflows** - Create team runbook for common scenarios
 
 For dashboard features, see [Dashboard Guide](guide.md).
 For organization setup, see [Organization Management](organization-management.md).

@@ -17,7 +17,7 @@ LLM enrichment (Google Gemini, OpenAI, Azure OpenAI) is a separate post-processi
 
 ## How Module Selection Works
 
-The orchestrator uses `RuleBasedModuleSelector` to automatically activate modules based on file patterns and analysis depth. You do not need to specify modules manually — the right ones run based on what is in the project.
+The orchestrator uses `RuleBasedModuleSelector` to automatically activate modules based on file patterns and analysis depth. You do not need to specify modules manually - the right ones run based on what is in the project.
 
 ```
 Incoming source (directory / git / S3)
@@ -71,14 +71,14 @@ Dynamic depth adjustment is enabled by default. Large repositories are auto-down
 
 ### Fully offline (no network required)
 
-- SAST — rule packs embedded at compile time
-- Secrets Detection — regex + entropy detection locally
-- API Security — OpenAPI rules locally
+- SAST - rule packs embedded at compile time
+- Secrets Detection - regex + entropy detection locally
+- API Security - OpenAPI rules locally
 
 ### Requires network
 
-- **Dependency Analysis** — CVE lookup against OSV, NVD, GHSA, and registries
-- **LLM enrichment** — explanations and fixes via external providers
+- **Dependency Analysis** - CVE lookup against OSV, NVD, GHSA, and registries
+- **LLM enrichment** - explanations and fixes via external providers
 
 ---
 
@@ -118,7 +118,7 @@ The `enrichment` field is populated only when LLM enrichment is requested after 
 
 ## Module-Specific Documentation
 
-- [Dependency Analysis](dependency-analysis.md) — ecosystem coverage, lockfile strategy, version recommendations
-- [SAST](sast.md) — supported languages, rule packs, taint analysis, confidence scoring
-- [Secrets Detection](secrets-detection.md) — detection methods, secret types, baselines
-- [API Security](api-security.md) — analysis categories, detected issue types, strict mode
+- [Dependency Analysis](dependency-analysis.md) - ecosystem coverage, lockfile strategy, version recommendations
+- [SAST](sast.md) - supported languages, rule packs, taint analysis, confidence scoring
+- [Secrets Detection](secrets-detection.md) - detection methods, secret types, baselines
+- [API Security](api-security.md) - analysis categories, detected issue types, strict mode

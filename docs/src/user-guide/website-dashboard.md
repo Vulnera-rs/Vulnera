@@ -8,37 +8,37 @@ Vulnera is API-first and does **not** ship a bundled web UI in this repository. 
 
 ### Health & Docs
 
-- `GET /health` — service health
-- `GET /metrics` — metrics endpoint
-- `GET /docs` — Swagger UI (if enabled)
-- `GET /api-docs/openapi.json` — OpenAPI spec
+- `GET /health` - service health
+- `GET /metrics` - metrics endpoint
+- `GET /docs` - Swagger UI (if enabled)
+- `GET /api-docs/openapi.json` - OpenAPI spec
 
 ### Jobs & Analysis
 
-- `POST /api/v1/analyze/job` — create analysis job
-- `GET /api/v1/jobs/{id}` — get job status/result
+- `POST /api/v1/analyze/job` - create analysis job
+- `GET /api/v1/jobs/{id}` - get job status/result
 
 ### Organizations
 
-- `POST /api/v1/organizations` — create organization
-- `GET /api/v1/organizations` — list organizations
-- `GET /api/v1/organizations/{id}` — organization details
-- `PUT /api/v1/organizations/{id}` — update organization
-- `DELETE /api/v1/organizations/{id}` — delete organization
-- `GET /api/v1/organizations/{id}/members` — list members
-- `POST /api/v1/organizations/{id}/members` — invite member
-- `DELETE /api/v1/organizations/{id}/members/{user_id}` — remove member
-- `POST /api/v1/organizations/{id}/leave` — leave organization
-- `POST /api/v1/organizations/{id}/transfer` — transfer ownership
+- `POST /api/v1/organizations` - create organization
+- `GET /api/v1/organizations` - list organizations
+- `GET /api/v1/organizations/{id}` - organization details
+- `PUT /api/v1/organizations/{id}` - update organization
+- `DELETE /api/v1/organizations/{id}` - delete organization
+- `GET /api/v1/organizations/{id}/members` - list members
+- `POST /api/v1/organizations/{id}/members` - invite member
+- `DELETE /api/v1/organizations/{id}/members/{user_id}` - remove member
+- `POST /api/v1/organizations/{id}/leave` - leave organization
+- `POST /api/v1/organizations/{id}/transfer` - transfer ownership
 
 ### Analytics & Quota
 
-- `GET /api/v1/organizations/{id}/analytics/dashboard` — org dashboard stats
-- `GET /api/v1/organizations/{id}/analytics/usage` — org usage
-- `GET /api/v1/organizations/{id}/analytics/quota` — org quota
-- `GET /api/v1/me/analytics/dashboard` — personal dashboard stats
-- `GET /api/v1/me/analytics/usage` — personal usage
-- `GET /api/v1/quota` — quota usage
+- `GET /api/v1/organizations/{id}/analytics/dashboard` - org dashboard stats
+- `GET /api/v1/organizations/{id}/analytics/usage` - org usage
+- `GET /api/v1/organizations/{id}/analytics/quota` - org quota
+- `GET /api/v1/me/analytics/dashboard` - personal dashboard stats
+- `GET /api/v1/me/analytics/usage` - personal usage
+- `GET /api/v1/quota` - quota usage
 
 ### LLM Features (Optional)
 
@@ -73,7 +73,6 @@ A minimal dashboard typically includes:
 ## Configuration Reference
 
 See:
-
 - [Configuration Reference](../reference/configuration.md)
 - [System Architecture](../reference/architecture.md)
 

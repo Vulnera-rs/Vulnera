@@ -22,12 +22,12 @@ SAST analyzes source code to detect security flaws such as injection, insecure c
 
 ## Pipeline (High-Level)
 
-1. **Discovery** — Walks files and maps them to supported languages.
-2. **Parsing** — Builds ASTs with Tree-sitter; optional OXC for JS/TS.
-3. **Rule matching** — Applies TOML rule packs to AST patterns.
-4. **Taint analysis** — Tracks source → sink flow across functions and files.
-5. **Call graph** — Resolves cross-file calls to expand reachability.
-6. **Post-process** — Dedupes, scores severity/confidence, emits findings.
+1. **Discovery** - Walks files and maps them to supported languages.
+2. **Parsing** - Builds ASTs with Tree-sitter; optional OXC for JS/TS.
+3. **Rule matching** - Applies TOML rule packs to AST patterns.
+4. **Taint analysis** - Tracks source → sink flow across functions and files.
+5. **Call graph** - Resolves cross-file calls to expand reachability.
+6. **Post-process** - Dedupes, scores severity/confidence, emits findings.
 
 ## Rule System
 
@@ -35,9 +35,9 @@ SAST rules are TOML-based and embedded at build time. Optional Git-based rule pa
 
 **Rule locations:**
 
-- `vulnera-sast/rules/*.toml` — core rule packs
-- `vulnera-sast/taint-patterns/*.toml` — taint sources/sinks/sanitizers
-- `vulnera-sast/tests/fixtures/` — CVE fixtures for quality gates
+- `vulnera-sast/rules/*.toml` - core rule packs
+- `vulnera-sast/taint-patterns/*.toml` - taint sources/sinks/sanitizers
+- `vulnera-sast/tests/fixtures/` - CVE fixtures for quality gates
 
 ## Analysis Depth (SAST)
 

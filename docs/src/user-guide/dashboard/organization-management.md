@@ -11,15 +11,15 @@ Organizations in Vulnera enable team collaboration with shared quotas, centraliz
    - Or go to **Dashboard → Organizations → Create New**
 
 2. **Fill in Organization Details**
-   - **Organization Name** — Your company or team name (e.g., "Acme Security Team")
-   - **Description** — Brief description of the organization's purpose
-   - **Logo** — Optional: Upload organization logo (PNG, JPG, 512×512px recommended)
-   - **Contact Email** — Primary contact for billing and notifications
+   - **Organization Name** - Your company or team name (e.g., "Acme Security Team")
+   - **Description** - Brief description of the organization's purpose
+   - **Logo** - Optional: Upload organization logo (PNG, JPG, 512×512px recommended)
+   - **Contact Email** - Primary contact for billing and notifications
 
 3. **Select Plan Tier**
-   - **Free** — 48 tokens/month, up to 5 members, basic integrations
-   - **Pro** — 1000 tokens/month, unlimited members, advanced integrations
-   - **Enterprise** — Custom tokens, SSO/SAML, custom domains, priority support
+   - **Free** - 48 tokens/month, up to 5 members, basic integrations
+   - **Pro** - 1000 tokens/month, unlimited members, advanced integrations
+   - **Enterprise** - Custom tokens, SSO/SAML, custom domains, priority support
 
 4. **Confirm Creation**
    - Review settings
@@ -82,19 +82,19 @@ Viewer (read-only)
 
 ### When to Use Each Role
 
-- **Owner** — Organization founders, ultimate decision-makers, billing contact
+- **Owner** - Organization founders, ultimate decision-makers, billing contact
   - Best for: 1-2 key decision-makers per organization
   - Caution: Rarely needed, keep minimal
 
-- **Admin** — Team leads, security directors, technical leads
+- **Admin** - Team leads, security directors, technical leads
   - Best for: Day-to-day organization management
   - Responsibility: Member provisioning, integration setup
 
-- **Member** — Developers, security engineers, DevOps engineers
+- **Member** - Developers, security engineers, DevOps engineers
   - Best for: Active security practitioners who scan code
   - Permissions: Run scans, view/resolve findings
 
-- **Viewer** — Executives, managers, stakeholders (read-only)
+- **Viewer** - Executives, managers, stakeholders (read-only)
   - Best for: Non-technical decision-makers who need visibility
   - Permissions: View scans, findings, reports (no modifications)
 
@@ -106,7 +106,7 @@ Viewer (read-only)
 
 1. Go to **Settings → Members**
 2. Click **Invite Member**
-3. Enter email address(es) — comma-separated for bulk invite
+3. Enter email address(es) - comma-separated for bulk invite
 4. Select role for each member:
    - Admin (for team leads)
    - Member (for developers)
@@ -147,7 +147,7 @@ Members receive email from `invite@vulnera.studio`:
 2. Find member in list
 3. Click member row → **Edit**
 4. Change role dropdown
-5. Click **Save** — changes take effect immediately
+5. Click **Save** - changes take effect immediately
 6. Member receives notification of role change
 
 ### Removing Members
@@ -423,10 +423,10 @@ vulnera-scan:
 1. Go to **Settings → Webhooks → Add Webhook**
 2. Enter webhook URL (must be HTTPS)
 3. Select events:
-   - `scan.started` — Analysis job started
-   - `scan.completed` — Analysis finished
-   - `finding.created` — New vulnerability detected
-   - `finding.resolved` — Manually marked resolved
+   - `scan.started` - Analysis job started
+   - `scan.completed` - Analysis finished
+   - `finding.created` - New vulnerability detected
+   - `finding.resolved` - Manually marked resolved
 4. (Optional) Set webhook secret for signature verification
 5. Click **Create**
 
@@ -628,10 +628,10 @@ A: 1. Owner adds desired new owner as Admin
 
 ## Next Steps
 
-- **Set Up Integrations** — Connect Slack, GitHub for automated workflows
-- **Configure Webhooks** — Feed findings to your ticketing system
-- **Generate Your First Report** — Create compliance or executive summary report
-- **Audit Organization** — Review member list and access quarterly
+- **Set Up Integrations** - Connect Slack, GitHub for automated workflows
+- **Configure Webhooks** - Feed findings to your ticketing system
+- **Generate Your First Report** - Create compliance or executive summary report
+- **Audit Organization** - Review member list and access quarterly
 
 For team collaboration workflows, see [Team Collaboration Guide](team-collaboration.md).
 For dashboard features, see [Dashboard Guide](guide.md).

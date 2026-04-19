@@ -209,7 +209,7 @@ vulnera analyze . --offline
 
 ## Troubleshooting
 
-**Q: No findings found—is it working?**
+**Q: No findings found - is it working?**
 A: That's good! Your code is secure. Try with `--show-passed` to see all checks run.
 
 **Q: Getting "permission denied" error?**
