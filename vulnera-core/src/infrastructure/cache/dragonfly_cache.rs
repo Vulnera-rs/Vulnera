@@ -193,7 +193,7 @@ impl DragonflyCache {
         }
     }
 
-    /// Get raw bytes from cache (for binary data like bincode serialized ASTs)
+    /// Get raw bytes from cache (for binary data like rkyv serialized ASTs)
     pub async fn get_raw(&self, key: &str) -> Result<Option<Vec<u8>>, ApplicationError> {
         let mut conn = (*self.connection_manager).clone();
 
@@ -218,7 +218,7 @@ impl DragonflyCache {
         Ok(value)
     }
 
-    /// Set raw bytes in cache with TTL (for binary data like bincode serialized ASTs)
+    /// Set raw bytes in cache with TTL (for binary data like rkyv serialized ASTs)
     pub async fn set_raw(
         &self,
         key: &str,

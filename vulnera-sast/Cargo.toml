@@ -57,7 +57,7 @@ futures = { workspace = true }
 
 
 # Caching serialization
-bincode = { workspace = true }
+rkyv = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 
