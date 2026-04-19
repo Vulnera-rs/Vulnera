@@ -19,7 +19,7 @@
 
 Most security scanners are built on memory-unsafe foundations and require you to trust opaque SaaS services with your source code. Vulnera is different.
 
-We built a **self-hosted, API-first security platform** that runs in your infrastructure, uses Linux kernel sandboxing (not containers), and gives you auditable rules—not black-box scores.
+We built a **self-hosted, API-first security platform** that runs in your infrastructure, uses Linux kernel sandboxing (not containers), and gives you auditable rules-not black-box scores.
 
 ### Three Pillars
 
@@ -28,7 +28,45 @@ We built a **self-hosted, API-first security platform** that runs in your infras
 | 🚀 **Rust-native performance** - No GC pauses, lock-free caching | 🛡️ **Landlock kernel sandboxing** - Not containers. The actual Linux kernel. | 📖 **Auditable rules** - TOML rule packs you can read and modify |
 | **<10s** for medium projects | **<1µs** sandbox startup overhead | Tree-sitter queries, not black boxes |
 
-While other scanners sandbox with containers, Vulnera uses Linux Landlock LSM—the same kernel technology that powers Chrome's sandbox. Faster, safer, and not bypassable by container escapes.
+While other scanners sandbox with containers, Vulnera uses Linux Landlock LSM-the same kernel technology that powers Chrome's sandbox. Faster, safer, and not bypassable by container escapes.
+
+### Security for the AI Coding Era
+
+The rise of **"vibe coding"** - where developers and non-developers rely heavily on AI to rapidly generate software - has introduced widespread systemic security risks. This method prioritizes speed over rigorous engineering, resulting in code that is frequently **syntactically correct but logically insecure**.
+
+**Common AI-generated security flaws Vulnera detects:**
+
+| AI Hallucination | How Vulnera Catches It |
+|------------------|------------------------|
+| **Hard-coded API keys** in generated boilerplate | Secrets detection with entropy analysis + live verification |
+| **SQL injection** in AI-generated database queries | SAST taint tracking from user input to query execution |
+| **Missing authentication** in scaffolded endpoints | API security analyzers for auth gaps |
+| **Vulnerable dependencies** in generated `requirements.txt` | CVE scanning across 9 ecosystems |
+| **XSS vulnerabilities** in auto-generated frontend code | Inter-procedural data flow analysis |
+
+**The stakes:** Software vulnerabilities have caused over $380 million in losses in industrial control systems alone. 90% of vulnerabilities stem from poor design and insecure coding practices - exactly what AI-generated code exacerbates.
+
+**Vulnera's approach:** Fast, integrated security analysis that catches AI-generated vulnerabilities at the speed of AI-generated code.
+
+---
+
+### Built for the Full Development Lifecycle
+
+**Pre-Production First** - Vulnera is designed to catch vulnerabilities before they reach production:
+
+| Phase | How Vulnera Fits |
+|-------|------------------|
+| **IDE/CLI** | Real-time analysis via LSP as you write code |
+| **Pre-commit** | `vulnera config hooks install` blocks secrets before commit |
+| **CI/CD** | GitHub Actions integration fails builds on critical findings |
+| **Staging** | Full analysis before production deployment |
+
+**Post-Production** - For running systems:
+- Dependency CVE monitoring for deployed applications
+- API security regression testing against production OpenAPI specs
+- Secrets rotation detection in configuration repositories
+
+Our philosophy: **Shift Left, Monitor Right.** Catch vulnerabilities during development when they're cheapest to fix, but maintain visibility into production security posture.
 
 ---
 
