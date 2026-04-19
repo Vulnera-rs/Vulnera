@@ -4,7 +4,7 @@ Quick answers to common questions about Vulnera's features, capabilities, and us
 
 ## Quota & Rate Limiting
 
-### How much does analysis cost in tokens?
+### How much does analysis cost in tokens for Enterprise users?
 
 Each operation consumes tokens from your daily quota:
 
@@ -33,9 +33,9 @@ Each operation consumes tokens from your daily quota:
 
 **Yes.** Options:
 
-1. **Organization tier** — Upgrade to shared team quota (100 tokens/day)
-2. **Premium plan** — Contact vulnera for higher limits
-3. **On-premise** — Deploy Vulnera privately with unlimited quota
+1. **Organization tier** - Upgrade to shared team quota (100 tokens/day)
+2. **Premium plan** - Contact vulnera for higher limits
+3. **On-premise** - Deploy Vulnera privately with unlimited quota
 
 ### What happens when I exceed my quota?
 
@@ -76,13 +76,13 @@ vulnera analyze --source ./my-project --modules sast,secrets,api
 
 Common causes:
 
-1. **Test/example secrets** — Hardcoded in docs or tests
+1. **Test/example secrets** - Hardcoded in docs or tests
    - **Fix:** Mark as `.vulnera-ignore` or use entropy baseline filters
 
-2. **Placeholder values** — Keys like `YOUR_API_KEY_HERE`
+2. **Placeholder values** - Keys like `YOUR_API_KEY_HERE`
    - **Fix:** Entropy score filters exclude most placeholders
 
-3. **High-entropy strings** — Random tokens in logs
+3. **High-entropy strings** - Random tokens in logs
    - **Fix:** Configure entropy thresholds per secret type
 
 **False positive rate:** <5% for high-confidence secrets (AWS keys, private certs)
@@ -106,44 +106,44 @@ Common causes:
 
 Possible reasons:
 
-1. **Dynamic code patterns** — Code generated at runtime
+1. **Dynamic code patterns** - Code generated at runtime
    - SAST analyzes static AST; runtime patterns require dynamic analysis "next step In roadmap"
 
-2. **Complex data flow** — Multi-step taint chains
+2. **Complex data flow** - Multi-step taint chains
    - Default taint depth is 3 hops; increase with `--taint-depth=5`
 
-3. **Custom sanitizers** — User-defined security functions not recognized
+3. **Custom sanitizers** - User-defined security functions not recognized
    - Configure in `.vulnera.toml` under `sast.custom_sanitizers`
 
-4. **False negative filtering** — Some detections suppressed to reduce noise
+4. **False negative filtering** - Some detections suppressed to reduce noise
    - Enable with `--analysis-depth=full`
 
 **Reference:** [SAST Analysis](../analysis/sast.md)
 
 ---
 
-## ML vs. LLM
+## Detection vs. LLM Features
 
-### What's the difference between ML models and LLM features?
+### What's the difference between rule-based detection and LLM features?
 
-| Aspect            | ML Models (Detection)                  | LLM Features (Explanation)    |
-| ----------------- | -------------------------------------- | ----------------------------- |
-| **Purpose**       | Find vulnerabilities                   | Explain & fix vulnerabilities |
-| **Technology**    | Pattern matching, AST parsing, entropy | Google Gemini                 |
-| **Speed**         | <1 second                              | 3-10 seconds                  |
-| **Offline**       | ✅ Yes                                 | ❌ No                         |
-| **Cost**          | 3 tokens                               | 6 tokens                      |
-| **Deterministic** | ✅ Same input = same output            | ❌ May vary slightly          |
+| Aspect            | Detection Models                      | LLM Features (Explanation)    |
+| ----------------- | ------------------------------------- | ----------------------------- |
+| **Purpose**       | Find vulnerabilities                  | Explain & fix vulnerabilities |
+| **Technology**    | Pattern matching, AST parsing, entropy | Google Gemini, OpenAI, Azure  |
+| **Speed**         | <1 second                             | 3-10 seconds                  |
+| **Offline**        | Yes                                   | No                            |
+| **Cost**          | 3 tokens                              | 6 tokens                      |
+| **Deterministic** | Yes -- same input = same output       | No -- may vary slightly       |
 
-### Are ML models proprietary?
+### Are detection models proprietary?
 
 **Detection models** (SAST, Secrets, API) are **rule-based and open-source**:
 
 - SAST: tree-sitter AST patterns (GitHub open-source)
-- Secrets: Entropy + regex patterns (public ML fingerprints)
+- Secrets: Entropy + regex patterns (no ML fingerprints)
 - API: OpenAPI schema validation (OWASP standards)
 
-**LLM explanations** use Google Gemini.
+**LLM explanations** use Google Gemini, OpenAI, or Azure.
 
 ### Can I use Vulnera without LLM features?
 
@@ -267,9 +267,9 @@ vulnera analyze --source s3://my-bucket/project \
 
 **Yes, three options:**
 
-1. **SaaS (api.vulnera.studio)** — Fully managed
-2. **Self-hosted Docker** — On your infrastructure
-3. **Kubernetes helm chart** — Enterprise clusters
+1. **SaaS (api.vulnera.studio)** - Fully managed
+2. **Self-hosted Docker** - On your infrastructure
+3. **Kubernetes helm chart** - Enterprise clusters
 
 **Reference:** [Architecture - Deployment Models](./architecture.md#deployment-models)
 
@@ -405,37 +405,39 @@ vulnera auth status   # Check authentication
 
 ## Dashboard & Web Platform
 
-### What is vulnera.studio?
+### What is Vulnera Studio?
 
-**Vulnera Studio** ([vulnera.studio](https://vulnera.studio)) is the central web dashboard for managing vulnerability analysis, team collaboration, and security insights. It provides:
+**Vulnera Studio** is the enterprise-managed SaaS platform for Vulnera. It provides:
 
-- **Personal Dashboard** — View your scans and findings
-- **Organization Management** — Team collaboration with shared quotas
-- **API Key Management** — Generate keys for CLI and API access
-- **Integrations** — Connect GitHub, GitLab, Slack, webhooks
-- **Analytics & Reporting** — Track team metrics and generate compliance reports
-- **Billing Management** — Upgrade plans and manage subscriptions
+- **Personal Dashboard** - View your scans and findings
+- **Organization Management** - Team collaboration with shared quotas
+- **API Key Management** - Generate keys for CLI and API access
+- **Integrations** - Connect GitHub, GitLab, Slack, webhooks
+- **Analytics & Reporting** - Track team metrics and generate compliance reports
+- **Billing Management** - Manage subscriptions
 
-**Access:** Visit [https://vulnera.studio](https://vulnera.studio) and sign in with your email.
+**Status:** Vulnera Studio is planned for post-1.0 release. Currently, the Community Edition provides a full self-hosted server with web UI at no cost.
+
+**Current alternative:** Deploy the Community Edition server locally - it includes the same web UI, API, and analysis capabilities.
 
 **Reference:** [Dashboard Guide](../user-guide/dashboard/guide.md)
 
 ### How do I create an organization?
 
-**Step-by-step:**
+**Step-by-step (Self-hosted server):**
 
-1. Log in to [vulnera.studio](https://vulnera.studio)
-2. Click **+ New Organization** in sidebar
-3. Enter organization name, description, and logo (optional)
-4. Select plan tier (Free, Pro, Enterprise)
-5. Click **Create** — you're now the owner
+1. Access your Vulnera server at `http://localhost:3000`
+2. Sign up with your email
+3. Click **+ New Organization** in sidebar
+4. Enter organization name, description, and logo (optional)
+5. Click **Create** - you're now the owner
 
 **What you get:**
 
-- Shared quota pool (e.g., 48 tokens/month for Free, 1000 for Pro)
 - Team member management (invite/remove members)
 - Centralized reporting and analytics
 - Organization API keys for CI/CD
+- Shared quota pooling
 
 **Reference:** [Organization Management](../user-guide/dashboard/organization-management.md)
 
@@ -446,26 +448,26 @@ vulnera auth status   # Check authentication
 1. Go to **Settings → Members**
 2. Click **Invite Member**
 3. Enter email address(es) and select role:
-   - **Admin** — Manage team, integrations, settings
-   - **Member** — Create scans, resolve findings
-   - **Viewer** — Read-only access (good for executives)
+   - **Admin** - Manage team, integrations, settings
+   - **Member** - Create scans, resolve findings
+   - **Viewer** - Read-only access (good for executives)
 4. Click **Send Invitations**
 5. Members receive email with join link
 
 **Roles & Permissions:**
 
-- **Owner** — Full access, billing, delete organization
-- **Admin** — Members, settings, integrations (no billing)
-- **Member** — Create/view scans, resolve findings
-- **Viewer** — Read-only access to scans and reports
+- **Owner** - Full access, billing, delete organization
+- **Admin** - Members, settings, integrations (no billing)
+- **Member** - Create/view scans, resolve findings
+- **Viewer** - Read-only access to scans and reports
 
 **Reference:** [Team Collaboration](../user-guide/dashboard/team-collaboration.md)
 
 ### How do I generate an API key for the CLI?
 
-**Generate API key:**
+**Generate API key (self-hosted server):**
 
-1. Log in to [vulnera.studio](https://vulnera.studio)
+1. Access your Vulnera server at `http://localhost:3000`
 2. Go to **Settings → API Keys**
 3. Click **Generate New Key**
 4. Name the key (e.g., "GitHub Actions", "Local Dev")
@@ -504,37 +506,29 @@ vulnera auth login --api-key YOUR_API_KEY
 
 ### How do I upgrade my organization's plan?
 
-**Upgrade plan:**
+**For self-hosted Community Edition:** The Community Edition is free and includes all core features. There is no upgrade path within the open-source version.
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Billing**
-2. Current plan and quota displayed
-3. Click **Change Plan** or **Upgrade**
-4. Select new tier (Pro, Enterprise) or add custom tokens
-5. Update payment method if needed
-6. Click **Confirm Upgrade**
-
-**Plan options:**
-
-- **Free** — 48 tokens/month, 5 members, basic integrations
-- **Pro** — 1000 tokens/month, unlimited members, advanced integrations
-- **Enterprise** — Custom tokens, SSO/SAML, custom domains, priority support
-
-**Downgrade:** Available mid-cycle; changes take effect at next billing date.
+**For Enterprise features:** Contact Vulnera sales for licensing information about:
+- DAST, IaC, CSPM, Fuzz testing modules
+- SBOM generation and License compliance
+- Vulnera Studio SaaS (when available)
+- Enterprise SSO (SAML/OIDC)
+- Priority support and SLA
 
 **Reference:** [Quota & Pricing](../user-guide/quota-pricing.md)
 
 ### How do I connect GitHub for automatic scanning?
 
-**GitHub Integration setup:**
+**GitHub Integration setup (self-hosted server):**
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Integrations → GitHub**
+1. Go to your Vulnera server → **Settings → Integrations → GitHub**
 2. Click **Connect GitHub**
 3. Authorize Vulnera GitHub App (select repos or all repos)
 4. Enable auto-scan triggers:
    - On push to main/develop
    - On all pull requests
    - Scheduled daily scan
-5. Save — scans now run automatically
+5. Save - scans now run automatically
 
 **What happens:**
 
@@ -547,9 +541,9 @@ vulnera auth login --api-key YOUR_API_KEY
 
 ### How do I set up Slack notifications?
 
-**Enable Slack integration:**
+**Enable Slack integration (self-hosted server):**
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Integrations → Slack**
+1. Go to your Vulnera server → **Settings → Integrations → Slack**
 2. Click **Connect Slack Workspace**
 3. Authorize Vulnera app in Slack
 4. Select notification channel
@@ -574,9 +568,9 @@ CVSS: 9.2
 
 ### How do I view team analytics and usage?
 
-**Organization Analytics:**
+**Organization Analytics (self-hosted server):**
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Organization → Analytics**
+1. Go to your Vulnera server → **Organization → Analytics**
 2. View dashboard:
    - Total quota used vs. remaining
    - Per-member breakdown (token consumption)
@@ -594,26 +588,25 @@ CVSS: 9.2
 
 ### Can I generate compliance reports from the dashboard?
 
-**Yes, multiple report types:**
+**Basic reporting available (self-hosted server):**
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Reports → Compliance Reports**
-2. Select framework:
-   - SOC2 Type II
-   - ISO 27001
-   - GDPR
-   - HIPAA (Enterprise)
-   - PCI DSS (Enterprise)
+1. Go to your Vulnera server → **Reports**
+2. Select report type:
+   - Security summary
+   - Vulnerability trends
+   - Member activity
 3. Select date range
-4. Click **Generate** → PDF/HTML download
-5. Share with auditors or stakeholders
+4. Export as CSV, JSON, or PDF
 
-**Report contents:**
+**Enterprise compliance reports (planned):**
 
-- Security metrics summary
-- Audit log excerpts
-- Member access records
-- Vulnerability remediation status
-- Data handling compliance statements
+- SOC2 Type II
+- ISO 27001
+- GDPR
+- HIPAA
+- PCI DSS
+
+These require the Enterprise license and Vulnera Studio SaaS (post-1.0).
 
 **Reference:** [Dashboard Guide - Reporting & Export](../user-guide/dashboard/guide.md#reporting--export)
 
@@ -621,10 +614,10 @@ CVSS: 9.2
 
 **Remove member from organization:**
 
-1. Go to [vulnera.studio](https://vulnera.studio) → **Settings → Members**
+1. Go to your Vulnera server → **Settings → Members**
 2. Find member in list
 3. Click **Remove** (⋯ menu)
-4. Confirm removal — member loses access immediately
+4. Confirm removal - member loses access immediately
 
 **What happens:**
 
@@ -656,44 +649,61 @@ CVSS: 9.2
 
 ### Can I see Vulnera's source code?
 
-**Partial:**
+**Yes.** Vulnera is open core with a clear split:
 
-- **Open-source**: SAST rules, Secrets patterns, CLI utilities
-- **Proprietary**: LLM integration, API backend, rate limiting logic
-- **Reference**: [GitHub open-source modules](https://github.com/vulnera-dev/vulnera/tree/main/vulnera-sast)
+**Open Source (AGPL-3.0 Community Edition):**
+- SAST engine with tree-sitter and taint analysis
+- Secrets detection with entropy + patterns
+- Dependency scanning with CVE lookup
+- API security analysis
+- LLM provider abstractions
+- Sandboxing backends (Landlock, Seccomp, WASM)
+- Full CLI and REST API
+
+**Enterprise Features (Proprietary - require license):**
+- DAST (dynamic application security testing)
+- IaC security (Terraform, Kubernetes, Docker)
+- CSPM (cloud security posture management)
+- Fuzz testing
+- SBOM generation
+- License compliance scanning
+- Malicious package detection
+- Vulnera Studio SaaS platform
+
+**Reference:** [GitHub repository](https://github.com/vulnera-dev/vulnera) and [Philosophy - Open Core](../PHILOSOPHY.md)
 
 ### Is on-premise deployment available?
 
-**NO.** Vulnera doesn't supports self-hosted deployment with plan to support in future.
+**Yes.** Vulnera is self-hosted by default. The AGPL Community Edition includes the full server binary with web UI, REST API, and all analysis modules. Deploy on your own infrastructure using Docker, Kubernetes, or bare metal.
 
-Contact Vulnera for enterprise licenses.
+Enterprise customers can also use Vulnera Studio (managed SaaS) when available.
+
+**Reference:** [Architecture - Deployment Models](./architecture.md#deployment-models)
 
 ---
 
 ## Cost & Licensing
 
-### Is there a free tier?
+### What are the licensing tiers?
 
-**Yes:**
+Vulnera uses an open-core model:
 
-| Tier         | Features                                          | Cost         |
-| ------------ | ------------------------------------------------- | ------------ |
-| Community    | SAST, Secrets, API (offline)                      | Free         |
-| Developer    | +Dependency scanning, LLM (limited 40 tokens/day) | Free/API key |
-| Organization | Team collaboration, 100 tokens/day, analytics     | $99/month    |
-| Enterprise   | Unlimited, SLA                                    | Custom       |
+| Tier | License | Features | Cost |
+|------|---------|----------|------|
+| **Community** | AGPL-3.0 | Full self-hosted server, SAST, Secrets, Dependencies, API, LLM | Free |
+| **Enterprise** | Proprietary | DAST, IaC, CSPM, Fuzz, SBOM, License Compliance, Vulnera Studio SaaS | Contact sales |
 
-**Reference:** [Quota & Pricing](../user-guide/quota-pricing.md)
+The Community Edition is fully functional and free. Enterprise features are additive - they don't remove capabilities from open source.
+
+**Reference:** [Open Core: Community vs Enterprise](../../README.md#open-core-community-vs-enterprise)
 
 ### What if I exceed my quota?
 
-**Billing options:**
+**For self-hosted Community Edition:** Quotas are configurable by the server administrator. There is no per-use billing for self-hosted deployments.
 
-1. **Auto-upgrade** — Automatically upgrade org to higher tier at month-end
-2. **Per-use billing** — Pay $0.10/token over quota (prepay)
-3. **Reserved quota** — Pre-purchase token packages at 20% discount
+**For Enterprise (when Vulnera Studio is available):** Contact Vulnera for quota management options.
 
-Set preferences in organization settings > Billing.
+The Community Edition has no inherent quota limits - you control your own infrastructure.
 
 ---
 
@@ -703,8 +713,8 @@ Set preferences in organization settings > Billing.
 
 - **Documentation:** [Full guide](../README.md)
 - **Community:** [GitHub Discussions](https://github.com/vulnera-dev/vulnera/discussions)
-- **Web:** [vulnera.studio](https://vulnera.studio)
-- **Enterprise SLA:** Contact vulnera sales for support plans.
+- **Documentation:** [Full guide](../README.md)
+- **Enterprise:** Contact Vulnera sales for enterprise licensing and SLA.
 
 **For bugs:** [GitHub Issues](https://github.com/vulnera-dev/vulnera/issues)
 
@@ -716,7 +726,5 @@ Set preferences in organization settings > Billing.
 - [Dashboard Guide](../user-guide/dashboard/guide.md)
 - [Organization Management](../user-guide/dashboard/organization-management.md)
 - [Team Collaboration](../user-guide/dashboard/team-collaboration.md)
-- [CLI Guide](../CLI_GUIDE.md)
-- [API Reference](./api-spec.md)
 - [Quota & Pricing](../user-guide/quota-pricing.md)
 - [LLM Features](../user-guide/llm-features.md)

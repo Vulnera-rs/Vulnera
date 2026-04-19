@@ -11,15 +11,15 @@ The API Security module analyzes OpenAPI 3.x specifications to identify security
 
 These analyzers run on the parsed OpenAPI spec:
 
-- **Authentication** — missing auth, weak schemes (e.g., basic), insecure auth usage
-- **Authorization** — missing authorization checks, overly permissive access
-- **Input Validation** — missing request validation, unsafe parameter shapes
-- **Data Exposure** — sensitive data in URLs/headers, response overexposure
-- **Security Headers** — missing CSP/HSTS/XFO/XCTO; CORS review
-- **OAuth/OIDC** — insecure flows, redirect issues, token validation gaps
-- **Design** — versioning and error-handling issues
-- **Security Misconfiguration** — insecure defaults and configuration pitfalls
-- **Resource Restriction** — missing request size/limit constraints
+- **Authentication** - missing auth, weak schemes (e.g., basic), insecure auth usage
+- **Authorization** - missing authorization checks, overly permissive access
+- **Input Validation** - missing request validation, unsafe parameter shapes
+- **Data Exposure** - sensitive data in URLs/headers, response overexposure
+- **Security Headers** - missing CSP/HSTS/XFO/XCTO; CORS review
+- **OAuth/OIDC** - insecure flows, redirect issues, token validation gaps
+- **Design** - versioning and error-handling issues
+- **Security Misconfiguration** - insecure defaults and configuration pitfalls
+- **Resource Restriction** - missing request size/limit constraints
 
 ## Notable Checks
 
@@ -65,7 +65,7 @@ vulnera api . --spec ./openapi.yaml
 
 **Relevant flags:**
 
-- `--spec <path>` — explicit OpenAPI spec path
+- `--spec <path>` - explicit OpenAPI spec path
 - `--min-severity <critical|high|medium|low>`
 - `--fail-on-issue`
 - `--framework <name>` (optional)
@@ -86,7 +86,7 @@ vulnera api . --format sarif > report.sarif
 
 ## Limitations
 
-- Relies on the spec as the source of truth — runtime behavior is out of scope.
+- Relies on the spec as the source of truth - runtime behavior is out of scope.
 - Missing or incomplete specs will limit detection.
 
 ## Next Steps

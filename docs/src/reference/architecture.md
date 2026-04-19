@@ -29,28 +29,28 @@ Vulnera follows **domain-driven design** with four layers:
 
 ### 1. Domain Layer
 
-**Pure types, entities, traits—zero side effects**
+**Pure types, entities, traits - zero side effects**
 
-- `module.rs` — `AnalysisModule` trait (all modules implement)
-- `errors.rs` — Domain error types
-- `findings.rs` — Finding entity and value objects
-- `config.rs` — Configuration value objects
-- `repository.rs` — Repository trait definitions
+- `module.rs` - `AnalysisModule` trait (all modules implement)
+- `errors.rs` - Domain error types
+- `findings.rs` - Finding entity and value objects
+- `config.rs` - Configuration value objects
+- `repository.rs` - Repository trait definitions
 
 **Key traits:**
 
-- `AnalysisModule` — All modules (deps, SAST, secrets, API, LLM) implement this
-- `IRepository` — Abstract data access
-- `ICache` — Cache abstraction (Dragonfly/Redis only)
-- `IAuthenticator` — Authentication logic
+- `AnalysisModule` - All modules (deps, SAST, secrets, API, LLM) implement this
+- `IRepository` - Abstract data access
+- `ICache` - Cache abstraction (Dragonfly/Redis only)
+- `IAuthenticator` - Authentication logic
 
 ### 2. Application Layer
 
 **Use cases orchestrating domain logic**
 
-- `create_analysis_job.rs` — Initialize analysis job
-- `execute_analysis_job.rs` — Run analysis modules
-- `enrich_findings_with_llm.rs` — Add LLM explanations
+- `create_analysis_job.rs` - Initialize analysis job
+- `execute_analysis_job.rs` - Run analysis modules
+- `enrich_findings_with_llm.rs` - Add LLM explanations
 - Repository implementations for data access
 
 **Key characteristics:**
@@ -63,11 +63,11 @@ Vulnera follows **domain-driven design** with four layers:
 
 **HTTP clients, database queries, file I/O, parsers**
 
-- `database/` — SQLx compile-time validated SQL queries
-- `parsers/` — AST parsing, manifest parsers
-- `api_clients/` — NVD, GHSA, GitHub, LLM provider clients (Gemini, OpenAI, Azure)
-- `cache/` — Dragonfly/Redis caching, compression
-- `auth/` — JWT and API key handling
+- `database/` - SQLx compile-time validated SQL queries
+- `parsers/` - AST parsing, manifest parsers
+- `api_clients/` - NVD, GHSA, GitHub, LLM provider clients (Gemini, OpenAI, Azure)
+- `cache/` - Dragonfly/Redis caching, compression
+- `auth/` - JWT and API key handling
 
 **Key characteristics:**
 
@@ -79,9 +79,9 @@ Vulnera follows **domain-driven design** with four layers:
 
 **Controllers, routes, DTOs**
 
-- `controllers/` — HTTP handlers
-- `models.rs` — Request/response DTOs with OpenAPI annotations
-- `routes.rs` — Route registration
+- `controllers/` - HTTP handlers
+- `models.rs` - Request/response DTOs with OpenAPI annotations
+- `routes.rs` - Route registration
 
 ## Module System
 
@@ -89,11 +89,11 @@ Vulnera follows **domain-driven design** with four layers:
 
 Each implements `AnalysisModule` trait:
 
-1. **Dependencies** — Package registry lookups (OSV, NVD, GHSA)
-2. **SAST** — AST-based code analysis (tree-sitter)
-3. **Secrets** — ML pattern + entropy detection
-4. **API** — OpenAPI 3.x specification analysis
-5. **LLM** — Google Gemini API for explanations/fixes
+1. **Dependencies** - Package registry lookups (OSV, NVD, GHSA)
+2. **SAST** - AST-based code analysis (tree-sitter)
+3. **Secrets** - Entropy + pattern matching detection
+4. **API** - OpenAPI 3.x specification analysis
+5. **LLM** - Google Gemini API for explanations/fixes
 
 ### Module Selection (Rule-Based)
 
@@ -202,12 +202,12 @@ LLM operation:        6 tokens
 
 **Key tables:**
 
-- `users` — User accounts, authentication
-- `organizations` — Team/organization grouping
-- `organization_members` — Role-based membership
-- `persisted_job_results` — Analysis findings (JSONB)
-- `api_keys` — SHA256-hashed API keys
-- `subscription_limits` — Quota tracking
+- `users` - User accounts, authentication
+- `organizations` - Team/organization grouping
+- `organization_members` - Role-based membership
+- `persisted_job_results` - Analysis findings (JSONB)
+- `api_keys` - SHA256-hashed API keys
+- `subscription_limits` - Quota tracking
 
 ## Authentication & Authorization
 
@@ -322,6 +322,6 @@ CMD ["vulnera"]
 
 ## For More Information
 
-- [Analysis Capabilities](../analysis/overview.md) — What each module does
-- [API Specification](api-spec.md) — Endpoint reference
-- [Configuration Guide](../user-guide/configuration.md) — Tuning parameters
+- [Analysis Capabilities](../analysis/overview.md) - What each module does
+- [API Specification](api-spec.md) - Endpoint reference
+- [Configuration Guide](../user-guide/configuration.md) - Tuning parameters

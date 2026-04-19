@@ -82,9 +82,9 @@ The selector adds enterprise modules in `Full` analysis and filters them by enti
 
 Dependency findings are aggregated from:
 
-- **OSV** — Open-source vulnerability database
-- **NVD** — National Vulnerability Database
-- **GHSA** — GitHub Security Advisories
+- **OSV** - Open-source vulnerability database
+- **NVD** - National Vulnerability Database
+- **GHSA** - GitHub Security Advisories
 
 Results are cached (Moka L1 + Dragonfly L2) to reduce repeated network calls.
 
@@ -92,7 +92,7 @@ Results are cached (Moka L1 + Dragonfly L2) to reduce repeated network calls.
 
 ## Module Reference
 
-- [Dependency Analysis](dependency-analysis.md) — ecosystem coverage, lockfile strategy, version recommendations
-- [SAST](sast.md) — supported languages, rule packs, taint analysis, confidence scoring
-- [Secrets Detection](secrets-detection.md) — detection methods, secret types, baselines
-- [API Security](api-security.md) — analysis categories, OAuth/OIDC checks, strict mode
+- [Dependency Analysis](dependency-analysis.md) - ecosystem coverage, lockfile strategy, version recommendations
+- [SAST](sast.md) - supported languages, rule packs, taint analysis, confidence scoring
+- [Secrets Detection](secrets-detection.md) - detection methods, secret types, baselines
+- [API Security](api-security.md) - analysis categories, OAuth/OIDC checks, strict mode

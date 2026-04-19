@@ -1,6 +1,6 @@
 # Vulnera Dashboard Guide
 
-Welcome to the **Vulnera Web Dashboard** — your central hub for vulnerability analysis, team collaboration, and security insights. This guide covers all dashboard features available at [vulnera.studio](https://vulnera.studio).
+Welcome to the **Vulnera Web Dashboard** - your central hub for vulnerability analysis, team collaboration, and security insights. This guide covers all dashboard features available at [vulnera.studio](https://vulnera.studio).
 
 ## Getting Started with the Dashboard
 
@@ -15,9 +15,9 @@ Welcome to the **Vulnera Web Dashboard** — your central hub for vulnerability 
 
 After your first login, you'll see:
 
-- **Personal Dashboard** — Your recent scans, quota usage, and quick actions
-- **Navigation Sidebar** — Access to all features
-- **Profile Menu** — Account settings, preferences, logout
+- **Personal Dashboard** - Your recent scans, quota usage, and quick actions
+- **Navigation Sidebar** - Access to all features
+- **Profile Menu** - Account settings, preferences, logout
 
 ## Core Dashboard Features
 
@@ -25,11 +25,11 @@ After your first login, you'll see:
 
 Your personal hub displays:
 
-- **Recent Scans** — Latest vulnerability analysis results
-- **Quick Stats** — Total findings, critical/high severity issues, trend indicators
-- **Action Items** — Unreviewed findings requiring attention
-- **Quota Usage** — Current monthly analysis tokens consumed vs. allocated
-- **Recent Projects** — Quick links to frequently scanned repositories
+- **Recent Scans** - Latest vulnerability analysis results
+- **Quick Stats** - Total findings, critical/high severity issues, trend indicators
+- **Action Items** - Unreviewed findings requiring attention
+- **Quota Usage** - Current monthly analysis tokens consumed vs. allocated
+- **Recent Projects** - Quick links to frequently scanned repositories
 
 **Tips:**
 - Use filters to drill down by severity, module type, or status
@@ -47,17 +47,17 @@ Organizations enable team collaboration with shared quotas and centralized repor
 1. Click **+ New Organization** in the sidebar (or from the dashboard)
 2. Enter organization name, description, and optional logo
 3. Select a plan tier (Free, Pro, Enterprise)
-4. Confirm — you're now the organization admin
+4. Confirm - you're now the organization admin
 
 **Organization settings include:**
 
-- **General** — Name, description, logo, contact email
-- **Members** — Add/remove team members, assign roles
-- **Billing** — Subscription, payment method, invoices
-- **API Keys** — Generate keys for CLI and API access
-- **Integrations** — Connect Slack, GitHub, GitLab, Azure DevOps
-- **Security** — SAML/SSO setup (Enterprise), audit logs
-- **Webhooks** — Configure event notifications
+- **General** - Name, description, logo, contact email
+- **Members** - Add/remove team members, assign roles
+- **Billing** - Subscription, payment method, invoices
+- **API Keys** - Generate keys for CLI and API access
+- **Integrations** - Connect Slack, GitHub, GitLab, Azure DevOps
+- **Security** - SAML/SSO setup (Enterprise), audit logs
+- **Webhooks** - Configure event notifications
 
 #### Organization Roles & Permissions
 
@@ -75,15 +75,15 @@ Organizations enable team collaboration with shared quotas and centralized repor
 1. Go to **Settings → Members**
 2. Click **Invite Member**
 3. Enter email address and select role (Admin, Member, Viewer)
-4. Send invitation — member receives email with join link
+4. Send invitation - member receives email with join link
 5. Member accepts and gains access to organization
 
 #### Managing Member Access
 
-- **Change Role** — Click member, update role, save
-- **Remove Member** — Click ⋯ → Remove (they lose access immediately)
-- **Resend Invitation** — If member hasn't joined within 7 days
-- **Activity Log** — View member actions and scan history
+- **Change Role** - Click member, update role, save
+- **Remove Member** - Click ⋯ → Remove (they lose access immediately)
+- **Resend Invitation** - If member hasn't joined within 7 days
+- **Activity Log** - View member actions and scan history
 
 **Best Practices:**
 - Assign **Viewer** role to non-technical stakeholders
@@ -139,10 +139,10 @@ curl -H "Authorization: Bearer YOUR_API_KEY" \
 
 Vulnera uses a **token-based quota system**:
 
-- **Personal Account** — 40 tokens/month (default)
-- **Organization (Free Plan)** — 48 tokens/month shared
-- **Organization (Pro)** — 1000 tokens/month
-- **Organization (Enterprise)** — Custom allocation
+- **Personal Account** - 40 tokens/month (default)
+- **Organization (Free Plan)** - 48 tokens/month shared
+- **Organization (Pro)** - 1000 tokens/month
+- **Organization (Enterprise)** - Custom allocation
 
 **Tokens consumed by analysis:**
 - Dependency scan: 1 token (base) + 0.5 per package manager
@@ -207,21 +207,21 @@ Organization → Scans → All Scans
 
 Each scan shows:
 
-- **Overview** — Project source, date, duration, status
-- **Findings** — Vulnerabilities grouped by severity
-- **Module Results** — Dependency, SAST, Secrets, API analysis
-- **AI Insights** — Explanations and recommended fixes (if LLM enabled)
-- **Timeline** — Job execution logs
-- **Export** — Download as JSON, SARIF, PDF
+- **Overview** - Project source, date, duration, status
+- **Findings** - Vulnerabilities grouped by severity
+- **Module Results** - Dependency, SAST, Secrets, API analysis
+- **AI Insights** - Explanations and recommended fixes (if LLM enabled)
+- **Timeline** - Job execution logs
+- **Export** - Download as JSON, SARIF, PDF
 
 #### Filtering & Searching
 
 Filter by:
-- **Severity** — Critical, High, Medium, Low, Info
-- **Status** — Open, Resolved, Ignored, False Positive
-- **Module** — Dependencies, SAST, Secrets, API
-- **Date Range** — Last 7 days, 30 days, custom
-- **Source** — Repository, S3 bucket, local upload
+- **Severity** - Critical, High, Medium, Low, Info
+- **Status** - Open, Resolved, Ignored, False Positive
+- **Module** - Dependencies, SAST, Secrets, API
+- **Date Range** - Last 7 days, 30 days, custom
+- **Source** - Repository, S3 bucket, local upload
 
 ### 7. Integrations & Webhooks
 
@@ -287,9 +287,9 @@ Custom webhooks for external systems:
 2. Click **Add Webhook**
 3. Enter webhook URL
 4. Select events:
-   - `scan.completed` — On analysis finish
-   - `finding.created` — New vulnerability detected
-   - `finding.resolved` — Manually marked resolved
+   - `scan.completed` - On analysis finish
+   - `finding.created` - New vulnerability detected
+   - `finding.resolved` - Manually marked resolved
 5. Test webhook, enable, save
 
 **Webhook payload example:**
@@ -319,10 +319,10 @@ Custom webhooks for external systems:
 
 #### Report Types
 
-- **Executive Summary** — High-level metrics for stakeholders
-- **Detailed Technical** — Full findings, CVSS scores, remediation
-- **Compliance** — GDPR/SOC2/ISO27001 aligned format
-- **Scheduled Reports** — Set recurring (weekly, monthly) auto-generation
+- **Executive Summary** - High-level metrics for stakeholders
+- **Detailed Technical** - Full findings, CVSS scores, remediation
+- **Compliance** - GDPR/SOC2/ISO27001 aligned format
+- **Scheduled Reports** - Set recurring (weekly, monthly) auto-generation
 
 #### SARIF Export
 
@@ -336,18 +336,18 @@ Export findings in SARIF format for CI/CD integrations:
 
 ### Account Security
 
-- ✅ **Enable 2FA** — Go to Settings → Security → Two-Factor Authentication
-- ✅ **Review Sessions** — Settings → Active Sessions, log out unused devices
-- ✅ **Audit Log** — Organization → Settings → Audit Log (admin only)
-- ✅ **Regular Backups** — Export API keys, integrations config periodically
+- ✅ **Enable 2FA** - Go to Settings → Security → Two-Factor Authentication
+- ✅ **Review Sessions** - Settings → Active Sessions, log out unused devices
+- ✅ **Audit Log** - Organization → Settings → Audit Log (admin only)
+- ✅ **Regular Backups** - Export API keys, integrations config periodically
 
 ### Organization Security
 
-- ✅ **Principle of Least Privilege** — Assign minimal required roles
-- ✅ **Key Rotation** — Rotate API keys every 90 days
-- ✅ **SSO/SAML** — Enable for Enterprise (single sign-on)
-- ✅ **Member Review** — Quarterly audit of team access
-- ✅ **Webhook Verification** — Validate webhook signatures server-side
+- ✅ **Principle of Least Privilege** - Assign minimal required roles
+- ✅ **Key Rotation** - Rotate API keys every 90 days
+- ✅ **SSO/SAML** - Enable for Enterprise (single sign-on)
+- ✅ **Member Review** - Quarterly audit of team access
+- ✅ **Webhook Verification** - Validate webhook signatures server-side
 
 ### Compliance & Audit
 
@@ -426,19 +426,19 @@ Create custom roles with granular permissions (Enterprise):
 
 1. **Settings → Roles → New Role**
 2. Define permissions:
-   - `scan:create` — Create new scans
-   - `scan:view` — View scan results
-   - `finding:resolve` — Mark findings resolved
-   - `settings:manage` — Modify org settings
+   - `scan:create` - Create new scans
+   - `scan:view` - View scan results
+   - `finding:resolve` - Mark findings resolved
+   - `settings:manage` - Modify org settings
 3. Assign users to custom role
 
 ## Next Steps
 
-- **Connect Your First Repository** — Set up GitHub integration for automated scans
-- **Invite Your Team** — Add members and start collaborative vulnerability tracking
-- **Generate API Key** — Integrate with your CI/CD pipeline
-- **Configure Integrations** — Set up Slack, webhooks for automated notifications
-- **Explore Reports** — Generate your first compliance or executive summary report
+- **Connect Your First Repository** - Set up GitHub integration for automated scans
+- **Invite Your Team** - Add members and start collaborative vulnerability tracking
+- **Generate API Key** - Integrate with your CI/CD pipeline
+- **Configure Integrations** - Set up Slack, webhooks for automated notifications
+- **Explore Reports** - Generate your first compliance or executive summary report
 
 For API-level access, see the [API Reference](../api-reference.md).
 For CLI-based workflows, see [CLI Reference](../../getting-started/personas/developer-quickstart.md).

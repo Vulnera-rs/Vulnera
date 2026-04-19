@@ -47,12 +47,12 @@ The server enforces **tiered rate limits** and **token costs per request**. This
 - **Anonymous**: 10 req/min, 100 req/hour, burst 5
 - **Org bonus**: +20% to tier limits
 
-**Token cost weights (per request):**
+**Token cost weights (per request, from `config/default.toml`):**
 
-- `GET` = 1
-- `POST`/`PUT`/`DELETE` = 2
-- **Analysis** = 3
-- **LLM** = 6
+- `get` = 1 (read operations)
+- `post` = 2 (write operations: POST, PUT, DELETE)
+- `analysis` = 3
+- `llm` = 6
 
 These costs apply to the **server-side rate limiter**, not the CLI local tracker.
 
@@ -84,21 +84,23 @@ vulnera quota
 ### Server (API)
 
 ```/dev/null/commands.txt#L1-2
-curl https://api.vulnera.studio/api/v1/quota \
+curl http://localhost:3000/api/v1/quota \
   -H "X-API-Key: <your_api_key>"
 ```
 
+> **Self-hosted only.** The `api.vulnera.studio` SaaS is not currently operational. Adjust the host to match your deployment (e.g., `http://localhost:3000` for local dev).
+
 ---
 
-## Configuration (Server)
+## Configuration (Self-Hosted Server)
 
-Server limits live in `config/default.toml`:
+Server limits live in `config/default.toml` or your custom config file:
 
-- `server.rate_limit.tiers.*` for rate tiers
-- `server.rate_limit.costs.*` for request cost weights
-- `server.rate_limit.tiers.org_bonus_percent`
+- `server.rate_limit.tiers.*` for rate tiers (api_key, authenticated, anonymous)
+- `server.rate_limit.costs.*` for request cost weights (get, post, analysis, llm)
+- `server.rate_limit.tiers.org_bonus_percent` for organization limit bonuses
 
-Override with environment variables using the `VULNERA__` prefix.
+Override with environment variables using the `VULNERA__` prefix (e.g., `VULNERA__SERVER__RATE_LIMIT__TIERS__API_KEY__REQUESTS_PER_MINUTE=200`).
 
 ---
 

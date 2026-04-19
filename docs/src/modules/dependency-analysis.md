@@ -29,8 +29,8 @@ Running in offline mode skips dependency analysis.
 
 Vulnera uses a hybrid resolution approach:
 
-- **Lockfile-first** — Extracts a fully resolved dependency tree from lockfiles for accurate transitive coverage.
-- **Manifest-only fallback** — Best-effort resolution via registry metadata when lockfiles are absent.
+- **Lockfile-first** - Extracts a fully resolved dependency tree from lockfiles for accurate transitive coverage.
+- **Manifest-only fallback** - Best-effort resolution via registry metadata when lockfiles are absent.
 
 **Known gaps:** Lockfile-independent transitive resolution is incomplete for some ecosystems (notably npm and PyPI).
 
