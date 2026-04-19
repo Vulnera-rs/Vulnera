@@ -26,15 +26,15 @@ flowchart TD
   subgraph SANDBOX["Sandbox (vulnera-sandbox)"]
     S1["SandboxPolicy::for_profile(...)"]
     S2["SandboxExecutor"]
-    S3["Backend: Landlock / Process / Noop"]
+    S3["Backend: Landlock / Process / Wasm / Noop"]
   end
 
   subgraph MODULES["Analysis Modules (vulnera-*)"]
-    M1["Dependency Analysis"]
+    M1["DependencyAnalyzer"]
     M2["SAST"]
-    M3["Secrets"]
-    M4["API Security"]
-    M5["LLM Enrichment (optional)"]
+    M3["SecretDetection"]
+    M4["ApiSecurity"]
+    M5["LLM Enrichment (vulnera-llm)"]
   end
 
   subgraph INFRA["Infrastructure"]

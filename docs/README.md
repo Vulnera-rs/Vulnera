@@ -46,14 +46,14 @@ git config core.hooksPath .githooks
 | `adapter`              | `/adapter/README.md`      | —                             | —                           |
 | `advisors`             | `/advisors/README.md`     | `/advisors/docs/README.md`    | `/advisors/CHANGELOG.md`    |
 | `vulnera-cli`          | `/vulnera-cli/README.md`  | `/vulnera-cli/docs/README.md` | `/vulnera-cli/CHANGELOG.md` |
-| `vulnera-sast`         | `/vulnera-sast/README.md` | —                             | —                           |
-| `vulnera-core`         | —                         | —                             | —                           |
-| `vulnera-orchestrator` | —                         | —                             | —                           |
-| `vulnera-deps`         | —                         | —                             | —                           |
-| `vulnera-secrets`      | —                         | —                             | —                           |
-| `vulnera-api`          | —                         | —                             | —                           |
-| `vulnera-llm`          | —                         | —                             | —                           |
-| `vulnera-sandbox`      | —                         | —                             | —                           |
+| `vulnera-sast`         | `/vulnera-sast/README.md` | -                             | -                           |
+| `vulnera-core`         | -                         | -                             | -                           |
+| `vulnera-orchestrator` | -                         | -                             | -                           |
+| `vulnera-deps`         | -                         | -                             | -                           |
+| `vulnera-secrets`      | -                         | -                             | -                           |
+| `vulnera-api`          | -                         | -                             | -                           |
+| `vulnera-llm`          | -                         | -                             | -                           |
+| `vulnera-sandbox`      | -                         | -                             | -                           |
 
 ## Contributor Quick Path
 
