@@ -155,6 +155,5 @@ criterion/
 vulnera-sast/tests/snapshots/*
 # Cache directories
 /.vulnera_data
-curls.txt
 # Decoupled components
 docs/modules.md
