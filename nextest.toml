@@ -3,7 +3,7 @@
 
 [profile.default]
 # Number of test threads to run in parallel
-test-threads = 0
+test-threads = 4
 
 # Retry flaky tests up to 3 times
 retries = 3

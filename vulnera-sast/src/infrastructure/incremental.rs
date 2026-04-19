@@ -120,7 +120,7 @@ impl IncrementalTracker {
     pub fn hash_content(content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Check if a file needs re-analysis based on content hash and dependencies

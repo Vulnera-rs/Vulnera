@@ -178,8 +178,7 @@ This is an early-stage open-source project. Contributions in any of these areas 
 
 ```bash
 # Install git hooks
-chmod +x .githooks/pre-commit
-git config core.hooksPath .githooks
+lefthook install
 
 # Run full CI check locally
 cargo clippy --workspace -- -D warnings

@@ -264,19 +264,18 @@ impl NuGetProjectXmlParser {
                         }
                     }
                 }
-                Ok(Event::Text(t)) => {
-                    if in_package_ref && in_version_child {
-                        let txt = reader
-                            .decoder()
-                            .decode(t.as_ref())
-                            .unwrap_or_default()
-                            .trim()
-                            .to_string();
-                        if !txt.is_empty() {
-                            current_version = Some(txt);
-                        }
+                Ok(Event::Text(t)) if in_package_ref && in_version_child => {
+                    let txt = reader
+                        .decoder()
+                        .decode(t.as_ref())
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
+                    if !txt.is_empty() {
+                        current_version = Some(txt);
                     }
                 }
+                Ok(Event::Text(_)) => {}
                 Ok(Event::End(e)) => {
                     let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
                     if tag.eq_ignore_ascii_case("Version") && in_package_ref {

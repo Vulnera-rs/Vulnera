@@ -1,0 +1,65 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Rust build artifacts
+target/
+**/*.rs.bk
+Cargo.lock~*
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing and coverage
+*.profraw
+coverage/
+.tarpaulin.toml
+
+# Documentation build
+docs/book/
+docs/src/SUMMARY.md
+
+# Docker files (avoid copying ourselves)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Node modules (if any frontend stuff)
+node_modules/
+*.log
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Lefthook (we install it in the image if needed)
+lefthook.yml
+
+# .sqlx/
+# Misc
+*.md
+!README.md
+CHANGELOG
+LICENSE

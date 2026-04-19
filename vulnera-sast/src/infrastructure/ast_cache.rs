@@ -3,13 +3,14 @@
 //! This module provides efficient caching of parsed ASTs using Dragonfly DB.
 //! Features:
 //! - Content-based hashing (sha256) for cache keys
-//! - Binary serialization via bincode for efficiency
+//! - Zero-copy binary serialization via rkyv for efficiency
 //! - Configurable TTL
 //! - Support for both raw tree-sitter trees and serialized AST nodes
 
 use crate::domain::value_objects::Language;
 use crate::infrastructure::parsers::AstNode;
-use serde::{Deserialize, Serialize};
+use rkyv::rancor::{self, Error as RancorError};
+use rkyv::{Archive, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,8 +39,25 @@ pub enum AstCacheError {
     CacheMiss(String),
 }
 
-/// Serializable AST node for bincode encoding
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Serializable AST node for rkyv encoding
+///
+/// This type supports zero-copy deserialization via rkyv's archived form.
+/// The `children` field is marked with `omit_bounds` to handle the recursive
+/// nature of the AST structure.
+#[derive(Debug, Clone, Archive, Serialize, Deserialize)]
+#[rkyv(
+    serialize_bounds(
+        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+        __S::Error: rkyv::rancor::Source,
+    ),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source),
+    bytecheck(
+        bounds(
+            __C: rkyv::validation::ArchiveContext,
+            <__C as rancor::Fallible>::Error: rkyv::rancor::Source,
+        ),
+    ),
+)]
 pub struct CachedAstNode {
     pub node_type: String,
     pub field_name: Option<String>,
@@ -49,6 +67,7 @@ pub struct CachedAstNode {
     pub start_col: u32,
     pub end_row: u32,
     pub end_col: u32,
+    #[rkyv(omit_bounds)]
     pub children: Vec<CachedAstNode>,
     pub source: String,
 }
@@ -86,9 +105,25 @@ impl From<CachedAstNode> for AstNode {
 }
 
 /// Cached AST entry with metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Supports zero-copy access to archived data via rkyv.
+#[derive(Debug, Clone, Archive, Serialize, Deserialize)]
+#[rkyv(
+    serialize_bounds(
+        __S: rkyv::ser::Writer + rkyv::ser::Allocator,
+        __S::Error: rkyv::rancor::Source,
+    ),
+    deserialize_bounds(__D::Error: rkyv::rancor::Source),
+    bytecheck(
+        bounds(
+            __C: rkyv::validation::ArchiveContext,
+            <__C as rancor::Fallible>::Error: rkyv::rancor::Source,
+        ),
+    ),
+)]
 pub struct CachedAstEntry {
     /// The cached AST root node
+    #[rkyv(omit_bounds)]
     pub ast: CachedAstNode,
     /// Language of the source
     pub language: String,
@@ -172,14 +207,34 @@ impl DragonflyAstCache {
         }
     }
 
-    /// Serialize AST entry to bytes using bincode
+    /// Serialize AST entry to bytes using rkyv
     fn serialize_entry(entry: &CachedAstEntry) -> Result<Vec<u8>, AstCacheError> {
-        bincode::serialize(entry).map_err(|e| AstCacheError::Serialization(e.to_string()))
+        rkyv::to_bytes::<RancorError>(entry)
+            .map(|bytes| bytes.into_vec())
+            .map_err(|e| AstCacheError::Serialization(e.to_string()))
     }
 
-    /// Deserialize AST entry from bytes
+    /// Deserialize AST entry from bytes using rkyv
     fn deserialize_entry(data: &[u8]) -> Result<CachedAstEntry, AstCacheError> {
-        bincode::deserialize(data).map_err(|e| AstCacheError::Deserialization(e.to_string()))
+        rkyv::from_bytes::<CachedAstEntry, RancorError>(data)
+            .map_err(|e| AstCacheError::Deserialization(e.to_string()))
+    }
+
+    /// Access archived AST entry without full deserialization (zero-copy)
+    ///
+    /// This provides zero-cost access to the cached AST data without
+    /// allocating new memory for the deserialized structure.
+    ///
+    /// # Warning
+    /// The returned archived reference is only valid as long as the input data
+    /// remains in memory. Do not persist the archived reference beyond the
+    /// lifetime of the data buffer.
+    #[allow(dead_code)]
+    pub fn access_archived_entry(
+        data: &[u8],
+    ) -> Result<&rkyv::Archived<CachedAstEntry>, AstCacheError> {
+        rkyv::access::<rkyv::Archived<CachedAstEntry>, RancorError>(data)
+            .map_err(|e| AstCacheError::Deserialization(e.to_string()))
     }
 
     /// Get current timestamp
