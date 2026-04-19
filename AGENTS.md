@@ -225,14 +225,15 @@ Terminal states: `Completed`, `Failed`, `Cancelled`.
 
 ## Pre-Commit & CI
 
-- **Githooks** (`.githooks/pre-commit`): `cargo fmt --all --check && cargo check && cargo clippy --all-targets --all-features -- -D warnings && cargo test --lib --tests`
-- **Pre-commit** (`.pre-commit-config.yaml`): Same checks as local hooks.
-- **Docker**: Multi-stage build with stub-based dependency caching. Runtime includes `python3` + `pipx`. Entrypoint runs migrations before starting server. Health check on `/health`.
+- **Lefthook** (`lefthook.yml`): git hooks manager with parallel execution. Install via package manager (see https://lefthook.dev/install/), then run `lefthook install`. Runs: `cargo fmt --all --check`, `cargo check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --lib --tests` (pre-commit), and `cargo nextest run --workspace --all-features` (pre-push).
+- **Cargo-deny** (`deny.toml`): Dependency auditing for security advisories, license compliance, and banned crates. Non-blocking in CI (`continue-on-error: true`).
+- **Docker**: Multi-stage build with cargo-chef for proper dependency caching (no stub file hacks). Runtime based on debian:12-slim. Entrypoint runs migrations before starting server. Health check on `/health`.
 
 ## Testing & Pre-Commit Checklist
 
 - [ ] `cargo clippy --all-targets --all-features -- -D warnings` is clean.
 - [ ] `cargo fmt --all --check` passes.
+- [ ] `cargo deny check` passes (advisories, licenses, bans, sources).
 - [ ] New SQL queries are verified via `.sqlx/` offline data or live DB.
 - [ ] Any new config has a default in `config/default.toml`.
 - [ ] Any new config section has a `Validate` impl in `vulnera-core/src/config/validation.rs`.
@@ -241,6 +242,7 @@ Terminal states: `Completed`, `Failed`, `Cancelled`.
 - [ ] Enterprise-only features gated behind `enterprise_entitled` flag in `ModuleRegistry`/`RuleBasedModuleSelector`.
 - [ ] New repository traits follow `IXxxRepository` naming convention.
 - [ ] New domain traits do NOT use `I` prefix (only repository traits do).
+- [ ] Lefthook hooks pass: `lefthook run pre-commit` and `lefthook run pre-push`.
 
 ## Standalone Repos Reference
 

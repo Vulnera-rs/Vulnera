@@ -1,0 +1,215 @@
+# cargo-deny configuration for Vulnera
+# Security-focused vulnerability analysis platform
+#
+# Usage: cargo deny check
+# Documentation: https://embarkstudios.github.io/cargo-deny/
+
+# =============================================================================
+# Target Configuration
+# =============================================================================
+[graph]
+targets = [
+    { triple = "x86_64-unknown-linux-gnu" },
+]
+all-features = false
+no-default-features = false
+
+# =============================================================================
+# Output Configuration
+# =============================================================================
+[output]
+feature-depth = 1
+
+# =============================================================================
+# Advisory Configuration
+# Checks for security advisories against crates in the dependency graph
+# =============================================================================
+[advisories]
+# The path to the advisory database, can be a local path or URL
+# If not specified, uses the default OSV database
+db-path = "~/.cargo/advisory-dbs"
+# How often to check for updates (in seconds)
+# Default: 24 hours (86400 seconds)
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# The maximum staleness in seconds for the advisory database
+# Default: 30 days (2592000 seconds)
+yanked = "warn"
+# How to handle yanked crates:
+# - "deny" - Fail if any yanked crate is detected
+# - "warn" - Warn about yanked crates but don't fail (default)
+# - "ignore" - Completely ignore yanked status
+
+# Ignore specific advisories (use sparingly and document reasons)
+ignore = [
+    # Example: "RUSTSEC-2023-0001",
+]
+
+# =============================================================================
+# License Configuration
+# Checks licenses of all crates in the dependency graph
+# =============================================================================
+[licenses]
+version = 2
+# Require a minimum confidence threshold for license detection
+confidence-threshold = 0.8
+# Allow the listed licenses unconditionally
+# Vulnera is AGPL-3.0-or-later, so we need to be careful with license compatibility
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "BSL-1.0",
+    "bzip2-1.0.6",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "Zlib",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "MPL-2.0",
+    "AGPL-3.0",
+    "AGPL-3.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-or-later",
+    "LGPL-3.0",
+    "OpenSSL",
+    "CC0-1.0",
+]
+# Allow private workspace crates (vulnera-* internal crates)
+private = { ignore = true }
+
+# Clarify licenses for crates that have unclear or non-standard license expressions
+[[licenses.clarify]]
+name = "ring"
+version = "*"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [
+    { path = "LICENSE", hash = 0xbd0eed23 },
+]
+
+[[licenses.clarify]]
+name = "webpki"
+version = "*"
+expression = "ISC"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
+[[licenses.clarify]]
+name = "rustls-webpki"
+version = "*"
+expression = "ISC"
+license-files = [
+    { path = "LICENSE", hash = 0x001c7e6c },
+]
+
+[[licenses.clarify]]
+name = "unicode-ident"
+version = "*"
+expression = "Unicode-DFS-2016"
+license-files = [
+    { path = "LICENSE-UNICODE", hash = 0x002d0853 },
+]
+
+# =============================================================================
+# Ban Configuration
+# Checks for specific crates that are banned or restricted
+# =============================================================================
+[bans]
+# Check for multiple versions of the same crate in the dependency graph
+# We warn but don't deny - monomorphization bloat is acceptable for now
+multiple-versions = "warn"
+# How to handle wildcards in version requirements
+# - "deny" - Fail if any wildcard is found
+# - "warn" - Warn about wildcards but don't fail
+# - "allow" - Allow wildcards (Vulnera uses workspace wildcards)
+wildcards = "allow"
+# Highlight specific versions of banned crates when encountered
+# Useful for tracking down duplicate dependencies
+highlight = "all"
+# List of crates that are banned (completely forbidden)
+deny = [
+    # Ban specific insecure or deprecated crates
+    # { name = "openssl", version = "*" },  # Use rustls instead - disabled until advisor is updated TODO!
+    { name = "failure", version = "*" },  # Deprecated, use anyhow/thiserror
+    { name = "error-chain", version = "*" },  # Deprecated, use anyhow/thiserror
+]
+
+# List of crates that are allowed to have multiple versions
+# These are often large ecosystem crates that are hard to unify
+skip = [
+    # Allow multiple versions of proc-macro related crates
+    { name = "proc-macro2", version = "*" },
+    { name = "quote", version = "*" },
+    { name = "syn", version = "*" },
+    # Allow multiple versions of hashbrown/indexmap (common transitive deps)
+    { name = "hashbrown", version = "*" },
+    { name = "indexmap", version = "*" },
+    # Allow multiple versions of windows-sys (platform abstraction)
+    { name = "windows-sys", version = "*" },
+    { name = "windows-targets", version = "*" },
+    # Allow multiple versions of libc
+    { name = "libc", version = "*" },
+    # Allow multiple versions of bitflags
+    { name = "bitflags", version = "*" },
+    # Allow multiple versions of cfg-if
+    { name = "cfg-if", version = "*" },
+    # Allow multiple versions of once_cell (migrating to std::sync::OnceLock)
+    { name = "once_cell", version = "*" },
+    # Allow multiple versions of convert_case (used by config and derive_more)
+    { name = "convert_case", version = "*" },
+]
+
+# Skip tree checks for specific crate subtrees
+# This allows multiple versions when they originate from specific crates
+skip-tree = [
+    # Skip tree for test-only dependencies
+    { name = "criterion", version = "*", depth = 3 },
+    { name = "testcontainers", version = "*", depth = 3 },
+    { name = "wiremock", version = "*", depth = 3 },
+    { name = "mockito", version = "*", depth = 3 },
+    { name = "proptest", version = "*", depth = 3 },
+    { name = "insta", version = "*", depth = 3 },
+    { name = "rstest", version = "*", depth = 3 },
+    { name = "axum-test", version = "*", depth = 3 },
+    # Skip tree for large ecosystem crates with many transitive deps
+    { name = "aws-sdk-s3", version = "*", depth = 3 },
+    { name = "aws-config", version = "*", depth = 3 },
+    { name = "git2", version = "*", depth = 3 },
+    { name = "tree-sitter", version = "*", depth = 3 },
+]
+
+# =============================================================================
+# Sources Configuration
+# Controls which registries and git sources are allowed
+# =============================================================================
+[sources]
+# List of allowed registries (empty means only crates.io)
+allow-registry = [
+    "https://github.com/rust-lang/crates.io-index",
+]
+# List of allowed git sources (empty means no git sources allowed)
+# We allow specific git sources for crates not yet on crates.io
+allow-git = [
+    # Example: "https://github.com/example/crate",
+]
+# Whether to allow unknown registries (false = deny)
+unknown-registry = "deny"
+# Whether to allow unknown git sources (false = deny)
+unknown-git = "deny"
+
+# =============================================================================
+# Additional Configuration Notes
+# =============================================================================
+#
+# WORKSPACE CRATES:
+# The following workspace crates are allowed (private = true with ignore = true):
+# - vulnera-core
+# - vulnera-deps
+# - vulnera-orchestrator
+# - vulnera-sast
+# - vulnera-secrets
+# - vulnera-api
+# - vulnera-llm
+# - vulnera-sandbox
