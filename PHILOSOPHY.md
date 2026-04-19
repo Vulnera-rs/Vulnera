@@ -10,9 +10,11 @@ Security tools should be as fast, safe, and transparent as the code they protect
 
 We build security scanners with the same principles we advocate for application development: memory safety, minimal privileges, and auditable logic.
 
+**Why now:** In 2026, AI-generated code has achieved massive scale. Developers ship AI-authored code faster than ever - but that velocity carries risk. AI models replicate the security mistakes in their training data. They generate plausible-looking code with subtle injection vulnerabilities, misconfigurations, and logic flaws. The principles in this document matter more today than they did three years ago because the bottleneck is no longer "how fast can we write code" but "how fast can we verify that what AI wrote is safe." A scanner that requires cloud connectivity, opaque algorithms, or manual review cannot keep pace with AI-generated velocity. We built Vulnera for this moment: verifiable security at the speed of AI-generated development.
+
 ---
 
-## Four Principles
+## Five Principles
 
 ### 1. Memory-Safe Security Tooling
 
@@ -130,6 +132,28 @@ vulnera explain --finding-id abc123  # Uses LLM
 
 ---
 
+### 5. Performance as Correctness
+
+**The Principle:** A scanner that takes ten minutes to run is a scanner developers disable. Speed is not a luxury - it is what makes continuous security possible.
+
+**Why It Matters:**
+- Security in CI must be faster than the build itself, or it will be bypassed
+- Ten thousand findings mean nothing if developers wait ten minutes to see them
+- Instant feedback loops create security-aware developers; batch feedback creates resentment
+- Performance at scale (100k+ LOC) demonstrates architectural soundness, not benchmark gaming
+
+**In Practice:**
+- Secrets detection for 100k lines completes in under 2 seconds on commodity hardware
+- Full SAST analysis completes in under 60 seconds for typical codebases
+- Tree-sitter AST parsing with zero-copy where possible
+- Streaming analysis: findings emitted as they are discovered, not batched at the end
+- Memory-mapped file I/O for large repository scans
+- Parallel module execution respecting `max_concurrent_packages` limits
+
+**The Metric:** Median scan time under 10 seconds. Not because marketing demands it, but because developers will not tolerate anything slower.
+
+---
+
 ## Open Core Philosophy
 
 We believe in **radical transparency for security infrastructure** and **fair compensation for team workflows**.
@@ -218,7 +242,7 @@ Dependencies point inward. Domain knows nothing of HTTP or SQL.
 
 **Secondary:** Individual developers and open-source maintainers who want free, powerful security scanning.
 
-**Not Targeted For Now:** Large enterprises requiring dedicated support - that's what our licensed tier is for.
+**Future:** Regulated enterprises in finance, healthcare, and government who require air-gapped deployment and auditable compliance reports.
 
 ---
 
