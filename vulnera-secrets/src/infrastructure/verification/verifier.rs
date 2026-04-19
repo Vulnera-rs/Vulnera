@@ -113,7 +113,7 @@ impl VerificationService {
 
         let mut hasher = Sha256::new();
         hasher.update(secret.as_bytes());
-        let secret_hash = format!("{:x}", hasher.finalize());
+        let secret_hash = hex::encode(hasher.finalize());
         format!("{:?}:{}", secret_type, secret_hash)
     }
 
