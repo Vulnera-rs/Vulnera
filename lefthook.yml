@@ -1,0 +1,53 @@
+# Lefthook configuration for Vulnera
+# Installation: Install lefthook via your package manager (see https://lefthook.dev/install/)
+# Then run: lefthook install
+#
+# IMPORTANT: If you used LLM-based tooling to generate or modify code,
+# disclose it in the pull request description.
+
+# Enable colored output
+colors: true
+
+# Skip certain output for cleaner runs
+skip_output:
+  - meta           # Skip lefthook version and configuration info
+  - summary        # Skip the summary at the end
+  - execution      # Skip individual command execution messages
+
+# Run commands in parallel where possible
+parallel: true
+
+# Pre-commit hooks
+pre-commit:
+  commands:
+    fmt:
+      priority: 1
+      run: cargo fmt --all --check
+      glob: "*.rs"
+    check:
+      priority: 2
+      run: cargo check
+      glob: "*.rs"
+    clippy:
+      priority: 3
+      run: cargo clippy --all-targets --all-features -- -D warnings
+      glob: "*.rs"
+    test:
+      priority: 4
+      run: cargo test --lib --tests
+      glob: "*.rs"
+
+# Pre-push hooks for more thorough testing
+pre-push:
+  commands:
+    nextest:
+      run: cargo nextest run --workspace --all-features
+      glob: "*.rs"
+
+# Reference message about LLM tooling disclosure
+# This message is displayed when hooks fail or as a reminder
+ref:
+  pre-commit: |
+    IMPORTANT REMINDER:
+    If you used LLM-based tooling to generate or modify code,
+    disclose it in the pull request description.
