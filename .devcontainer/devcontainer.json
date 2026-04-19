@@ -1,0 +1,40 @@
+{
+  "name": "Vulnera",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspaces/vulnera",
+  "containerEnv": {
+    "DATABASE_URL": "postgres://vulnera:vulnera_dev@postgres:5432/vulnera",
+    "VULNERA__CACHE__DRAGONFLY_URL": "redis://dragonfly:6379",
+    "SQLX_OFFLINE": "true",
+    "VULNERA__AUTH__JWT_SECRET": "dev_secret_key_change_in_production_32chars",
+    "RUST_LOG": "debug"
+  },
+  "remoteEnv": {
+    "DATABASE_URL": "postgres://vulnera:vulnera_dev@postgres:5432/vulnera",
+    "VULNERA__CACHE__DRAGONFLY_URL": "redis://dragonfly:6379",
+    "SQLX_OFFLINE": "true",
+    "VULNERA__AUTH__JWT_SECRET": "dev_secret_key_change_in_production_32chars",
+    "RUST_LOG": "debug"
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "appPort": [3000],
+  "remoteUser": "vulnera",
+  "mounts": [
+    {
+      "source": "vulnera-cargo-registry",
+      "target": "/usr/local/cargo/registry",
+      "type": "volume"
+    },
+    {
+      "source": "vulnera-cargo-git",
+      "target": "/usr/local/cargo/git",
+      "type": "volume"
+    },
+    {
+      "source": "vulnera-target",
+      "target": "/workspaces/vulnera/target",
+      "type": "volume"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspaces/vulnera:cached
+    command: sleep infinity
+    environment:
+      - DATABASE_URL=postgres://vulnera:vulnera_dev@postgres:5432/vulnera
+      - VULNERA__CACHE__DRAGONFLY_URL=redis://dragonfly:6379
+      - SQLX_OFFLINE=true
+      - VULNERA__AUTH__JWT_SECRET=dev_secret_key_change_in_production_32chars
+      - RUST_LOG=debug
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+    networks:
+      - vulnera-dev
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vulnera
+      POSTGRES_PASSWORD: vulnera_dev
+      POSTGRES_DB: vulnera
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vulnera -d vulnera"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - vulnera-dev
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.25.0
+    restart: unless-stopped
+    ulimits:
+      memlock: -1
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - vulnera-dev
+
+volumes:
+  postgres-data:
+  dragonfly-data:
+  vulnera-cargo-registry:
+  vulnera-cargo-git:
+  vulnera-target:
+
+networks:
+  vulnera-dev:
+    driver: bridge

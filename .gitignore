@@ -143,6 +143,11 @@ Thumbs.db
 .env.local
 .env.production
 
+# DevContainer local configuration
+.devcontainer/.env
+.devcontainer/*.override.yml
+.devcontainer/.docker/
+
 # Coverage reports
 #coverage/
 #tarpaulin-report.html

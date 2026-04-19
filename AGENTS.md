@@ -107,6 +107,69 @@ cd vulnera-cli && cargo run -- config show  # Show configuration
 cargo tarpaulin                             # Uses tarpaulin.toml config
 ```
 
+## DevContainer Setup (Recommended)
+
+A sophisticated devcontainer configuration is provided in `.devcontainer/` that includes:
+- **PostgreSQL 17** - Pre-configured with baseline migrations
+- **Dragonfly** (Redis-compatible) - High-performance cache and job queue
+- **Rust 1.92** with full toolchain and development tools
+- **Pre-configured environment** - All services wired and ready
+
+### Quick Start with DevContainer
+
+**Using Zed Editor:**
+```bash
+# Use just (install with: cargo install just)
+just init      # Initialize and start
+
+# Or manually:
+cd .devcontainer && docker-compose up -d
+docker-compose exec app bash
+```
+
+**Using VS Code:**
+1. Install "Dev Containers" extension
+2. `Ctrl+Shift+P` → `Dev Containers: Reopen in Container`
+3. Wait for initial build (~5-10 minutes first time)
+
+### DevContainer Services
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| API Server | http://localhost:3000 | Vulnera HTTP API |
+| Health Check | http://localhost:3000/health | Server health endpoint |
+| Swagger UI | http://localhost:3000/docs | API documentation |
+| PostgreSQL | localhost:5432 | Main database |
+| Dragonfly | localhost:6379 | Redis-compatible cache |
+| PGAdmin (optional) | http://localhost:5050 | Database GUI |
+
+### DevContainer Commands
+
+```bash
+# Using just (Rust-based command runner - install with: cargo install just)
+just up          # Start all services
+just down        # Stop services
+just shell       # Enter dev container
+just migrate     # Run database migrations
+just test        # Run all tests with nextest
+just check       # Run clippy + format checks
+just rebuild     # Full rebuild from scratch
+just pgadmin     # Start PGAdmin for DB management
+just dev         # Start with hot reload
+```
+
+### Environment (Pre-configured)
+
+```bash
+DATABASE_URL=postgres://vulnera:vulnera_dev@postgres:5432/vulnera
+VULNERA__CACHE__DRAGONFLY_URL=redis://dragonfly:6379
+SQLX_OFFLINE=true
+VULNERA__AUTH__JWT_SECRET=dev_secret_key_change_in_production_32chars
+RUST_LOG=debug
+```
+
+See `.devcontainer/README.md` for full documentation.
+
 ## Adding a Feature: Best Practices
 
 ### 1. New Analysis Module
