@@ -131,7 +131,7 @@ Vulnera is an **API-first platform** with multiple interfaces:
 Deploy the full platform in your infrastructure:
 
 ```bash
-git clone https://github.com/Vulnera-rs/Vulnera.git
+git clone --recursive https://github.com/Vulnera-rs/Vulnera.git
 cd Vulnera
 
 # Setup database
