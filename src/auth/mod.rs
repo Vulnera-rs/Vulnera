@@ -6,18 +6,18 @@
 use sqlx::PgPool;
 use std::sync::Arc;
 
-use vulnera_core::Config;
-use vulnera_core::application::auth::use_cases::{
+use vulnera_contract::Config;
+use vulnera_contract::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
 };
-use vulnera_core::domain::auth::repositories::{IApiKeyRepository, IUserRepository};
-use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
-use vulnera_core::infrastructure::auth::{
+use vulnera_contract::domain::auth::repositories::{IApiKeyRepository, IUserRepository};
+use vulnera_contract::domain::organization::repositories::IOrganizationMemberRepository;
+use vulnera_contract::infrastructure::auth::{
     ApiKeyGenerator, CacheTokenBlacklistService, JwtService, PasswordHasher, SqlxApiKeyRepository,
     SqlxOrganizationMemberRepository, SqlxUserRepository, TokenBlacklistService,
 };
-use vulnera_core::infrastructure::cache::CacheServiceImpl;
+use vulnera_contract::infrastructure::cache::CacheServiceImpl;
 use vulnera_orchestrator::presentation::auth::extractors::AuthState;
 
 /// Authentication services and use cases initialized at startup

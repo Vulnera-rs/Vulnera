@@ -223,7 +223,7 @@ pub async fn enrich_job_findings(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Job {} not found", job_id)))?;
 
     // Extract findings from module results
-    let mut all_findings: Vec<vulnera_core::domain::module::Finding> = snapshot
+    let mut all_findings: Vec<vulnera_contract::domain::module::Finding> = snapshot
         .module_results
         .iter()
         .flat_map(|result| result.findings.clone())

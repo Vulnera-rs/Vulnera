@@ -85,7 +85,7 @@ vulnera sast . --exclude "tests/*,vendor/*"
 
 ## Configuration
 
-Configured via `vulnera_core::config::SastConfig` and `AnalysisConfig`.
+Configured via `vulnera_contract::config::SastConfig` and `AnalysisConfig`.
 
 Key settings:
 

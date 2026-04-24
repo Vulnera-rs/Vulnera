@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use vulnera_core::domain::module::{
+use vulnera_contract::domain::module::{
     Finding, FindingConfidence, FindingSeverity, ModuleResult, ModuleType,
 };
 
@@ -134,7 +134,7 @@ fn confidence_score(confidence: &FindingConfidence) -> u32 {
 mod tests {
     use super::*;
     use uuid::Uuid;
-    use vulnera_core::domain::module::{
+    use vulnera_contract::domain::module::{
         FindingType, Location, ModuleResultMetadata, VulnerabilityFindingMetadata,
     };
 

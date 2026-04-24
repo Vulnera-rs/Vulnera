@@ -29,7 +29,7 @@ These analyzers run on the parsed OpenAPI spec:
 
 ## Configuration
 
-The module is configured via `vulnera_core::config::ApiSecurityConfig`.
+The module is configured via `vulnera_contract::config::ApiSecurityConfig`.
 
 ### Key settings
 

@@ -1,12 +1,7 @@
 [workspace]
 members = [
-    "vulnera-core",
-    "vulnera-deps",
+    "vulnera-contract",
     "vulnera-orchestrator",
-    "vulnera-sast",
-    "vulnera-secrets",
-    "vulnera-api",
-    "vulnera-llm",
     "vulnera-sandbox",
 ]
 exclude = ["vulnera-cli","advisors","adapter"]
@@ -33,13 +28,13 @@ default = []
 
 
 [dependencies]
-vulnera-core = { path = "vulnera-core" }
-vulnera-deps = { path = "vulnera-deps" }
+vulnera-contract = { path = "vulnera-contract" }
+vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
 vulnera-orchestrator = { path = "vulnera-orchestrator" }
-vulnera-sast = { path = "vulnera-sast" }
-vulnera-secrets = { path = "vulnera-secrets" }
-vulnera-api = { path = "vulnera-api" }
-vulnera-llm = { path = "vulnera-llm" }
+vulnera-sast = { git = "https://github.com/Vulnera-rs/vulnera-sast.git", branch = "main" }
+vulnera-secrets = { git = "https://github.com/Vulnera-rs/vulnera-secrets.git", branch = "main" }
+vulnera-api = { git = "https://github.com/Vulnera-rs/vulnera-api.git", branch = "main" }
+vulnera-llm = { git = "https://github.com/Vulnera-rs/vulnera-llm.git", branch = "main" }
 vulnera-sandbox = { path = "vulnera-sandbox" }
 
 # Web framework
@@ -249,6 +244,12 @@ tempfile = "3.25.0"
 mockito = "1.7.1"
 tokio-test = "0.4.5"
 serial_test = "3.2.0"
+
+# Redirect transitive git deps (from standalone module repos) to local path
+# to avoid duplicate crate resolution within the workspace.
+[patch."https://github.com/Vulnera-rs/vulnera.git"]
+vulnera-contract = { path = "vulnera-contract" }
+
 
 [workspace.lints.clippy]
 type_complexity = "allow"

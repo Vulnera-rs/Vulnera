@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use vulnera_core::application::vulnerability::services::CacheService;
-use vulnera_core::infrastructure::cache::DragonflyCache;
+use vulnera_contract::application::vulnerability::services::CacheService;
+use vulnera_contract::infrastructure::cache::DragonflyCache;
 
 use super::snapshot::JobSnapshot;
 

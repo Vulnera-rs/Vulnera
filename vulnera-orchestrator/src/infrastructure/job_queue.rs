@@ -7,9 +7,9 @@ use sha2::Sha256;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use vulnera_core::application::analytics::{AnalyticsRecorder, FindingsSummary};
-use vulnera_core::domain::organization::value_objects::StatsSubject;
-use vulnera_core::infrastructure::cache::CacheServiceImpl;
+use vulnera_contract::application::analytics::{AnalyticsRecorder, FindingsSummary};
+use vulnera_contract::domain::organization::value_objects::StatsSubject;
+use vulnera_contract::infrastructure::cache::CacheServiceImpl;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
 use crate::application::workflow::{JobWorkflow, WorkflowError};
@@ -58,7 +58,7 @@ mod tests {
     use super::*;
     use crate::domain::entities::{AnalysisJob, Project, ProjectMetadata};
     use crate::domain::value_objects::{AnalysisDepth, SourceType};
-    use vulnera_core::domain::module::ModuleType;
+    use vulnera_contract::domain::module::ModuleType;
 
     #[test]
     fn test_queued_job_serialization() {

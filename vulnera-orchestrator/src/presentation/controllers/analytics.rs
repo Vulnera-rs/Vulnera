@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tracing::{error, instrument};
 use uuid::Uuid;
 
-use vulnera_core::domain::organization::value_objects::{OrganizationId, SubscriptionTier};
+use vulnera_contract::domain::organization::value_objects::{OrganizationId, SubscriptionTier};
 
 use crate::presentation::auth::Auth;
 use crate::presentation::controllers::OrchestratorState;
@@ -499,9 +499,9 @@ fn error_response(status: StatusCode, code: &str, message: &str) -> Response {
 }
 
 fn map_organization_error(
-    error: vulnera_core::domain::organization::errors::OrganizationError,
+    error: vulnera_contract::domain::organization::errors::OrganizationError,
 ) -> Response {
-    use vulnera_core::domain::organization::errors::OrganizationError;
+    use vulnera_contract::domain::organization::errors::OrganizationError;
 
     let (status, code, message) = match &error {
         OrganizationError::NotFound { id } => (

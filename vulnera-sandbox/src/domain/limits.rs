@@ -7,8 +7,8 @@
 
 use std::time::Duration;
 
-use vulnera_core::config::SandboxConfig;
-use vulnera_core::domain::module::ModuleType;
+use vulnera_contract::config::SandboxConfig;
+use vulnera_contract::domain::module::ModuleType;
 
 /// Calculated resource limits for sandbox execution
 #[derive(Debug, Clone)]
@@ -90,7 +90,7 @@ pub fn calculate_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vulnera_core::config::{SandboxBackendPreference, SandboxFailureMode};
+    use vulnera_contract::config::{SandboxBackendPreference, SandboxFailureMode};
 
     fn test_config() -> SandboxConfig {
         SandboxConfig {

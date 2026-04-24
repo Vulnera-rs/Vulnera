@@ -20,12 +20,12 @@ use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::fmt;
 
 use vulnera_api::module::ApiSecurityModule;
-use vulnera_core::config::Config;
-use vulnera_core::domain::module::{AnalysisModule, ModuleConfig, ModuleResult};
-use vulnera_core::infrastructure::cache::CacheServiceImpl;
-use vulnera_core::infrastructure::cache::dragonfly_cache::DragonflyCache;
-use vulnera_core::infrastructure::parsers::ParserFactory;
-use vulnera_core::infrastructure::vulnerability_advisor::VulneraAdvisorRepository;
+use vulnera_contract::config::Config;
+use vulnera_contract::domain::module::{AnalysisModule, ModuleConfig, ModuleResult};
+use vulnera_contract::infrastructure::cache::CacheServiceImpl;
+use vulnera_contract::infrastructure::cache::dragonfly_cache::DragonflyCache;
+use vulnera_contract::infrastructure::parsers::ParserFactory;
+use vulnera_contract::infrastructure::vulnerability_advisor::VulneraAdvisorRepository;
 use vulnera_deps::module::DependencyAnalyzerModule;
 use vulnera_sandbox::SandboxPolicy;
 use vulnera_sast::module::SastModule;

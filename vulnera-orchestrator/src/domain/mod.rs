@@ -9,7 +9,7 @@ pub use services::*;
 pub use value_objects::*;
 
 // Re-export module types from core for convenience
-pub use vulnera_core::domain::module::{
+pub use vulnera_contract::domain::module::{
     AnalysisModule, Finding, ModuleConfig, ModuleExecutionError, ModuleResult, ModuleType,
 };
 

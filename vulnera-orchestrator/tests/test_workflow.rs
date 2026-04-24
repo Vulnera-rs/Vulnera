@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use vulnera_core::domain::module::ModuleType;
+use vulnera_contract::domain::module::ModuleType;
 use vulnera_orchestrator::application::workflow::{JobWorkflow, WorkflowError};
 use vulnera_orchestrator::domain::entities::{
     AggregatedReport, AnalysisJob, FindingsByType, Project, ProjectMetadata, SeverityBreakdown,

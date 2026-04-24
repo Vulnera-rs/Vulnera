@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use vulnera_core::domain::module::ModuleResult;
+use vulnera_contract::domain::module::ModuleResult;
 
 use crate::domain::entities::{FindingsByType, JobInvocationContext, ProjectMetadata, Summary};
 use crate::domain::value_objects::{JobStatus, JobTransition};

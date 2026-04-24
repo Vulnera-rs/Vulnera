@@ -8,9 +8,9 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use vulnera_core::Config;
-use vulnera_core::application::analytics::AnalyticsAggregationService;
-use vulnera_core::infrastructure::VulneraAdvisorRepository;
+use vulnera_contract::Config;
+use vulnera_contract::application::analytics::AnalyticsAggregationService;
+use vulnera_contract::infrastructure::VulneraAdvisorRepository;
 
 /// Spawn a background worker for periodic vulnerability data synchronization
 pub fn spawn_sync_worker(

@@ -24,7 +24,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::application::selector::SandboxSelector;
 use crate::domain::policy::SandboxPolicy;
 use crate::domain::traits::{SandboxBackend, SandboxError};
-use vulnera_core::domain::module::{
+use vulnera_contract::domain::module::{
     AnalysisModule, ModuleConfig, ModuleExecutionError, ModuleResult,
 };
 

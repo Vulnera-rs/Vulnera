@@ -10,9 +10,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-vulnera-core = { path = "../vulnera-core" }
-vulnera-deps = { path = "../vulnera-deps" }
-vulnera-llm = { path = "../vulnera-llm" }
+vulnera-contract = { path = "../vulnera-contract" }
+vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
+vulnera-llm = { git = "https://github.com/Vulnera-rs/vulnera-llm.git", branch = "main" }
 vulnera-sandbox = { path = "../vulnera-sandbox" }
 sqlx = { workspace = true }
 

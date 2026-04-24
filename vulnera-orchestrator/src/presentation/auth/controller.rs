@@ -9,16 +9,16 @@ use chrono::{Duration, Utc};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use vulnera_core::application::auth::use_cases::{
+use vulnera_contract::application::auth::use_cases::{
     GenerateApiKeyUseCase, ListApiKeysUseCase, LoginUseCase, RefreshTokenUseCase,
     RegisterUserUseCase, RevokeApiKeyUseCase, ValidateTokenUseCase,
 };
-use vulnera_core::config::CookieSameSite;
-use vulnera_core::domain::auth::{
+use vulnera_contract::config::CookieSameSite;
+use vulnera_contract::domain::auth::{
     errors::AuthError,
     value_objects::{ApiKeyId, Email},
 };
-use vulnera_core::infrastructure::auth::{CsrfService, TokenBlacklistService};
+use vulnera_contract::infrastructure::auth::{CsrfService, TokenBlacklistService};
 
 use crate::presentation::auth::extractors::{Auth, AuthState};
 use crate::presentation::auth::models::*;
@@ -362,7 +362,7 @@ pub async fn register(
     // Get roles for response
     let roles = request
         .roles
-        .unwrap_or_else(|| vec![vulnera_core::domain::auth::value_objects::UserRole::User]);
+        .unwrap_or_else(|| vec![vulnera_contract::domain::auth::value_objects::UserRole::User]);
 
     let body = AuthResponse {
         csrf_token,

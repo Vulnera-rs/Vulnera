@@ -165,7 +165,7 @@ Notes:
 
 ## Provider Configuration
 
-LLM providers are configured via `vulnera_core::config::LlmConfig` and environment variables.
+LLM providers are configured via `vulnera_contract::config::LlmConfig` and environment variables.
 
 ### Provider Selection
 

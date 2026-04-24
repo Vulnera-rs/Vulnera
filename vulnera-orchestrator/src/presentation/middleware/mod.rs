@@ -11,9 +11,9 @@ use std::sync::Arc;
 use std::time::Instant;
 use uuid::Uuid;
 
-use vulnera_core::application::errors::ApplicationError;
-use vulnera_core::infrastructure::auth::CsrfService;
-use vulnera_core::infrastructure::rate_limiter::{
+use vulnera_contract::application::errors::ApplicationError;
+use vulnera_contract::infrastructure::auth::CsrfService;
+use vulnera_contract::infrastructure::rate_limiter::{
     RateLimiterService,
     types::{AuthEndpoint, RequestCost},
 };
@@ -322,8 +322,9 @@ pub struct EarlyAuthInfo {
 /// State for early auth extraction middleware
 #[derive(Clone)]
 pub struct EarlyAuthState {
-    pub validate_token: Arc<vulnera_core::application::auth::use_cases::ValidateTokenUseCase>,
-    pub validate_api_key: Arc<vulnera_core::application::auth::use_cases::ValidateApiKeyUseCase>,
+    pub validate_token: Arc<vulnera_contract::application::auth::use_cases::ValidateTokenUseCase>,
+    pub validate_api_key:
+        Arc<vulnera_contract::application::auth::use_cases::ValidateApiKeyUseCase>,
 }
 
 /// Early authentication middleware - runs BEFORE rate limiting to properly identify users
@@ -343,7 +344,7 @@ pub async fn early_auth_middleware(
     // Try API key first (X-API-Key header or Authorization: ApiKey ...)
     if let Some(api_key) = extract_api_key_from_headers(request.headers()) {
         // Check if it's the master key
-        if vulnera_core::infrastructure::auth::is_master_key(&api_key) {
+        if vulnera_contract::infrastructure::auth::is_master_key(&api_key) {
             // Master key - use a synthetic user ID for rate limiting
             auth_info.user_id = Some(uuid::Uuid::nil()); // Nil UUID for master key
             auth_info.api_key_id = Some(uuid::Uuid::new_v4()); // Synthetic API key ID

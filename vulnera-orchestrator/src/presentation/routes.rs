@@ -13,8 +13,8 @@ use tower_http::{cors::CorsLayer, timeout::TimeoutLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use vulnera_core::Config;
-use vulnera_core::infrastructure::auth::CsrfService;
+use vulnera_contract::Config;
+use vulnera_contract::infrastructure::auth::CsrfService;
 
 use crate::presentation::{
     auth::controller::{
@@ -144,7 +144,7 @@ use axum::{
             crate::presentation::auth::models::ApiKeyResponse,
             crate::presentation::auth::models::ApiKeyListResponse,
             crate::presentation::auth::models::ApiKeyListItem,
-            vulnera_core::domain::auth::value_objects::UserRole
+            vulnera_contract::domain::auth::value_objects::UserRole
         )
     ),
     tags(
