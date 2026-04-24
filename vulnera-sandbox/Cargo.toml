@@ -17,10 +17,10 @@ path = "src/bin/worker.rs"
 [dependencies]
 # Shared dependencies
 vulnera-contract = { path = "../vulnera-contract" }
-vulnera-sast = { git = "https://github.com/Vulnera-rs/vulnera-sast.git", branch = "main" }
-vulnera-secrets = { git = "https://github.com/Vulnera-rs/vulnera-secrets.git", branch = "main" }
-vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
-vulnera-api = { git = "https://github.com/Vulnera-rs/vulnera-api.git", branch = "main" }
+vulnera-sast = { path = "../vulnera-sast" }
+vulnera-secrets = { path = "../vulnera-secrets" }
+vulnera-deps = { path = "../vulnera-deps" }
+vulnera-api = { path = "../vulnera-api" }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

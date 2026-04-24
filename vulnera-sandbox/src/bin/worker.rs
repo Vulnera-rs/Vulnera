@@ -436,7 +436,7 @@ async fn execute_module_async(args: &Args) -> Result<ModuleResult, String> {
 
             let module = DependencyAnalyzerModule::new(
                 parser_factory,
-                vuln_repo,
+                Some(vuln_repo),
                 cache_service,
                 config.analysis.max_concurrent_packages,
                 config.analysis.max_concurrent_registry_queries,
