@@ -1,6 +1,6 @@
 //! SARIF report format implementation
 
-use vulnera_core::domain::module::{Finding, FindingSeverity};
+use vulnera_contract::domain::module::{Finding, FindingSeverity};
 
 use crate::domain::entities::AggregatedReport;
 use serde_json::{Value, json};

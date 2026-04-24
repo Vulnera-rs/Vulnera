@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use vulnera_core::domain::module::ModuleType;
+use vulnera_contract::domain::module::ModuleType;
 
 use super::entities::Project;
 use super::value_objects::{AnalysisDepth, AwsCredentials, SourceType};

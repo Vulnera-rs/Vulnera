@@ -7,8 +7,8 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::sync::Arc;
 use tracing::info;
 
-use vulnera_core::Config;
-use vulnera_core::infrastructure::cache::DragonflyCache;
+use vulnera_contract::Config;
+use vulnera_contract::infrastructure::cache::DragonflyCache;
 use vulnera_orchestrator::infrastructure::{GitService, GitServiceConfig, S3Service};
 
 /// Infrastructure components initialized at startup

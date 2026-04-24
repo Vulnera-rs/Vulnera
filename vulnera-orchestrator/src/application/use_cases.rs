@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, instrument, warn};
-use vulnera_core::domain::module::{
+use vulnera_contract::domain::module::{
     FindingSeverity, ModuleConfig, ModuleExecutionError, ModuleResult, ModuleType,
 };
 use walkdir::WalkDir;
@@ -17,7 +17,7 @@ use crate::domain::entities::{
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, SourceType};
 use crate::infrastructure::ModuleRegistry;
-use vulnera_core::config::{SandboxConfig, SandboxFailureMode};
+use vulnera_contract::config::{SandboxConfig, SandboxFailureMode};
 use vulnera_sandbox::{
     SandboxExecutor, SandboxPolicy, SandboxPolicyProfile, SandboxSelector, calculate_limits,
 };
@@ -189,7 +189,7 @@ impl ExecuteAnalysisJobUseCase {
 
         // Create JoinSet for parallel execution
         // We always return Ok from spawned tasks (errors are converted to ModuleResult with error field)
-        let mut join_set: JoinSet<(vulnera_core::domain::module::ModuleType, ModuleResult)> =
+        let mut join_set: JoinSet<(vulnera_contract::domain::module::ModuleType, ModuleResult)> =
             JoinSet::new();
 
         // Spawn all module execution tasks concurrently
@@ -544,16 +544,16 @@ impl AggregateResultsUseCase {
             if result.error.is_none() {
                 modules_completed += 1;
                 match result.module_type {
-                    vulnera_core::domain::module::ModuleType::SAST => {
+                    vulnera_contract::domain::module::ModuleType::SAST => {
                         sast_findings.extend(result.findings.clone());
                     }
-                    vulnera_core::domain::module::ModuleType::SecretDetection => {
+                    vulnera_contract::domain::module::ModuleType::SecretDetection => {
                         secret_findings.extend(result.findings.clone());
                     }
-                    vulnera_core::domain::module::ModuleType::DependencyAnalyzer => {
+                    vulnera_contract::domain::module::ModuleType::DependencyAnalyzer => {
                         dependency_findings_raw.extend(result.findings.clone());
                     }
-                    vulnera_core::domain::module::ModuleType::ApiSecurity => {
+                    vulnera_contract::domain::module::ModuleType::ApiSecurity => {
                         api_findings.extend(result.findings.clone());
                     }
                     _ => {
@@ -566,7 +566,7 @@ impl AggregateResultsUseCase {
         }
 
         // Deduplicate each list
-        let deduplicate = |findings: Vec<vulnera_core::domain::module::Finding>| -> Vec<vulnera_core::domain::module::Finding> {
+        let deduplicate = |findings: Vec<vulnera_contract::domain::module::Finding>| -> Vec<vulnera_contract::domain::module::Finding> {
             let mut seen = std::collections::HashSet::new();
             let mut dedup = Vec::new();
             for f in findings {
@@ -635,7 +635,7 @@ impl AggregateResultsUseCase {
     }
 
     fn group_dependency_findings(
-        findings: &[vulnera_core::domain::module::Finding],
+        findings: &[vulnera_contract::domain::module::Finding],
     ) -> std::collections::HashMap<String, GroupedDependencyFinding> {
         let mut grouped: std::collections::HashMap<String, GroupedDependencyFinding> =
             std::collections::HashMap::new();

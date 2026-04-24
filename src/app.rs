@@ -7,7 +7,7 @@ use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-use vulnera_core::Config;
+use vulnera_contract::Config;
 use vulnera_orchestrator::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,
 };
@@ -23,21 +23,21 @@ use vulnera_orchestrator::presentation::controllers::{
 };
 use vulnera_orchestrator::presentation::routes::create_router;
 
-use vulnera_core::application::analytics::AnalyticsAggregationService;
-use vulnera_core::application::analytics::use_cases::{
+use vulnera_contract::application::analytics::AnalyticsAggregationService;
+use vulnera_contract::application::analytics::use_cases::{
     CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
 };
-use vulnera_core::application::organization::use_cases::{
+use vulnera_contract::application::organization::use_cases::{
     CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
     InviteMemberUseCase, LeaveOrganizationUseCase, ListUserOrganizationsUseCase,
     RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
 };
-use vulnera_core::application::reporting::ReportServiceImpl;
-use vulnera_core::domain::organization::repositories::{
+use vulnera_contract::application::reporting::ReportServiceImpl;
+use vulnera_contract::domain::organization::repositories::{
     IAnalysisEventRepository, IOrganizationRepository, IPersistedJobResultRepository,
     IPersonalStatsMonthlyRepository, ISubscriptionLimitsRepository, IUserStatsMonthlyRepository,
 };
-use vulnera_core::infrastructure::{
+use vulnera_contract::infrastructure::{
     VulneraAdvisorRepository,
     auth::{
         JwtService, PasswordHasher, SqlxAnalysisEventRepository, SqlxOrganizationRepository,
@@ -261,7 +261,7 @@ pub async fn create_app(
     let repository_analysis_service: Arc<dyn RepositoryAnalysisService> =
         Arc::new(RepositoryAnalysisServiceImpl::new(
             github_client,
-            vulnerability_repository.clone(),
+            Some(vulnerability_repository.clone()),
             parser_factory.clone(),
             config_arc.clone(),
         ));
@@ -269,7 +269,7 @@ pub async fn create_app(
     // 10.5 Initialize Dependency Analysis Use Case
     let dependency_analysis_use_case = Arc::new(AnalyzeDependenciesUseCase::new(
         parser_factory.clone(),
-        vulnerability_repository.clone(),
+        Some(vulnerability_repository.clone()),
         cache_service.clone(),
         config.analysis.max_concurrent_packages,
     ));

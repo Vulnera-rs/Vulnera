@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use vulnera_core::domain::auth::value_objects::UserRole;
+use vulnera_contract::domain::auth::value_objects::UserRole;
 
 /// Login request DTO
 #[derive(Debug, Deserialize, ToSchema)]

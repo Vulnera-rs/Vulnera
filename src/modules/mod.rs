@@ -8,10 +8,10 @@ use std::time::Duration;
 use tracing::info;
 
 use vulnera_api::ApiSecurityModule;
-use vulnera_core::Config;
-use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
-use vulnera_core::infrastructure::cache::CacheServiceImpl;
-use vulnera_core::infrastructure::parsers::ParserFactory;
+use vulnera_contract::Config;
+use vulnera_contract::domain::vulnerability::repositories::IVulnerabilityRepository;
+use vulnera_contract::infrastructure::cache::CacheServiceImpl;
+use vulnera_contract::infrastructure::parsers::ParserFactory;
 use vulnera_deps::DependencyAnalyzerModule;
 use vulnera_orchestrator::infrastructure::ModuleRegistry;
 use vulnera_sast::application::use_cases::AnalysisConfig;
@@ -36,7 +36,7 @@ impl AnalysisModules {
         // 1. Initialize Dependency Analyzer Module
         let deps_module = Arc::new(DependencyAnalyzerModule::new(
             parser_factory.clone(),
-            vulnerability_repository.clone(),
+            Some(vulnerability_repository.clone()),
             cache_service.clone(),
             config.analysis.max_concurrent_packages,
             config.analysis.max_concurrent_registry_queries,

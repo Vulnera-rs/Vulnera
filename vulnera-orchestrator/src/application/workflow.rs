@@ -28,7 +28,7 @@ use std::sync::Arc;
 use tracing::{info, instrument, warn};
 use uuid::Uuid;
 
-use vulnera_core::domain::module::ModuleResult;
+use vulnera_contract::domain::module::ModuleResult;
 
 use crate::domain::entities::{
     AggregatedReport, AnalysisJob, FindingsByType, JobInvocationContext, Project, Summary,

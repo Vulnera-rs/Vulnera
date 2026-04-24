@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId};
-use vulnera_core::domain::module::{Finding, ModuleResult};
-use vulnera_core::domain::organization::value_objects::OrganizationId;
-pub use vulnera_core::domain::project::{Project, ProjectMetadata};
+use vulnera_contract::domain::auth::value_objects::{ApiKeyId, Email, UserId};
+use vulnera_contract::domain::module::{Finding, ModuleResult};
+use vulnera_contract::domain::organization::value_objects::OrganizationId;
+pub use vulnera_contract::domain::project::{Project, ProjectMetadata};
 
 use super::value_objects::{AnalysisDepth, JobStatus, JobTransition, JobTransitionError};
 
@@ -40,7 +40,7 @@ pub struct AnalysisJob {
     pub job_id: Uuid,
     pub project_id: String,
     pub status: JobStatus,
-    pub modules_to_run: Vec<vulnera_core::domain::module::ModuleType>,
+    pub modules_to_run: Vec<vulnera_contract::domain::module::ModuleType>,
     pub analysis_depth: AnalysisDepth,
     pub created_at: DateTime<Utc>,
     pub started_at: Option<DateTime<Utc>>,
@@ -54,7 +54,7 @@ pub struct AnalysisJob {
 impl AnalysisJob {
     pub fn new(
         project_id: String,
-        modules_to_run: Vec<vulnera_core::domain::module::ModuleType>,
+        modules_to_run: Vec<vulnera_contract::domain::module::ModuleType>,
         analysis_depth: AnalysisDepth,
     ) -> Self {
         Self {

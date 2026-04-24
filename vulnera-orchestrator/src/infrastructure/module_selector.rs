@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 
-use vulnera_core::domain::module::{ModuleTier, ModuleType};
+use vulnera_contract::domain::module::{ModuleTier, ModuleType};
 
 use crate::domain::entities::Project;
 use crate::domain::services::ModuleSelector;

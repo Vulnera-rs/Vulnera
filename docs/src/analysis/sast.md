@@ -113,7 +113,7 @@ vulnera sast . --format sarif > report.sarif
 
 ## Configuration (Server + Library)
 
-The SAST engine is configured via `vulnera_core::config::SastConfig` and `AnalysisConfig`.
+The SAST engine is configured via `vulnera_contract::config::SastConfig` and `AnalysisConfig`.
 
 Key settings:
 

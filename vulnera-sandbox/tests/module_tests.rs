@@ -5,10 +5,10 @@
 
 use std::collections::HashMap;
 use vulnera_api::module::ApiSecurityModule;
-use vulnera_core::config::{
+use vulnera_contract::config::{
     ApiSecurityConfig, SandboxBackendPreference, SandboxConfig, SastConfig, SecretDetectionConfig,
 };
-use vulnera_core::domain::module::{AnalysisModule, ModuleConfig, ModuleType};
+use vulnera_contract::domain::module::{AnalysisModule, ModuleConfig, ModuleType};
 use vulnera_sandbox::{SandboxExecutor, SandboxSelector, calculate_limits};
 use vulnera_sast::module::SastModule;
 use vulnera_secrets::module::SecretDetectionModule;

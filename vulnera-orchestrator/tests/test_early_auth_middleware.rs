@@ -15,11 +15,11 @@ use axum::{
 use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tower::ServiceExt;
-use vulnera_core::config::TieredRateLimitConfig;
-use vulnera_core::infrastructure::rate_limiter::{
+use vulnera_contract::config::TieredRateLimitConfig;
+use vulnera_contract::infrastructure::rate_limiter::{
     RateLimiterService, storage::InMemoryRateLimitStorage,
 };
-use vulnera_core::{
+use vulnera_contract::{
     application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase},
     domain::auth::{
         entities::{ApiKey, User},
@@ -569,7 +569,7 @@ async fn test_master_key_authentication() {
     unsafe {
         std::env::set_var("VULNERA_MASTER_KEY", "test-master-key-for-testing");
     }
-    vulnera_core::infrastructure::auth::initialize_master_key();
+    vulnera_contract::infrastructure::auth::initialize_master_key();
 
     let jwt_service = Arc::new(create_jwt_service());
     let api_key_generator = Arc::new(create_api_key_generator());

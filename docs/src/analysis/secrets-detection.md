@@ -79,7 +79,7 @@ vulnera secrets . --format sarif > report.sarif
 
 ## Configuration (Server + Library)
 
-Secrets detection is configured via `vulnera_core::config::SecretDetectionConfig`.
+Secrets detection is configured via `vulnera_contract::config::SecretDetectionConfig`.
 
 Key settings:
 

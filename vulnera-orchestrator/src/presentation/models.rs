@@ -158,8 +158,8 @@ impl From<crate::domain::entities::JobInvocationContext> for JobInvocationContex
     }
 }
 
-impl From<vulnera_core::domain::module::ModuleResult> for ModuleResultDto {
-    fn from(result: vulnera_core::domain::module::ModuleResult) -> Self {
+impl From<vulnera_contract::domain::module::ModuleResult> for ModuleResultDto {
+    fn from(result: vulnera_contract::domain::module::ModuleResult) -> Self {
         Self {
             module_type: format!("{:?}", result.module_type),
             status: if result.error.is_none() {

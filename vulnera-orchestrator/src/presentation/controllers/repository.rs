@@ -24,7 +24,9 @@ use crate::presentation::models::{
     RepositoryAnalysisResponse, RepositoryConfigCapsDto, RepositoryDescriptorDto,
     RepositoryFileResultDto, RepositoryPackageDto, SeverityBreakdownDto,
 };
-use vulnera_core::domain::vulnerability::entities::{Package, SeverityBreakdown, Vulnerability};
+use vulnera_contract::domain::vulnerability::entities::{
+    Package, SeverityBreakdown, Vulnerability,
+};
 use vulnera_deps::services::repository_analysis::{
     RepositoryAnalysisInput, RepositoryAnalysisInternalResult, RepositoryFileResultInternal,
 };

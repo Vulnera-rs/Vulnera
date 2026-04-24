@@ -7,11 +7,11 @@ use axum::{
 };
 use std::sync::Arc;
 
-use vulnera_core::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
-use vulnera_core::application::errors::ApplicationError;
-use vulnera_core::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
-use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
-use vulnera_core::domain::organization::value_objects::OrganizationId;
+use vulnera_contract::application::auth::use_cases::{ValidateApiKeyUseCase, ValidateTokenUseCase};
+use vulnera_contract::application::errors::ApplicationError;
+use vulnera_contract::domain::auth::value_objects::{ApiKeyId, Email, UserId, UserRole};
+use vulnera_contract::domain::organization::repositories::IOrganizationMemberRepository;
+use vulnera_contract::domain::organization::value_objects::OrganizationId;
 
 use crate::presentation::middleware::application_error_to_response;
 
@@ -37,7 +37,7 @@ pub struct AuthUser {
 pub struct ApiKeyAuth {
     pub user_id: UserId,
     pub email: Email,
-    pub api_key_id: vulnera_core::domain::auth::value_objects::ApiKeyId,
+    pub api_key_id: vulnera_contract::domain::auth::value_objects::ApiKeyId,
 }
 
 /// Authentication method used
@@ -66,9 +66,10 @@ pub struct Auth {
 pub struct AuthState {
     pub validate_token: Arc<ValidateTokenUseCase>,
     pub validate_api_key: Arc<ValidateApiKeyUseCase>,
-    pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
-    pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
-    pub api_key_generator: Arc<vulnera_core::infrastructure::auth::ApiKeyGenerator>,
+    pub user_repository: Arc<dyn vulnera_contract::domain::auth::repositories::IUserRepository>,
+    pub api_key_repository:
+        Arc<dyn vulnera_contract::domain::auth::repositories::IApiKeyRepository>,
+    pub api_key_generator: Arc<vulnera_contract::infrastructure::auth::ApiKeyGenerator>,
     /// Optional organization member repository used to resolve org membership
     pub organization_member_repository: Option<Arc<dyn IOrganizationMemberRepository>>,
 }
@@ -110,7 +111,7 @@ where
             extract_cookie_from_parts(parts, "access_token").ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::InvalidToken,
+                    vulnera_contract::domain::auth::errors::AuthError::InvalidToken,
                 ),
             })?;
 
@@ -167,12 +168,12 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::ApiKeyInvalid,
+                    vulnera_contract::domain::auth::errors::AuthError::ApiKeyInvalid,
                 ),
             })?;
 
         // Check if this is the master API key (dev/extension use)
-        if vulnera_core::infrastructure::auth::is_master_key(&api_key) {
+        if vulnera_contract::infrastructure::auth::is_master_key(&api_key) {
             // Create a synthetic master user with admin privileges
             let master_user_id = UserId::generate();
             let master_email = build_master_email()?;
@@ -210,7 +211,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
+                    vulnera_contract::domain::auth::errors::AuthError::UserIdNotFound {
                         user_id: user_id.as_str(),
                     },
                 ),
@@ -282,9 +283,10 @@ where
         // Try X-API-Key header (for programmatic access)
         if let Some(api_key) = parts.headers.get("X-API-Key").and_then(|h| h.to_str().ok()) {
             // Check if this is the master API key (dev/extension use)
-            if vulnera_core::infrastructure::auth::is_master_key(api_key) {
+            if vulnera_contract::infrastructure::auth::is_master_key(api_key) {
                 // Create a synthetic master user with admin privileges
-                let master_user_id = vulnera_core::domain::auth::value_objects::UserId::generate();
+                let master_user_id =
+                    vulnera_contract::domain::auth::value_objects::UserId::generate();
                 let master_email = build_master_email()?;
 
                 tracing::info!("Master API key authenticated from {:?}", parts.uri);
@@ -292,7 +294,7 @@ where
                 return Ok(Auth {
                     user_id: master_user_id,
                     email: master_email,
-                    roles: vec![vulnera_core::domain::auth::value_objects::UserRole::Admin],
+                    roles: vec![vulnera_contract::domain::auth::value_objects::UserRole::Admin],
                     auth_method: AuthMethod::ApiKey,
                     api_key_id: None,
                     is_master_key: true,
@@ -314,7 +316,7 @@ where
                         .ok_or_else(|| AuthErrorResponse {
                             status: StatusCode::UNAUTHORIZED,
                             error: ApplicationError::Authentication(
-                                vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
+                                vulnera_contract::domain::auth::errors::AuthError::UserIdNotFound {
                                     user_id: user_id.as_str(),
                                 },
                             ),
@@ -358,7 +360,7 @@ where
         Err(AuthErrorResponse {
             status: StatusCode::UNAUTHORIZED,
             error: ApplicationError::Authentication(
-                vulnera_core::domain::auth::errors::AuthError::InvalidToken,
+                vulnera_contract::domain::auth::errors::AuthError::InvalidToken,
             ),
         })
     }
@@ -398,7 +400,7 @@ where
         };
 
         // Check if this is the master API key (dev/extension use)
-        if vulnera_core::infrastructure::auth::is_master_key(api_key) {
+        if vulnera_contract::infrastructure::auth::is_master_key(api_key) {
             // Create a synthetic master user with admin privileges
             let master_user_id = UserId::generate();
             let master_email = build_master_email()?;
@@ -421,7 +423,7 @@ where
             .map_err(|_| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::ApiKeyInvalid,
+                    vulnera_contract::domain::auth::errors::AuthError::ApiKeyInvalid,
                 ),
             })?;
         let user_id = validation.user_id;
@@ -438,7 +440,7 @@ where
             .ok_or_else(|| AuthErrorResponse {
                 status: StatusCode::UNAUTHORIZED,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::UserIdNotFound {
+                    vulnera_contract::domain::auth::errors::AuthError::UserIdNotFound {
                         user_id: user_id.as_str(),
                     },
                 ),
@@ -479,7 +481,7 @@ pub trait HasRole {
             return Err(AuthErrorResponse {
                 status: StatusCode::FORBIDDEN,
                 error: ApplicationError::Authentication(
-                    vulnera_core::domain::auth::errors::AuthError::InsufficientPermissions,
+                    vulnera_contract::domain::auth::errors::AuthError::InsufficientPermissions,
                 ),
             });
         }

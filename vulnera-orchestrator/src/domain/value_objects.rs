@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-pub use vulnera_core::domain::project::SourceType;
+pub use vulnera_contract::domain::project::SourceType;
 
 /// AWS credentials for S3 bucket access
 ///
@@ -70,7 +70,7 @@ pub enum AnalysisDepth {
     FastScan,
 }
 
-// ModuleType is now imported from vulnera_core::domain::module
+// ModuleType is now imported from vulnera_contract::domain::module
 
 /// Job status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

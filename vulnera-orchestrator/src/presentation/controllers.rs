@@ -12,26 +12,26 @@ use std::time::Instant;
 
 use axum::{extract::State, response::Json};
 use chrono::Utc;
-use vulnera_core::application::analytics::use_cases::{
+use vulnera_contract::application::analytics::use_cases::{
     CheckQuotaUseCase, GetDashboardOverviewUseCase, GetMonthlyAnalyticsUseCase,
 };
-use vulnera_core::application::auth::use_cases::{
+use vulnera_contract::application::auth::use_cases::{
     LoginUseCase, RefreshTokenUseCase, RegisterUserUseCase, ValidateApiKeyUseCase,
     ValidateTokenUseCase,
 };
-use vulnera_core::application::organization::use_cases::{
+use vulnera_contract::application::organization::use_cases::{
     CreateOrganizationUseCase, DeleteOrganizationUseCase, GetOrganizationUseCase,
     InviteMemberUseCase, LeaveOrganizationUseCase, ListUserOrganizationsUseCase,
     RemoveMemberUseCase, TransferOwnershipUseCase, UpdateOrganizationNameUseCase,
 };
-use vulnera_core::application::reporting::ReportServiceImpl;
-use vulnera_core::domain::organization::repositories::IOrganizationMemberRepository;
-use vulnera_core::domain::vulnerability::repositories::IVulnerabilityRepository;
-use vulnera_core::infrastructure::auth::{
+use vulnera_contract::application::reporting::ReportServiceImpl;
+use vulnera_contract::domain::organization::repositories::IOrganizationMemberRepository;
+use vulnera_contract::domain::vulnerability::repositories::IVulnerabilityRepository;
+use vulnera_contract::infrastructure::auth::{
     ApiKeyGenerator, JwtService, PasswordHasher, TokenBlacklistService,
 };
-use vulnera_core::infrastructure::cache::CacheServiceImpl;
-use vulnera_core::infrastructure::rate_limiter::RateLimiterService;
+use vulnera_contract::infrastructure::cache::CacheServiceImpl;
+use vulnera_contract::infrastructure::rate_limiter::RateLimiterService;
 use vulnera_deps::types::VersionResolutionService;
 
 use crate::application::use_cases::{
@@ -58,7 +58,7 @@ use serde::Deserialize;
 use tokio::task::JoinSet;
 use tracing::{error, info};
 use uuid::Uuid;
-use vulnera_core::domain::vulnerability::{
+use vulnera_contract::domain::vulnerability::{
     entities::{AnalysisReport, Package, Vulnerability},
     value_objects::Ecosystem,
 };
@@ -109,8 +109,9 @@ pub struct LlmServices {
 #[derive(Clone)]
 pub struct AuthServices {
     pub db_pool: Arc<sqlx::PgPool>,
-    pub user_repository: Arc<dyn vulnera_core::domain::auth::repositories::IUserRepository>,
-    pub api_key_repository: Arc<dyn vulnera_core::domain::auth::repositories::IApiKeyRepository>,
+    pub user_repository: Arc<dyn vulnera_contract::domain::auth::repositories::IUserRepository>,
+    pub api_key_repository:
+        Arc<dyn vulnera_contract::domain::auth::repositories::IApiKeyRepository>,
     pub jwt_service: Arc<JwtService>,
     pub password_hasher: Arc<PasswordHasher>,
     pub api_key_generator: Arc<ApiKeyGenerator>,
@@ -142,7 +143,8 @@ pub struct AnalyticsServices {
     pub get_dashboard_overview_use_case: Arc<GetDashboardOverviewUseCase>,
     pub get_monthly_analytics_use_case: Arc<GetMonthlyAnalyticsUseCase>,
     pub check_quota_use_case: Arc<CheckQuotaUseCase>,
-    pub analytics_service: Arc<vulnera_core::application::analytics::AnalyticsAggregationService>,
+    pub analytics_service:
+        Arc<vulnera_contract::application::analytics::AnalyticsAggregationService>,
 }
 
 #[derive(Clone)]
@@ -154,7 +156,7 @@ pub struct OrchestratorState {
     pub auth: Arc<AuthServices>,
     pub organization: Arc<OrganizationServices>,
     pub analytics: Arc<AnalyticsServices>,
-    pub config: Arc<vulnera_core::Config>,
+    pub config: Arc<vulnera_contract::Config>,
     pub startup_time: Instant,
 }
 
@@ -354,7 +356,7 @@ fn package_to_dto(pkg: &Package) -> PackageDto {
 
 /// Convert AnalysisMetadata to AnalysisMetadataDto
 fn metadata_to_dto(
-    metadata: &vulnera_core::domain::vulnerability::entities::AnalysisMetadata,
+    metadata: &vulnera_contract::domain::vulnerability::entities::AnalysisMetadata,
 ) -> AnalysisMetadataDto {
     AnalysisMetadataDto {
         total_packages: metadata.total_packages,

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use vulnera_core::domain::module::{AnalysisModule, ModuleTier, ModuleType};
+use vulnera_contract::domain::module::{AnalysisModule, ModuleTier, ModuleType};
 
 /// Registry for analysis modules with tier-aware access control
 pub struct ModuleRegistry {
@@ -82,8 +82,8 @@ impl Default for ModuleRegistry {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use vulnera_core::domain::module::ModuleResultMetadata;
-    use vulnera_core::domain::module::{ModuleConfig, ModuleExecutionError, ModuleResult};
+    use vulnera_contract::domain::module::ModuleResultMetadata;
+    use vulnera_contract::domain::module::{ModuleConfig, ModuleExecutionError, ModuleResult};
 
     /// Minimal stub for testing registry behavior
     struct StubModule(ModuleType);
