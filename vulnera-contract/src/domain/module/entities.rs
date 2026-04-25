@@ -86,7 +86,6 @@ pub struct Finding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secret_metadata: Option<SecretFindingMetadata>,
     /// Vulnerability-specific metadata (populated by vulnerability analyzers such as SAST)
-    #[serde(default)]
     pub vulnerability_metadata: VulnerabilityFindingMetadata,
     /// LLM-generated enrichment data (populated on-demand via enrichment endpoint)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -775,14 +774,15 @@ mod tests {
     }
 
     #[test]
-    fn finding_json_deserialization_optional_fields_default() {
+    fn finding_json_deserialization_required_fields() {
         let json = r#"{
             "id": "id-deser-1",
             "type": "Vulnerability",
             "location": { "path": "main.go", "line": 1 },
             "severity": "High",
             "confidence": "Medium",
-            "description": "empty password check"
+            "description": "empty password check",
+            "vulnerability_metadata": {}
         }"#;
 
         let finding: Finding = serde_json::from_str(json).unwrap();
