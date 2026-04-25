@@ -1,15 +1,9 @@
-//! No-op sandbox implementation
-//!
-//! This backend applies no restrictions and is used when sandboxing is disabled
-//! or when a "none" backend is requested.
-
 use async_trait::async_trait;
 use tracing::info;
 
 use crate::domain::policy::SandboxPolicy;
 use crate::domain::traits::{SandboxBackend, SandboxResult};
 
-/// No-op sandbox that does nothing
 #[derive(Debug, Default)]
 pub struct NoOpSandbox;
 
@@ -30,7 +24,7 @@ impl SandboxBackend for NoOpSandbox {
     }
 
     async fn apply_restrictions(&self, _policy: &SandboxPolicy) -> SandboxResult<()> {
-        info!("No-op sandbox: applying no restrictions");
+        info!("NoOp sandbox: no restrictions applied");
         Ok(())
     }
 }

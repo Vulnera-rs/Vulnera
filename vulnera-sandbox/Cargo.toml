@@ -10,32 +10,21 @@ keywords = ["security", "sandbox", "landlock", "seccomp"]
 categories = ["os::linux-apis", "security"]
 description = "Hybrid kernel sandboxing for Vulnera security modules"
 
-[[bin]]
-name = "vulnera-worker"
-path = "src/bin/worker.rs"
-
 [dependencies]
 # Shared dependencies
 vulnera-contract = { path = "../vulnera-contract" }
-vulnera-sast = { git = "https://github.com/Vulnera-rs/vulnera-sast.git", branch = "main" }
-vulnera-secrets = { git = "https://github.com/Vulnera-rs/vulnera-secrets.git", branch = "main" }
-vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
-vulnera-api = { git = "https://github.com/Vulnera-rs/vulnera-api.git", branch = "main" }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-clap = { version = "4", features = ["derive"] }
 uuid = { workspace = true }
-which = "8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 seccompiler = "0.5.0"
-nix = { version = "0.30.0", features = ["process", "signal", "resource"] }
+nix = { version = "0.31.0", features = ["process", "signal", "resource", "sched", "user"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 wasmtime = "40"
