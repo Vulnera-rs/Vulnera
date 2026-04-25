@@ -1,59 +1,59 @@
 # vulnera-sandbox
 
-Hybrid isolation sandbox for analysis modules with multiple backend options.
-
-## Purpose
-
-Provide least-privilege execution environments for security analysis:
-
-- **Landlock** (Linux 5.13+) - Kernel-enforced filesystem/network restrictions
-- **Seccomp** (Older Linux) - Syscall filtering with process isolation
-- **WASM** (Non-Linux) - WebAssembly-based portable sandbox (in development)
-- **NoOp** (Development) - Disabled sandboxing for debugging
+Hybrid isolation sandbox for analysis modules with defense-in-depth.
 
 ## Architecture
 
 ```
 domain/
-  policy.rs          - SandboxPolicy and profiles
-  backend.rs         - SandboxBackend trait
-  
+  traits.rs        - SandboxBackend trait, SandboxError, SandboxStats
+  policy.rs        - SandboxPolicy with builder and profiles
+  limits.rs        - Dynamic resource limit calculation
+
 application/
-  executor.rs        - SandboxExecutor
-  selector.rs        - Backend selection logic
-  
+  executor.rs      - SandboxExecutor - runs modules within sandbox
+  selector.rs      - Auto-selection of best backend by platform
+
 infrastructure/
-  landlock.rs        - Landlock LSM implementation
-  seccomp.rs         - Seccomp syscall filtering
-  process.rs         - Process-based isolation
-  wasm.rs            - WASM runtime (stub)
-  worker.rs          - Worker binary entry point
+  landlock.rs      - Landlock LSM + seccomp (Linux 5.13+, ABI V4)
+  seccomp.rs       - Standalone seccomp-bpf syscall filter
+  process.rs       - Resource limits + namespaces + seccomp (older Linux)
+  wasm.rs          - Wasmtime-based sandbox (non-Linux fallback)
+  noop.rs          - No restrictions (development)
 ```
+
+## Backend Priority
+
+| Priority | Backend | Platform | Isolation |
+|----------|---------|----------|-----------|
+| 1 | Landlock | Linux 5.13+ | Landlock FS+net + seccomp BPF |
+| 2 | Process | Linux (all) | rlimits + namespaces + seccomp |
+| 3 | WASM | Non-Linux | Wasmtime fuel/epoch isolation |
+| 4 | NoOp | Any | No restrictions (development) |
+
+## Defense-in-Depth
+
+- **Landlock backend**: Landlock restricts filesystem paths and network ports; seccomp restricts available syscalls
+- **Process backend**: RLIMIT_AS/CPU/CORE/NOFILE/NPROC + user/mount/network/IPC namespaces + seccomp BPF allowlist
+- **WASM backend**: Wasmtime with fuel metering, epoch interruption, and StoreLimits for memory
 
 ## Policy Profiles
 
-- `ReadOnlyAnalysis` - Filesystem-only access, no network
-- `DependencyResolution` - HTTP(S) + optional Redis access
-
-## Resource Limits
-
-Dynamic scaling by module type:
-- DependencyAnalyzer: 2.5x timeout, 1.5x memory
-- SAST: 2.0x timeout, 2.0x memory
-- Others: 1.0x/1.0x baseline
+- `ReadOnlyAnalysis` - Filesystem read-only, no network
+- `DependencyResolution` - HTTP(S) + optional Redis port
 
 ## Usage
 
 ```rust
-let policy = SandboxPolicy::for_analysis(source_path)
-    .with_profile(SandboxPolicyProfile::ReadOnlyAnalysis)
-    .with_timeout_secs(120)
-    .with_memory_mb(2048);
+use vulnera_sandbox::{SandboxExecutor, SandboxPolicy, SandboxSelector};
 
-let executor = SandboxExecutor::new(backend, policy);
-executor.execute(module_config).await?;
+let executor = SandboxExecutor::new(SandboxSelector::select());
+let policy = SandboxPolicy::for_analysis("/path/to/scan")
+    .with_profile(SandboxPolicyProfile::ReadOnlyAnalysis);
+
+let result = executor.execute_module(&module, &config, &policy).await?;
 ```
 
 ## License
 
-AGPL-3.0-or-later. See [LICENSE](../LICENSE) for details.
+AGPL-3.0-or-later.
