@@ -36,20 +36,36 @@ impl SandboxPolicy {
         let mut policy = Self::default();
 
         let system_paths = [
-            "/usr",
+            "/bin",
             "/lib",
             "/lib64",
             "/lib32",
             "/proc",
+            "/sbin",
+            "/usr",
+            "/usr/bin",
+            "/usr/lib",
+            "/usr/lib64",
+            "/usr/lib32",
+            "/usr/sbin",
+            "/usr/share",
+            "/usr/local",
             "/etc/ssl",
             "/etc/pki",
             "/etc/ca-certificates",
+            "/etc/ca-certificates.conf",
             "/etc/resolv.conf",
             "/etc/hosts",
+            "/etc/host.conf",
             "/etc/nsswitch.conf",
             "/etc/passwd",
             "/etc/group",
-        ]; //TODO
+            "/etc/ld.so.cache",
+            "/etc/ld.so.conf.d",
+            "/etc/apt",
+            "/etc/machine-id",
+            "/etc/mtab",
+        ];
         for path in system_paths {
             let p = PathBuf::from(path);
             if p.exists() {
