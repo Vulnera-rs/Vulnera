@@ -23,8 +23,19 @@ pub struct ModuleResult {
 
 impl ModuleResult {
     /// Create a successful module result.
-    pub fn success(job_id: Uuid, module_type: ModuleType, findings: Vec<Finding>, metadata: ModuleResultMetadata) -> Self {
-        Self { job_id, module_type, findings, metadata, error: None }
+    pub fn success(
+        job_id: Uuid,
+        module_type: ModuleType,
+        findings: Vec<Finding>,
+        metadata: ModuleResultMetadata,
+    ) -> Self {
+        Self {
+            job_id,
+            module_type,
+            findings,
+            metadata,
+            error: None,
+        }
     }
 
     /// Create a failed module result.
@@ -215,8 +226,16 @@ pub struct VulnerabilitySemanticPath {
 
 impl VulnerabilitySemanticPath {
     /// Create a new semantic path.
-    pub fn new(source: VulnerabilitySemanticNode, steps: Vec<VulnerabilitySemanticNode>, sink: VulnerabilitySemanticNode) -> Self {
-        Self { source, steps, sink }
+    pub fn new(
+        source: VulnerabilitySemanticNode,
+        steps: Vec<VulnerabilitySemanticNode>,
+        sink: VulnerabilitySemanticNode,
+    ) -> Self {
+        Self {
+            source,
+            steps,
+            sink,
+        }
     }
 }
 
@@ -234,8 +253,16 @@ pub struct VulnerabilitySemanticNode {
 
 impl VulnerabilitySemanticNode {
     /// Create a new semantic node.
-    pub fn new(location: Location, description: impl Into<String>, expression: impl Into<String>) -> Self {
-        Self { location, description: description.into(), expression: expression.into() }
+    pub fn new(
+        location: Location,
+        description: impl Into<String>,
+        expression: impl Into<String>,
+    ) -> Self {
+        Self {
+            location,
+            description: description.into(),
+            expression: expression.into(),
+        }
     }
 }
 
@@ -257,7 +284,11 @@ pub struct SecretFindingMetadata {
 
 impl SecretFindingMetadata {
     /// Create new secret metadata.
-    pub fn new(detector_id: impl Into<String>, verification_state: SecretVerificationState, redacted_secret: impl Into<String>) -> Self {
+    pub fn new(
+        detector_id: impl Into<String>,
+        verification_state: SecretVerificationState,
+        redacted_secret: impl Into<String>,
+    ) -> Self {
         Self {
             detector_id: detector_id.into(),
             verification_state,
@@ -407,8 +438,7 @@ pub struct ModuleResultMetadata {
 mod tests {
     use super::*;
     use crate::{
-        FindingConfidence, FindingSeverity, FindingType, ModuleType,
-        SecretVerificationState,
+        FindingConfidence, FindingSeverity, FindingType, ModuleType, SecretVerificationState,
     };
     use chrono::Utc;
 
@@ -527,16 +557,8 @@ mod tests {
     #[test]
     fn finding_builder_with_vulnerability_metadata() {
         let loc = test_location();
-        let source = VulnerabilitySemanticNode::new(
-            loc.clone(),
-            "taint source",
-            "request.body",
-        );
-        let sink = VulnerabilitySemanticNode::new(
-            loc,
-            "raw SQL",
-            "db.query(sql)",
-        );
+        let source = VulnerabilitySemanticNode::new(loc.clone(), "taint source", "request.body");
+        let sink = VulnerabilitySemanticNode::new(loc, "raw SQL", "db.query(sql)");
         let path = VulnerabilitySemanticPath::new(source, vec![], sink);
         let vuln_meta = VulnerabilityFindingMetadata {
             snippet: Some("db.query(user)".into()),
@@ -676,11 +698,7 @@ mod tests {
             "raw SQL query",
             "db.query(sql)",
         );
-        let path = VulnerabilitySemanticPath::new(
-            source.clone(),
-            vec![step.clone()],
-            sink.clone(),
-        );
+        let path = VulnerabilitySemanticPath::new(source.clone(), vec![step.clone()], sink.clone());
         assert_eq!(path.source.description, source.description);
         assert_eq!(path.steps.len(), 1);
         assert_eq!(path.sink.expression, sink.expression);

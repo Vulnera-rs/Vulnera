@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 
 /// Module licensing tier
 ///
-/// Determines whether a module is available in the open-source community edition
-/// or requires an enterprise license.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ModuleTier {
@@ -148,7 +146,12 @@ mod tests {
             ModuleType::ApiSecurity,
         ];
         for mt in community_modules {
-            assert_eq!(mt.tier(), ModuleTier::Community, "{:?} should be Community", mt);
+            assert_eq!(
+                mt.tier(),
+                ModuleTier::Community,
+                "{:?} should be Community",
+                mt
+            );
             assert!(mt.is_community());
             assert!(!mt.is_enterprise());
         }
@@ -166,7 +169,12 @@ mod tests {
             ModuleType::CSPM,
         ];
         for mt in enterprise_modules {
-            assert_eq!(mt.tier(), ModuleTier::Enterprise, "{:?} should be Enterprise", mt);
+            assert_eq!(
+                mt.tier(),
+                ModuleTier::Enterprise,
+                "{:?} should be Enterprise",
+                mt
+            );
             assert!(!mt.is_community());
             assert!(mt.is_enterprise());
         }
@@ -236,10 +244,7 @@ mod tests {
     #[test]
     fn module_execution_error_display() {
         let err = ModuleExecutionError::ExecutionFailed("sandbox OOM".into());
-        assert_eq!(
-            err.to_string(),
-            "Module execution failed: sandbox OOM"
-        );
+        assert_eq!(err.to_string(), "Module execution failed: sandbox OOM");
     }
 
     #[test]

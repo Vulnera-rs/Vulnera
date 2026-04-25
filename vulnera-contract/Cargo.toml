@@ -29,5 +29,9 @@ serde_json = { workspace = true }
 # UUID generation
 uuid = { workspace = true }
 
+# Hashing for cache keys
+sha2 = { workspace = true }
+hex = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
