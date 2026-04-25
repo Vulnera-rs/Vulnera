@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 /// Determines whether a module is available in the open-source community edition
 /// or requires an enterprise license.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ModuleTier {
-    /// Free and open-source — available to all users
+    /// Free and open-source - available to all users
     Community,
     /// Requires an active enterprise license
     Enterprise,
@@ -28,6 +29,7 @@ impl std::fmt::Display for ModuleTier {
 /// Each analysis module type has a unique identifier that is used for registration,
 /// selection, and routing within the orchestrator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ModuleType {
     /// Dependency analyzer module (Community)
     DependencyAnalyzer,
@@ -108,8 +110,163 @@ pub enum ModuleExecutionError {
     InvalidConfig(String),
 
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(String),
 
     #[error("Other error: {0}")]
     Other(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- ModuleTier ---
+
+    #[test]
+    fn module_tier_display() {
+        assert_eq!(ModuleTier::Community.to_string(), "community");
+        assert_eq!(ModuleTier::Enterprise.to_string(), "enterprise");
+    }
+
+    #[test]
+    fn module_tier_json_roundtrip() {
+        for tier in [ModuleTier::Community, ModuleTier::Enterprise] {
+            let json = serde_json::to_string(&tier).unwrap();
+            let parsed: ModuleTier = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, tier);
+        }
+    }
+
+    // --- ModuleType ---
+
+    #[test]
+    fn community_module_types_have_community_tier() {
+        let community_modules = [
+            ModuleType::DependencyAnalyzer,
+            ModuleType::SAST,
+            ModuleType::SecretDetection,
+            ModuleType::ApiSecurity,
+        ];
+        for mt in community_modules {
+            assert_eq!(mt.tier(), ModuleTier::Community, "{:?} should be Community", mt);
+            assert!(mt.is_community());
+            assert!(!mt.is_enterprise());
+        }
+    }
+
+    #[test]
+    fn enterprise_module_types_have_enterprise_tier() {
+        let enterprise_modules = [
+            ModuleType::MaliciousPackageDetection,
+            ModuleType::LicenseCompliance,
+            ModuleType::SBOM,
+            ModuleType::DAST,
+            ModuleType::FuzzTesting,
+            ModuleType::IaC,
+            ModuleType::CSPM,
+        ];
+        for mt in enterprise_modules {
+            assert_eq!(mt.tier(), ModuleTier::Enterprise, "{:?} should be Enterprise", mt);
+            assert!(!mt.is_community());
+            assert!(mt.is_enterprise());
+        }
+    }
+
+    #[test]
+    fn module_type_json_roundtrip() {
+        let types = [
+            ModuleType::DependencyAnalyzer,
+            ModuleType::SAST,
+            ModuleType::SecretDetection,
+            ModuleType::ApiSecurity,
+            ModuleType::MaliciousPackageDetection,
+            ModuleType::LicenseCompliance,
+            ModuleType::SBOM,
+            ModuleType::DAST,
+            ModuleType::FuzzTesting,
+            ModuleType::IaC,
+            ModuleType::CSPM,
+        ];
+        for mt in types {
+            let json = serde_json::to_string(&mt).unwrap();
+            let parsed: ModuleType = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, mt);
+        }
+    }
+
+    // --- ModuleConfig ---
+
+    #[test]
+    fn module_config_default() {
+        let cfg = ModuleConfig {
+            job_id: uuid::Uuid::parse_str("b16b4e16-a5c6-4168-96cc-d4f414bf974c").unwrap(),
+            project_id: "project-1".into(),
+            source_uri: "/tmp/repo".into(),
+            config: std::collections::HashMap::new(),
+        };
+        assert_eq!(cfg.project_id, "project-1");
+        assert_eq!(cfg.source_uri, "/tmp/repo");
+        assert!(cfg.config.is_empty());
+    }
+
+    #[test]
+    fn module_config_json_roundtrip() {
+        use serde_json::json;
+        let mut config = std::collections::HashMap::new();
+        config.insert("depth".into(), json!("full"));
+        config.insert("paths".into(), json!(["src/", "tests/"]));
+        let cfg = ModuleConfig {
+            job_id: uuid::Uuid::parse_str("b16b4e16-a5c6-4168-96cc-d4f414bf974c").unwrap(),
+            project_id: "test-project".into(),
+            source_uri: "/tmp/repo".into(),
+            config,
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: ModuleConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.project_id, "test-project");
+        assert_eq!(parsed.source_uri, "/tmp/repo");
+        assert_eq!(
+            parsed.config.get("depth").and_then(|v| v.as_str()),
+            Some("full")
+        );
+    }
+
+    // --- ModuleExecutionError ---
+
+    #[test]
+    fn module_execution_error_display() {
+        let err = ModuleExecutionError::ExecutionFailed("sandbox OOM".into());
+        assert_eq!(
+            err.to_string(),
+            "Module execution failed: sandbox OOM"
+        );
+    }
+
+    #[test]
+    fn module_execution_error_invalid_config_display() {
+        let err = ModuleExecutionError::InvalidConfig("missing 'source_path'".into());
+        assert!(err.to_string().contains("missing 'source_path'"));
+    }
+
+    #[test]
+    fn module_execution_error_io_display() {
+        let err = ModuleExecutionError::Io("permission denied: /etc/shadow".into());
+        assert!(err.to_string().contains("permission denied"));
+        assert!(err.to_string().contains("IO error"));
+    }
+
+    #[test]
+    fn module_execution_error_other_display() {
+        let err = ModuleExecutionError::Other("unknown tool exited code 137".into());
+        assert!(err.to_string().contains("unknown tool exited code 137"));
+    }
+
+    // --- ModuleType Discriminant stability ---
+
+    #[test]
+    fn module_type_equality_is_by_variant() {
+        assert_eq!(ModuleType::SAST, ModuleType::SAST);
+        assert_ne!(ModuleType::SAST, ModuleType::SecretDetection);
+        assert_ne!(ModuleType::DependencyAnalyzer, ModuleType::DAST);
+    }
 }
