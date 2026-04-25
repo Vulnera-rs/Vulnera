@@ -119,6 +119,7 @@ fn severity_score(severity: &FindingSeverity) -> u32 {
         FindingSeverity::Medium => 50,
         FindingSeverity::Low => 20,
         FindingSeverity::Info => 5,
+        _ => 0,
     }
 }
 
@@ -127,6 +128,7 @@ fn confidence_score(confidence: &FindingConfidence) -> u32 {
         FindingConfidence::High => 15,
         FindingConfidence::Medium => 8,
         FindingConfidence::Low => 3,
+        _ => 0,
     }
 }
 
@@ -135,7 +137,7 @@ mod tests {
     use super::*;
     use uuid::Uuid;
     use vulnera_contract::domain::module::{
-        FindingType, Location, ModuleResultMetadata, VulnerabilityFindingMetadata,
+        FindingConfidence, FindingSeverity, FindingType, Location, ModuleResultMetadata,
     };
 
     fn mk_finding(
@@ -146,35 +148,29 @@ mod tests {
         severity: FindingSeverity,
         confidence: FindingConfidence,
     ) -> Finding {
-        Finding {
-            id: id.to_string(),
-            r#type: FindingType::Vulnerability,
-            rule_id: rule_id.map(ToString::to_string),
-            location: Location {
-                path: path.to_string(),
-                line: Some(line),
-                column: None,
-                end_line: Some(line),
-                end_column: None,
-            },
+        let mut builder = Finding::builder(
+            id.to_string(),
+            FindingType::Vulnerability,
+            Location::new(path.to_string())
+                .with_line(line)
+                .with_end_line(line),
             severity,
             confidence,
-            description: "desc".to_string(),
-            recommendation: None,
-            secret_metadata: None,
-            vulnerability_metadata: VulnerabilityFindingMetadata::default(),
-            enrichment: None,
+            "desc",
+        );
+        if let Some(rid) = rule_id {
+            builder = builder.rule_id(rid.to_string());
         }
+        builder.build()
     }
 
     fn mk_result(module_type: ModuleType, findings: Vec<Finding>) -> ModuleResult {
-        ModuleResult {
-            job_id: Uuid::new_v4(),
+        ModuleResult::success(
+            Uuid::new_v4(),
             module_type,
             findings,
-            metadata: ModuleResultMetadata::default(),
-            error: None,
-        }
+            ModuleResultMetadata::default(),
+        )
     }
 
     #[test]

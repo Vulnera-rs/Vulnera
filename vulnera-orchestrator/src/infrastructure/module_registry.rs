@@ -26,7 +26,7 @@ impl ModuleRegistry {
         self.modules.insert(module.module_type(), module);
     }
 
-    /// Get a module by type (no tier check — callers must validate entitlement first).
+    /// Get a module by type (no tier check - callers must validate entitlement first).
     pub fn get_module(&self, module_type: &ModuleType) -> Option<Arc<dyn AnalysisModule>> {
         self.modules.get(module_type).cloned()
     }
@@ -45,6 +45,7 @@ impl ModuleRegistry {
             ModuleTier::Community => Some(module.clone()),
             ModuleTier::Enterprise if enterprise_entitled => Some(module.clone()),
             ModuleTier::Enterprise => None,
+            _ => None,
         }
     }
 
@@ -85,7 +86,6 @@ mod tests {
     use vulnera_contract::domain::module::ModuleResultMetadata;
     use vulnera_contract::domain::module::{ModuleConfig, ModuleExecutionError, ModuleResult};
 
-    /// Minimal stub for testing registry behavior
     struct StubModule(ModuleType);
 
     #[async_trait]
@@ -97,13 +97,12 @@ mod tests {
             &self,
             _config: &ModuleConfig,
         ) -> Result<ModuleResult, ModuleExecutionError> {
-            Ok(ModuleResult {
-                job_id: uuid::Uuid::nil(),
-                module_type: self.0.clone(),
-                findings: vec![],
-                metadata: ModuleResultMetadata::default(),
-                error: None,
-            })
+            Ok(ModuleResult::success(
+                uuid::Uuid::nil(),
+                self.0.clone(),
+                vec![],
+                ModuleResultMetadata::default(),
+            ))
         }
     }
 

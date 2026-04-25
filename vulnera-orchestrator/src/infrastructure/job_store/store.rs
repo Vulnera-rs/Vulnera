@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use vulnera_contract::application::vulnerability::services::CacheService;
-use vulnera_contract::infrastructure::cache::DragonflyCache;
+use vulnera_contract::infrastructure::cache::CacheBackend;
+use vulnera_infrastructure::infrastructure::cache::dragonfly_cache::DragonflyCache;
 
 use super::snapshot::JobSnapshot;
 
@@ -85,9 +85,9 @@ impl JobStore for DragonflyJobStore {
     async fn delete_snapshot(&self, job_id: Uuid) -> Result<(), JobStoreError> {
         let key = Self::job_key(job_id);
 
-        // Use CacheService invalidate method
+        // Use CacheBackend delete method
         self.cache
-            .invalidate(&key)
+            .delete(&key)
             .await
             .map_err(|e| JobStoreError::Cache(e.to_string()))?;
 

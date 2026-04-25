@@ -1,4 +1,4 @@
-//! Job Workflow — centralised state-machine controller for analysis jobs.
+//! Job Workflow - centralised state-machine controller for analysis jobs.
 //!
 //! Every status transition goes through [`JobWorkflow`] which validates the
 //! transition against the state machine defined on [`JobStatus`], persists a
