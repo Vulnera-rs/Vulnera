@@ -62,7 +62,7 @@ If you'd like to financially support the project, you can do so via [GitHub Spon
 
 - **Format and lint** before every commit: `cargo fmt --all && cargo clippy --workspace`
 - **Add tests** for all new features and bug fixes. Target **80%+ test coverage**.
-- **Keep changes focused** — one logical change per PR. Open draft PRs early for feedback.
+- **Keep changes focused** - one logical change per PR. Open draft PRs early for feedback.
 - **Run the full test suite** before marking a PR as ready: `cargo nextest run --workspace`
 
 ## Architecture Guidelines
@@ -76,7 +76,7 @@ Vulnera follows Domain-Driven Design (DDD) with strict layering:
 | `infrastructure/` | DB queries, HTTP clients, cache | Yes |
 | `presentation/` | Axum controllers, DTOs, OpenAPI | Yes |
 
-- **Never** instantiate services inside crate internals — wire everything in `src/app.rs` (composition root).
+- **Never** instantiate services inside crate internals - wire everything in `src/app.rs` (composition root).
 - **Traits** are prefixed with `I` (e.g., `IUserRepository`).
 - **Error handling:** `thiserror` for libraries, `anyhow` for application wiring. Never `.unwrap()` in production code.
 

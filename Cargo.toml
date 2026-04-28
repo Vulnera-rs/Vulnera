@@ -1,13 +1,3 @@
-[workspace]
-members = [
-    "vulnera-contract",
-    "vulnera-orchestrator",
-    "vulnera-sandbox",
-]
-exclude = ["vulnera-cli","advisors","adapter"]
-
-resolver = "2"
-
 [package]
 name = "vulnera-rust"
 version.workspace = true
@@ -26,16 +16,16 @@ path = "src/main.rs"
 [features]
 default = []
 
-
 [dependencies]
 vulnera-contract = { path = "vulnera-contract" }
-vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
+vulnera-infrastructure = { path = "vulnera-infrastructure" }
 vulnera-orchestrator = { path = "vulnera-orchestrator" }
-vulnera-sast = { git = "https://github.com/Vulnera-rs/vulnera-sast.git", branch = "main" }
-vulnera-secrets = { git = "https://github.com/Vulnera-rs/vulnera-secrets.git", branch = "main" }
-vulnera-api = { git = "https://github.com/Vulnera-rs/vulnera-api.git", branch = "main" }
-vulnera-llm = { git = "https://github.com/Vulnera-rs/vulnera-llm.git", branch = "main" }
 vulnera-sandbox = { path = "vulnera-sandbox" }
+vulnera-sast = { path = "vulnera-sast" }
+vulnera-secrets = { path = "vulnera-secrets" }
+vulnera-api = { path = "vulnera-api" }
+vulnera-deps = { path = "vulnera-deps" }
+vulnera-llm = { path = "vulnera-llm" }
 
 # Web framework
 axum = { workspace = true }
@@ -55,27 +45,24 @@ tracing = { workspace = true }
 # Database
 sqlx = { workspace = true }
 
-# Serialization (needed for CLI JSON output)
+# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# GitHub API
-octocrab = { workspace = true }
-
-# Time handling (for quota UTC reset)
+# Time handling
 chrono = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
 
-# Hashing (for machine ID in quota)
+# Hashing
 sha2 = { workspace = true }
 hex = { workspace = true }
 
 # File system traversal
 walkdir = { workspace = true }
 
-# Base64 encoding (for encrypted credentials)
+# Base64 encoding
 base64 = { workspace = true }
 
 # TLS/Crypto
@@ -93,6 +80,19 @@ console = { workspace = true, optional = true }
 hostname = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 tempfile.workspace = true
+
+[workspace]
+members = [
+    "vulnera-contract",
+    "vulnera-infrastructure",
+    "vulnera-orchestrator",
+    "vulnera-sandbox",
+    "vulnera-api",
+    "vulnera-deps",
+    "vulnera-llm",
+    "vulnera-sast",
+    "vulnera-secrets",
+]
 
 [workspace.package]
 version = "0.5.1"
@@ -244,12 +244,6 @@ tempfile = "3.25.0"
 mockito = "1.7.1"
 tokio-test = "0.4.5"
 serial_test = "3.2.0"
-
-# Redirect transitive git deps (from standalone module repos) to local path
-# to avoid duplicate crate resolution within the workspace.
-[patch."https://github.com/Vulnera-rs/vulnera.git"]
-vulnera-contract = { path = "vulnera-contract" }
-
 
 [workspace.lints.clippy]
 type_complexity = "allow"

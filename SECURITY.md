@@ -68,11 +68,11 @@ Vulnera follows defense-in-depth principles across every layer:
 
 ### Sandbox Isolation
 
-Analysis modules execute inside sandboxed environments. On Linux 5.13+, Landlock filesystem restrictions and seccomp syscall filtering are applied before any analysis code runs. The sandbox policy is a first-class typed domain concept — not an optional wrapper. `fail_closed` mode is available for environments that must hard-fail rather than degrade gracefully.
+Analysis modules execute inside sandboxed environments. On Linux 5.13+, Landlock filesystem restrictions and seccomp syscall filtering are applied before any analysis code runs. The sandbox policy is a first-class typed domain concept - not an optional wrapper. `fail_closed` mode is available for environments that must hard-fail rather than degrade gracefully.
 
 ### Input Validation
 
-All user-supplied input is validated at the presentation layer before reaching domain logic. SQL queries use SQLx compile-time `query!` macros — no string-interpolated SQL in production paths. This is enforced by a CI audit script that rejects non-macro `query()` calls.
+All user-supplied input is validated at the presentation layer before reaching domain logic. SQL queries use SQLx compile-time `query!` macros - no string-interpolated SQL in production paths. This is enforced by a CI audit script that rejects non-macro `query()` calls.
 
 ### Authentication & Authorization
 
@@ -84,7 +84,7 @@ All user-supplied input is validated at the presentation layer before reaching d
 
 ### Dependency Auditing
 
-Production dependencies are audited with `cargo audit`. The CI pipeline runs `cargo clippy` with `clippy::unwrap_used`, `clippy::expect_used`, and `clippy::panic` set to deny — panics in production code paths are blocked before merge.
+Production dependencies are audited with `cargo audit`. The CI pipeline runs `cargo clippy` with `clippy::unwrap_used`, `clippy::expect_used`, and `clippy::panic` set to deny - panics in production code paths are blocked before merge.
 
 ### Secrets in Logs
 
