@@ -43,7 +43,7 @@ git config core.hooksPath .githooks
 | Crate                  | README                    | Docs index                    | Changelog                   |
 | ---------------------- | ------------------------- | ----------------------------- | --------------------------- |
 | Root server            | `/README.md`              | `/docs/src/README.md`         | `/CHANGELOG.md`             |
-| `adapter`              | `/adapter/README.md`      | —                             | —                           |
+| `adapter`              | `/adapter/README.md`      | -                             | -                           |
 | `advisors`             | `/advisors/README.md`     | `/advisors/docs/README.md`    | `/advisors/CHANGELOG.md`    |
 | `vulnera-cli`          | `/vulnera-cli/README.md`  | `/vulnera-cli/docs/README.md` | `/vulnera-cli/CHANGELOG.md` |
 | `vulnera-sast`         | `/vulnera-sast/README.md` | -                             | -                           |

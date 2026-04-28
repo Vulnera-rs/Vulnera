@@ -1055,7 +1055,7 @@ curl -X GET http://localhost:3000/api/v1/analyze \
     - `most_up_to_date_safe` (newest safe version available)
   - Adds `next_safe_minor_within_current_major` hint (next safe version within current major).
   - Upgrade impact classification for each recommendation:
-    - `nearest_impact` and `most_up_to_date_impact` — values: `major`/`minor`/`patch`/`unknown`.
+    - `nearest_impact` and `most_up_to_date_impact` - values: `major`/`minor`/`patch`/`unknown`.
   - Prerelease exclusion switch via env:
     - `VULNERA__RECOMMENDATIONS__EXCLUDE_PRERELEASES` (default: `false`).
   - Cap the number of version queries per request:

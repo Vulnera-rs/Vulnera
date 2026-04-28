@@ -5,30 +5,14 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use vulnera_contract::domain::auth::value_objects::{ApiKeyId, Email, UserId};
 use vulnera_contract::domain::module::{Finding, ModuleResult};
-use vulnera_contract::domain::organization::value_objects::OrganizationId;
 pub use vulnera_contract::domain::project::{Project, ProjectMetadata};
 
 use super::value_objects::{AnalysisDepth, JobStatus, JobTransition, JobTransitionError};
 
-/// How the job request was authenticated
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum JobAuthStrategy {
-    Jwt,
-    ApiKey,
-}
-
 /// Optional metadata describing who triggered the job
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct JobInvocationContext {
-    pub user_id: Option<UserId>,
-    pub email: Option<Email>,
-    pub auth_strategy: Option<JobAuthStrategy>,
-    pub api_key_id: Option<ApiKeyId>,
-    /// Organization context for the job (if user is part of an organization)
-    pub organization_id: Option<OrganizationId>,
     /// Whether this job was triggered via master key (skip analytics)
     #[serde(default)]
     pub is_master_key: bool,
@@ -174,7 +158,7 @@ pub struct TypeBreakdown {
 }
 
 /// Findings grouped by type
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FindingsByType {
     pub sast: Vec<Finding>,
     pub secrets: Vec<Finding>,

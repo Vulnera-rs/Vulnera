@@ -2,6 +2,7 @@
 
 use axum::{extract::State, http::StatusCode, response::Json};
 use chrono::Utc;
+use tokio::time::{Duration, timeout};
 
 use crate::presentation::controllers::OrchestratorState;
 use crate::presentation::models::HealthResponse;
@@ -12,16 +13,67 @@ use crate::presentation::models::HealthResponse;
     path = "/health",
     tag = "health",
     responses(
-        (status = 200, description = "Service is healthy", body = HealthResponse)
+        (status = 200, description = "Service is healthy", body = HealthResponse),
+        (status = 503, description = "Service unhealthy", body = HealthResponse)
     )
 )]
-pub async fn health_check(State(_app_state): State<OrchestratorState>) -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: "healthy".to_string(),
+pub async fn health_check(
+    State(app_state): State<OrchestratorState>,
+) -> (StatusCode, Json<HealthResponse>) {
+    let probe_timeout = Duration::from_secs(3);
+    let mut db_healthy = false;
+    let mut cache_healthy = false;
+
+    // Probe database connectivity
+    if let Ok(Ok(_)) = timeout(probe_timeout, async {
+        let mut conn = app_state
+            .orchestrator
+            .db_pool
+            .acquire()
+            .await
+            .map_err(drop)?;
+        sqlx::query("SELECT 1")
+            .execute(&mut *conn)
+            .await
+            .map_err(drop)
+    })
+    .await
+    {
+        db_healthy = true;
+    }
+
+    // Probe cache connectivity
+    if let Ok(Ok(())) = timeout(probe_timeout, app_state.orchestrator.cache_service.ping()).await {
+        cache_healthy = true;
+    }
+
+    let all_healthy = db_healthy && cache_healthy;
+
+    let details = serde_json::json!({
+        "dependencies": {
+            "database": if db_healthy { "healthy" } else { "unhealthy" },
+            "cache": if cache_healthy { "healthy" } else { "unhealthy" },
+        }
+    });
+
+    let response = HealthResponse {
+        status: if all_healthy {
+            "healthy".to_string()
+        } else {
+            "degraded".to_string()
+        },
         version: env!("CARGO_PKG_VERSION").to_string(),
         timestamp: Utc::now(),
-        details: None,
-    })
+        details: Some(details),
+    };
+
+    let status = if all_healthy {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (status, Json(response))
 }
 
 /// Prometheus-style metrics endpoint
@@ -30,7 +82,7 @@ pub async fn health_check(State(_app_state): State<OrchestratorState>) -> Json<H
     path = "/metrics",
     tag = "health",
     responses(
-        (status = 200, description = "Prometheus metrics", content_type = "text/plain")
+        (status = 200, description = "metrics", content_type = "text/plain")
     )
 )]
 pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<String, StatusCode> {
@@ -45,12 +97,7 @@ pub async fn metrics(State(app_state): State<OrchestratorState>) -> Result<Strin
     ));
 
     // Add cache metrics if available
-    if let Ok(cache_stats) = app_state
-        .infrastructure
-        .cache_service
-        .get_cache_statistics()
-        .await
-    {
+    if let Ok(cache_stats) = app_state.orchestrator.cache_service.get_statistics().await {
         metrics.push_str("# HELP vulnera_cache_hits_total Total number of cache hits\n");
         metrics.push_str("# TYPE vulnera_cache_hits_total counter\n");
         metrics.push_str(&format!("vulnera_cache_hits_total {}\n", cache_stats.hits));

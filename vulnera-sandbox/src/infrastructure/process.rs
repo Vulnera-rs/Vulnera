@@ -1,54 +1,57 @@
-//! Process-based sandbox fallback
-//!
-//! Uses resource limits for sandboxing on older Linux
-//! systems that don't support Landlock.
-
 use async_trait::async_trait;
+use nix::sched::{self, CloneFlags};
 use nix::sys::resource::{Resource, setrlimit};
-use tracing::debug;
+use tracing::{debug, info, warn};
 
+use super::seccomp;
 use crate::domain::policy::SandboxPolicy;
 use crate::domain::traits::{SandboxBackend, SandboxError, SandboxResult};
 
-/// Process-based sandbox using resource limits
-///
-/// This is a fallback for systems without Landlock support.
-/// Less secure than Landlock but still provides useful isolation.
 #[derive(Debug, Default)]
 pub struct ProcessSandbox;
 
 impl ProcessSandbox {
-    /// Create a new process sandbox
     pub fn new() -> Self {
         Self
     }
 
-    /// Apply resource limits to the current process
     fn apply_resource_limits(policy: &SandboxPolicy) -> SandboxResult<()> {
-        // Memory limit (both virtual and resident)
-        setrlimit(Resource::RLIMIT_AS, policy.max_memory, policy.max_memory).map_err(|e| {
-            SandboxError::CreationFailed(format!("Failed to set memory limit: {}", e))
-        })?;
-
-        // CPU time limit (soft limit = timeout, hard limit = timeout + 5s)
+        setrlimit(Resource::RLIMIT_AS, policy.max_memory, policy.max_memory)
+            .map_err(|e| SandboxError::CreationFailed(format!("RLIMIT_AS: {e}")))?;
         let cpu_secs = policy.timeout.as_secs();
         setrlimit(Resource::RLIMIT_CPU, cpu_secs, cpu_secs + 5)
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to set CPU limit: {}", e)))?;
-
-        // Disable core dumps
-        setrlimit(Resource::RLIMIT_CORE, 0, 0).map_err(|e| {
-            SandboxError::CreationFailed(format!("Failed to disable core dumps: {}", e))
-        })?;
-
-        // Limit file descriptors
+            .map_err(|e| SandboxError::CreationFailed(format!("RLIMIT_CPU: {e}")))?;
+        setrlimit(Resource::RLIMIT_CORE, 0, 0)
+            .map_err(|e| SandboxError::CreationFailed(format!("RLIMIT_CORE: {e}")))?;
         setrlimit(Resource::RLIMIT_NOFILE, 256, 512)
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to limit fds: {}", e)))?;
-
-        // Limit number of processes/threads
+            .map_err(|e| SandboxError::CreationFailed(format!("RLIMIT_NOFILE: {e}")))?;
         setrlimit(Resource::RLIMIT_NPROC, 32, 64)
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to limit procs: {}", e)))?;
+            .map_err(|e| SandboxError::CreationFailed(format!("RLIMIT_NPROC: {e}")))?;
+        debug!("Process resource limits applied");
+        Ok(())
+    }
 
-        debug!("Resource limits applied successfully");
+    fn apply_namespaces(policy: &SandboxPolicy) -> SandboxResult<()> {
+        let mut flags = CloneFlags::empty();
+        flags.insert(CloneFlags::CLONE_NEWNET);
+        if policy.allowed_ports.is_empty() {
+            flags.insert(CloneFlags::CLONE_NEWNS);
+            flags.insert(CloneFlags::CLONE_NEWPID);
+        }
+        if policy.max_memory > 0 {
+            flags.insert(CloneFlags::CLONE_NEWIPC);
+        }
+        match sched::unshare(flags) {
+            Ok(()) => {
+                debug!("Namespaces created: {:?}", flags);
+                if flags.contains(CloneFlags::CLONE_NEWNET) {
+                    info!("Network namespace isolated");
+                }
+            }
+            Err(e) => {
+                warn!("Namespace creation failed (non-fatal): {e}");
+            }
+        }
         Ok(())
     }
 }
@@ -60,12 +63,23 @@ impl SandboxBackend for ProcessSandbox {
     }
 
     fn is_available(&self) -> bool {
-        // Process sandboxing is always available on Unix-like systems
         cfg!(unix)
     }
 
     async fn apply_restrictions(&self, policy: &SandboxPolicy) -> SandboxResult<()> {
-        Self::apply_resource_limits(policy)
+        Self::apply_resource_limits(policy)?;
+
+        if let Err(e) = Self::apply_namespaces(policy) {
+            warn!("Namespace isolation failed (continuing with rlimits): {e}");
+        }
+
+        let seccomp_config = seccomp::create_analysis_config(policy);
+        match seccomp::apply_seccomp_filter(&seccomp_config) {
+            Ok(()) => info!("Process sandbox: resource limits + namespaces + seccomp applied"),
+            Err(e) => warn!("Seccomp filter failed (continuing with rlimits): {e}"),
+        }
+
+        Ok(())
     }
 }
 
@@ -78,5 +92,15 @@ mod tests {
         let sandbox = ProcessSandbox::new();
         assert!(sandbox.is_available());
         assert_eq!(sandbox.name(), "process");
+    }
+
+    #[tokio::test]
+    async fn test_process_sandbox_restrictions() {
+        let sandbox = ProcessSandbox::new();
+        let policy = SandboxPolicy::default()
+            .with_memory_mb(4096)
+            .with_timeout_secs(30);
+        let result = sandbox.apply_restrictions(&policy).await;
+        assert!(result.is_ok());
     }
 }

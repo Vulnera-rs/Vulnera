@@ -7,9 +7,7 @@ use sha2::Sha256;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use vulnera_contract::application::analytics::{AnalyticsRecorder, FindingsSummary};
-use vulnera_contract::domain::organization::value_objects::StatsSubject;
-use vulnera_contract::infrastructure::cache::CacheServiceImpl;
+use vulnera_infrastructure::infrastructure::cache::dragonfly_cache::DragonflyCache;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
 use crate::application::workflow::{JobWorkflow, WorkflowError};
@@ -34,22 +32,19 @@ pub struct QueuedAnalysisJob {
 /// Handle that allows HTTP handlers to push jobs into the background worker queue.
 #[derive(Clone)]
 pub struct JobQueueHandle {
-    cache_service: Arc<CacheServiceImpl>,
+    cache: Arc<DragonflyCache>,
 }
 
 impl JobQueueHandle {
-    pub fn new(cache_service: Arc<CacheServiceImpl>) -> Self {
-        Self { cache_service }
+    pub fn new(cache: Arc<DragonflyCache>) -> Self {
+        Self { cache }
     }
 
     pub async fn enqueue(&self, job: QueuedAnalysisJob) -> Result<(), JobQueueError> {
-        self.cache_service
-            .lpush(JOB_QUEUE_KEY, &job)
-            .await
-            .map_err(|e| {
-                error!("Failed to enqueue job: {}", e);
-                JobQueueError::EnqueueFailed(e.to_string())
-            })
+        self.cache.lpush(JOB_QUEUE_KEY, &job).await.map_err(|e| {
+            error!("Failed to enqueue job: {}", e);
+            JobQueueError::EnqueueFailed(e.to_string())
+        })
     }
 }
 
@@ -110,15 +105,14 @@ pub struct JobWorkerContext {
     pub workflow: Arc<JobWorkflow>,
     pub job_store: Arc<dyn JobStore>,
     pub git_service: Arc<GitService>,
-    pub cache_service: Arc<CacheServiceImpl>,
-    pub analytics_recorder: Arc<dyn AnalyticsRecorder>,
+    pub cache: Arc<DragonflyCache>,
 }
 
 /// Spawn a worker pool that consumes queued jobs and processes them in the background.
 pub fn spawn_job_worker_pool(context: JobWorkerContext, max_concurrent_jobs: usize) {
     let concurrency = max_concurrent_jobs.max(1);
     let semaphore = Arc::new(Semaphore::new(concurrency));
-    let cache_service = context.cache_service.clone();
+    let cache = context.cache.clone();
 
     tokio::spawn(async move {
         info!("Job worker pool started with concurrency: {}", concurrency);
@@ -135,8 +129,8 @@ pub fn spawn_job_worker_pool(context: JobWorkerContext, max_concurrent_jobs: usi
 
             // Poll for a job with a timeout (e.g., 5 seconds) to allow graceful shutdown checks if needed
             // Using a loop here to keep trying until we get a job or shut down
-            let job_opt = match cache_service
-                .brpop::<QueuedAnalysisJob>(JOB_QUEUE_KEY, 5.0)
+            let job_opt = match cache
+                .brpop::<QueuedAnalysisJob>(JOB_QUEUE_KEY, Duration::from_secs(5))
                 .await
             {
                 Ok(job) => job,
@@ -173,33 +167,6 @@ async fn process_job(
     let job_id = payload.job.job_id;
 
     info!(job_id = %job_id, "Processing analysis job");
-
-    // Determine analytics subject from invocation context
-    let analytics_subject = payload.invocation_context.as_ref().and_then(|inv| {
-        if inv.is_master_key {
-            return None;
-        }
-        if let Some(org_id) = inv.organization_id {
-            Some(StatsSubject::Organization(org_id))
-        } else {
-            inv.user_id.map(StatsSubject::User)
-        }
-    });
-
-    let user_id = payload
-        .invocation_context
-        .as_ref()
-        .and_then(|inv| inv.user_id);
-
-    // Record scan started event (if we have analytics context)
-    if let Some(ref subject) = analytics_subject
-        && let Err(e) = ctx
-            .analytics_recorder
-            .on_scan_started(subject.clone(), user_id, job_id)
-            .await
-    {
-        warn!(job_id = %job_id, error = %e, "Failed to record scan started analytics");
-    }
 
     // ── Workflow: Pending → Running ──────────────────────────────────
     if let Err(e) = ctx
@@ -244,29 +211,6 @@ async fn process_job(
                 return Err(JobProcessingError::Workflow(e));
             }
 
-            // Record scan completed with findings breakdown
-            if let Some(ref subject) = analytics_subject {
-                let severity = &report.summary.by_severity;
-                if let Err(e) = ctx
-                    .analytics_recorder
-                    .on_scan_completed(
-                        subject.clone(),
-                        user_id,
-                        job_id,
-                        FindingsSummary {
-                            critical: severity.critical as u32,
-                            high: severity.high as u32,
-                            medium: severity.medium as u32,
-                            low: severity.low as u32,
-                            info: severity.info as u32,
-                        },
-                    )
-                    .await
-                {
-                    warn!(job_id = %job_id, error = %e, "Failed to record scan completed analytics");
-                }
-            }
-
             if let Some(callback_url) = payload.callback_url.as_deref() {
                 let webhook_payload = WebhookPayload {
                     job_id,
@@ -302,16 +246,6 @@ async fn process_job(
             {
                 error!(job_id = %job_id, error = %e, "Failed to transition job to Failed");
                 return Err(JobProcessingError::Workflow(e));
-            }
-
-            // Record scan failed (with zero findings)
-            if let Some(ref subject) = analytics_subject
-                && let Err(e) = ctx
-                    .analytics_recorder
-                    .on_scan_completed(subject.clone(), user_id, job_id, FindingsSummary::default())
-                    .await
-            {
-                warn!(job_id = %job_id, error = %e, "Failed to record scan failed analytics");
             }
 
             // Deliver webhook for failed jobs too

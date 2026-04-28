@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio::{net::TcpListener, signal};
 use tokio_util::sync::CancellationToken;
 
-use vulnera_contract::config::validation::Validate;
+use vulnera_infrastructure::config::validation::Validate;
 use vulnera_rust::{Config, create_app, init_tracing};
 
 #[tokio::main]

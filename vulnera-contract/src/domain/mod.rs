@@ -1,22 +1,10 @@
-//! Domain Layer - Core business logic and entities
+//! Domain Layer - Pure analysis contract types
 //!
-//! This module contains the core domain entities, value objects, and domain services
-//! that represent the business logic of vulnerability analysis.
+//! This module defines the shared types that form the interface contract
+//! between the orchestrator and all analysis modules.
 
-pub mod auth;
 pub mod module;
-pub mod organization;
 pub mod project;
-pub mod vulnerability;
 
-// Re-export common types from both modules
-#[allow(ambiguous_glob_reexports)]
-pub use auth::*;
-#[allow(ambiguous_glob_reexports)]
 pub use module::*;
-#[allow(ambiguous_glob_reexports)]
-pub use organization::*;
-#[allow(ambiguous_glob_reexports)]
 pub use project::*;
-#[allow(ambiguous_glob_reexports)]
-pub use vulnerability::*;

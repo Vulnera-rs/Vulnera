@@ -1,32 +1,43 @@
-# vulnera-core
+# vulnera-contract
 
-Core domain models, shared traits, and infrastructure abstractions for the Vulnera security analysis platform.
+Pure analysis contract crate for the Vulnera platform.
 
 ## Purpose
 
-This crate provides the foundational layer used by all other Vulnera modules:
+This crate defines the **shared interface contract** between the Vulnera orchestrator and all analysis modules (SAST, secrets, API security, dependency scanning, and future submodules). It is the only dependency that modules need to implement the `AnalysisModule` trait.
 
-- **Domain models** - Entities, value objects, and domain events
-- **Shared traits** - `AnalysisModule`, `IRepository`, `ICache`, `IAuthenticator`
-- **Configuration** - Strongly-typed config with 17 sections
-- **Infrastructure abstractions** - Database, cache, HTTP client interfaces
+- **Plugin contract** - `AnalysisModule` trait that every analysis module implements
+- **Finding data model** - `Finding`, `FindingType`, `FindingSeverity`, `FindingConfidence`, `Location`
+- **Module envelope** - `ModuleConfig` / `ModuleResult` / `ModuleExecutionError`
+- **Module identity** - `ModuleType`, `ModuleTier` (Community / Enterprise)
+- **Project metadata** - `Project`, `SourceType`, `ProjectMetadata`
 
-## Key Components
+## Architecture
 
-| Module | Purpose |
-|--------|---------|
-| `domain/` | Pure types with zero side effects |
-| `application/` | Shared use cases and services |
-| `infrastructure/` | Concrete implementations (SQLx, Dragonfly, etc.) |
-| `config/` | Configuration structs and validation |
+```
+vulnera-contract/
+└── domain/
+    ├── module/       # AnalysisModule trait + Finding types + Module types
+    └── project/      # Project metadata for prepare_config
+```
+
+## Stability
+
+All public enums are `#[non_exhaustive]`. Adding variants or optional fields
+(with `#[serde(default)]`) is a semver-minor bump. Removing or changing
+existing variants is a semver-major bump.
 
 ## Usage
 
-This crate is not typically used directly by end users. It's a dependency of all other Vulnera crates.
-
 ```toml
 [dependencies]
-vulnera-core = { path = "../vulnera-core" }
+vulnera-contract = { path = "../vulnera-contract" }
+```
+
+## Build
+
+```
+cargo check -p vulnera-contract
 ```
 
 ## License

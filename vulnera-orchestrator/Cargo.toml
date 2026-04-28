@@ -11,8 +11,7 @@ categories.workspace = true
 
 [dependencies]
 vulnera-contract = { path = "../vulnera-contract" }
-vulnera-deps = { path = "../vulnera-deps" }
-vulnera-llm = { path = "../vulnera-llm" }
+vulnera-infrastructure = { path = "../vulnera-infrastructure" }
 vulnera-sandbox = { path = "../vulnera-sandbox" }
 sqlx = { workspace = true }
 
@@ -23,56 +22,22 @@ tower-http = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
-async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-# OpenAPI documentation
-utoipa = { workspace = true }
-utoipa-swagger-ui = { workspace = true }
-
-# Error handling
-thiserror = { workspace = true }
-
-# Logging
-tracing = { workspace = true }
-
-# Time handling
-chrono = { workspace = true }
-
-# UUID generation
+# UUID
 uuid = { workspace = true }
 
-# URL parsing
-url = { workspace = true }
-
-# HTTP client for webhook delivery
-reqwest = { workspace = true, features = ["json"] }
-
-# HMAC signatures for webhook verification
-hmac = { workspace = true }
-sha2 = { workspace = true }
-hex = { workspace = true }
-
-# Directory traversal
-walkdir = { workspace = true }
-git2 = { workspace = true }
-tempfile = { workspace = true }
-futures = { workspace = true }
-tokio-stream = { workspace = true }
-
-# AWS SDK for S3 bucket analysis
-aws-config = { workspace = true }
-aws-sdk-s3 = { workspace = true }
-aws-credential-types = { workspace = true }
-base64 = { workspace = true }
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tokio-test = { workspace = true }
 axum-test = { workspace = true }
-insta = { workspace = true }
-proptest = { workspace = true }
-rstest = { workspace = true }
-tempfile = { workspace = true }

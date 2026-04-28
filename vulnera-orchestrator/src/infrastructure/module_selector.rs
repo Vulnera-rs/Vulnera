@@ -44,6 +44,7 @@ impl RuleBasedModuleSelector {
         match module_type.tier() {
             ModuleTier::Community => true,
             ModuleTier::Enterprise => self.enterprise_entitled,
+            _ => false,
         }
     }
 }

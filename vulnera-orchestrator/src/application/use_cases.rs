@@ -17,7 +17,7 @@ use crate::domain::entities::{
 use crate::domain::services::{ModuleSelector, ProjectDetectionError, ProjectDetector};
 use crate::domain::value_objects::{AnalysisDepth, SourceType};
 use crate::infrastructure::ModuleRegistry;
-use vulnera_contract::config::{SandboxConfig, SandboxFailureMode};
+use vulnera_sandbox::config::{SandboxConfig, SandboxFailureMode};
 use vulnera_sandbox::{
     SandboxExecutor, SandboxPolicy, SandboxPolicyProfile, SandboxSelector, calculate_limits,
 };
@@ -326,13 +326,11 @@ impl ExecuteAnalysisJobUseCase {
                         }
                         Err(e) => {
                             // Create error result
-                            let mut error_result = ModuleResult {
-                                job_id: config.job_id,
-                                module_type: module_type_clone.clone(),
-                                findings: vec![],
-                                metadata: Default::default(),
-                                error: Some(e.to_string()),
-                            };
+                            let mut error_result = ModuleResult::failure(
+                                config.job_id,
+                                module_type_clone.clone(),
+                                e.to_string(),
+                            );
                             error_result
                                 .metadata
                                 .additional_info
@@ -426,13 +424,11 @@ impl ExecuteAnalysisJobUseCase {
                     module = ?module_type,
                     "Creating error result for module not found in registry"
                 );
-                results.push(ModuleResult {
-                    job_id: job.job_id,
-                    module_type: module_type.clone(),
-                    findings: vec![],
-                    metadata: Default::default(),
-                    error: Some("Module not found in registry".to_string()),
-                });
+                results.push(ModuleResult::failure(
+                    job.job_id,
+                    module_type.clone(),
+                    "Module not found in registry",
+                ));
             }
         }
 
@@ -615,6 +611,7 @@ impl AggregateResultsUseCase {
                 FindingSeverity::Medium => summary.by_severity.medium += 1,
                 FindingSeverity::Low => summary.by_severity.low += 1,
                 FindingSeverity::Info => summary.by_severity.info += 1,
+                _ => {}
             }
         }
 
