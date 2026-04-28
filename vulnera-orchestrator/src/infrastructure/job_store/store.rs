@@ -4,7 +4,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use vulnera_contract::infrastructure::cache::CacheBackend;
-use vulnera_infrastructure::infrastructure::cache::dragonfly_cache::DragonflyCache;
+use vulnera_infrastructure::cache::DragonflyCache;
 
 use super::snapshot::JobSnapshot;
 

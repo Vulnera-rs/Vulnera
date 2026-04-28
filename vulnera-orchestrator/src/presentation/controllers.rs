@@ -8,7 +8,7 @@ use std::time::Instant;
 
 use axum::{extract::State, response::Json};
 
-use vulnera_infrastructure::infrastructure::cache::dragonfly_cache::DragonflyCache;
+use vulnera_infrastructure::cache::DragonflyCache;
 
 use crate::application::use_cases::{
     AggregateResultsUseCase, CreateAnalysisJobUseCase, ExecuteAnalysisJobUseCase,

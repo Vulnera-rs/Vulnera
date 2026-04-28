@@ -7,7 +7,7 @@ use sha2::Sha256;
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use vulnera_infrastructure::infrastructure::cache::dragonfly_cache::DragonflyCache;
+use vulnera_infrastructure::cache::DragonflyCache;
 
 use crate::application::use_cases::{AggregateResultsUseCase, ExecuteAnalysisJobUseCase};
 use crate::application::workflow::{JobWorkflow, WorkflowError};

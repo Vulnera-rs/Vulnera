@@ -670,21 +670,14 @@ impl AggregateResultsUseCase {
                 description: finding.description.clone(),
             });
 
-            if let Some(rec) = &finding.recommendation {
-                // Try to parse as JSON
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(rec) {
+            if let Some(rec) = &finding.recommendation
+                && let Ok(json) = serde_json::from_str::<serde_json::Value>(rec) {
                     if let Some(nearest) = json.get("nearest_safe").and_then(|v| v.as_str()) {
                         entry.recommendations.nearest_safe = Some(nearest.to_string());
                     }
                     if let Some(latest) = json.get("latest_safe").and_then(|v| v.as_str()) {
                         entry.recommendations.latest_safe = Some(latest.to_string());
                     }
-                } else {
-                    // Fallback for legacy or non-JSON recommendations
-                    if entry.recommendations.nearest_safe.is_none() {
-                        entry.recommendations.nearest_safe = Some(rec.clone());
-                    }
-                }
             }
         }
 
