@@ -74,9 +74,7 @@ anyhow = { workspace = true }
 # Hashing
 sha2 = { workspace = true }
 hex = { workspace = true }
-
-# File system traversal
-walkdir = { workspace = true }
+walkdir.workspace = true
 
 # Base64 encoding
 base64 = { workspace = true }
@@ -178,7 +176,7 @@ sqlx = { version = "0.8.6", features = [
 ] }
 
 # File and Version parsing
-toml = "0.9.8"
+toml = "1.1"
 serde_yml = "0.0.12"
 quick-xml = "0.39.0"
 regex = "1.12"
@@ -208,9 +206,6 @@ tree-sitter-go = "0.25.0"
 tree-sitter-c = "0.24.1"
 tree-sitter-cpp = "0.23.4"
 globset = "0.4"
-oxc_allocator = "0.124.0"
-oxc_parser = "0.124.0"
-oxc_span = "0.124.0"
 
 # Serialization (binary)
 rkyv = { version = "0.8", features = ["alloc", "bytecheck"] }
@@ -225,7 +220,7 @@ bytes = "1.11.0"
 clap = { version = "4.5", features = ["derive", "env", "color"] }
 dialoguer = { version = "0.12.0", features = ["password"] }
 comfy-table = "7.2"
-keyring = "3.6"
+keyring = "4.0"
 aes-gcm = "0.10"
 indicatif = { version = "0.18.3", features = ["rayon"] }
 directories = "6.0.0"
