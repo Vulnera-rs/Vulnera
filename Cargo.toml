@@ -1,3 +1,19 @@
+[workspace]
+members = [
+    "vulnera-contract",
+    "vulnera-infrastructure",
+    "vulnera-orchestrator",
+    "vulnera-sandbox",
+    "vulnera-api",
+    "vulnera-deps",
+    "vulnera-llm",
+    "vulnera-sast",
+    "vulnera-secrets",
+]
+exclude = ["vulnera-cli","advisors","adapter"]
+
+resolver = "2"
+
 [package]
 name = "vulnera-rust"
 version.workspace = true
@@ -80,19 +96,6 @@ console = { workspace = true, optional = true }
 hostname = { workspace = true, optional = true }
 dirs = { workspace = true, optional = true }
 tempfile.workspace = true
-
-[workspace]
-members = [
-    "vulnera-contract",
-    "vulnera-infrastructure",
-    "vulnera-orchestrator",
-    "vulnera-sandbox",
-    "vulnera-api",
-    "vulnera-deps",
-    "vulnera-llm",
-    "vulnera-sast",
-    "vulnera-secrets",
-]
 
 [workspace.package]
 version = "0.5.1"

@@ -6667,7 +6667,78 @@ dependencies = [
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tracing-subscriber",
+<<<<<<< HEAD
  "url",
+||||||| c0ec060
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-json",
+ "utoipa",
+ "uuid",
+ "vulnera-advisor",
+ "wiremock",
+]
+
+[[package]]
+name = "vulnera-deps"
+version = "0.5.1"
+source = "git+https://github.com/Vulnera-rs/vulnera-deps.git?branch=main#bcd3eb3c1798d3ffad1aec197e595698fda06364"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "globset",
+ "once_cell",
+ "percent-encoding",
+ "petgraph 0.8.3",
+ "quick-xml",
+ "regex",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+=======
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-json",
+ "utoipa",
+ "uuid",
+ "vulnera-advisor",
+ "wiremock",
+]
+
+[[package]]
+name = "vulnera-deps"
+version = "0.5.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "criterion",
+ "futures",
+ "globset",
+ "once_cell",
+ "percent-encoding",
+ "petgraph 0.8.3",
+ "proptest",
+ "quick-xml",
+ "regex",
+ "rstest",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+>>>>>>> main
  "uuid",
  "vulnera-contract",
 ]
@@ -6684,7 +6755,13 @@ dependencies = [
  "mockall",
  "proptest",
  "regex",
+<<<<<<< HEAD
  "reqwest",
+||||||| c0ec060
+ "reqwest 0.13.2",
+=======
+ "reqwest 0.13.2",
+>>>>>>> main
  "rstest",
  "serde",
  "serde_json",
@@ -6693,7 +6770,11 @@ dependencies = [
  "tracing",
  "uuid",
  "vulnera-contract",
+<<<<<<< HEAD
  "vulnera-infrastructure",
+||||||| c0ec060
+=======
+>>>>>>> main
  "wiremock",
 ]
 
@@ -6865,7 +6946,13 @@ dependencies = [
  "once_cell",
  "proptest",
  "regex",
+<<<<<<< HEAD
  "reqwest",
+||||||| c0ec060
+ "reqwest 0.13.2",
+=======
+ "reqwest 0.13.2",
+>>>>>>> main
  "rstest",
  "serde",
  "serde_json",
