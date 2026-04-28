@@ -8080,16 +8080,20 @@ dependencies = [
 [[package]]
 name = "vulnera-api"
 version = "0.5.1"
-source = "git+https://github.com/Vulnera-rs/vulnera-api.git?branch=main#ef42194931c95e5ab2c969c11e98f71907103b38"
 dependencies = [
  "async-trait",
+ "futures",
+ "insta",
  "oas3",
  "regex",
+ "rstest",
  "serde",
  "serde_json",
  "serde_yml",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "tracing",
  "vulnera-contract",
 ]
@@ -8155,23 +8159,28 @@ dependencies = [
 [[package]]
 name = "vulnera-deps"
 version = "0.5.1"
-source = "git+https://github.com/Vulnera-rs/vulnera-deps.git?branch=main#bcd3eb3c1798d3ffad1aec197e595698fda06364"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "criterion",
+ "futures",
  "globset",
  "once_cell",
  "percent-encoding",
  "petgraph 0.8.3",
+ "proptest",
  "quick-xml",
  "regex",
+ "rstest",
  "semver",
  "serde",
  "serde_json",
  "serde_yml",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "uuid",
@@ -8181,21 +8190,25 @@ dependencies = [
 [[package]]
 name = "vulnera-llm"
 version = "0.5.1"
-source = "git+https://github.com/Vulnera-rs/vulnera-llm.git?branch=main#4520a8b80acf666d9140d11ffaddad4d6258ed52"
 dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
  "chrono",
  "futures",
+ "mockall",
+ "proptest",
  "regex",
  "reqwest 0.13.2",
+ "rstest",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-test",
  "tracing",
  "uuid",
  "vulnera-contract",
+ "wiremock",
 ]
 
 [[package]]
@@ -8314,22 +8327,25 @@ dependencies = [
 [[package]]
 name = "vulnera-sast"
 version = "0.5.1"
-source = "git+https://github.com/Vulnera-rs/vulnera-sast.git?branch=main#e6dbfbc04a00f4c8e56032b5ec014b2593523ab2"
 dependencies = [
  "async-trait",
+ "datatest-stable",
  "futures",
  "git2",
  "globset",
  "hex",
+ "insta",
  "moka",
  "once_cell",
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
  "proc-macro2",
+ "proptest",
  "quote",
  "regex",
  "rkyv",
+ "rstest",
  "serde",
  "serde_json",
  "serde_yml",
@@ -8339,6 +8355,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tree-sitter",
@@ -8357,22 +8374,27 @@ dependencies = [
 [[package]]
 name = "vulnera-secrets"
 version = "0.5.1"
-source = "git+https://github.com/Vulnera-rs/vulnera-secrets.git?branch=main#b2957a927e86bafa71f7dc218e4a9f9c44e7f2d0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "datatest-stable",
+ "futures",
  "git2",
  "globset",
  "hex",
  "once_cell",
+ "proptest",
  "regex",
  "reqwest 0.13.2",
+ "rstest",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-test",
  "toml 0.9.12+spec-1.1.0",
  "tracing",
  "tree-sitter",
@@ -8381,8 +8403,10 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "uuid",
  "vulnera-contract",
  "walkdir",
+ "wiremock",
 ]
 
 [[package]]

@@ -1,0 +1,15 @@
+[submodule "vulnera-sast"]
+	path = vulnera-sast
+	url = https://github.com/Vulnera-rs/vulnera-sast.git
+[submodule "vulnera-secrets"]
+	path = vulnera-secrets
+	url = https://github.com/Vulnera-rs/vulnera-secrets.git
+[submodule "vulnera-api"]
+	path = vulnera-api
+	url = https://github.com/Vulnera-rs/vulnera-api.git
+[submodule "vulnera-llm"]
+	path = vulnera-llm
+	url = https://github.com/Vulnera-rs/vulnera-llm.git
+[submodule "vulnera-deps"]
+	path = vulnera-deps
+	url = https://github.com/Vulnera-rs/vulnera-deps.git

@@ -3,6 +3,11 @@ members = [
     "vulnera-contract",
     "vulnera-orchestrator",
     "vulnera-sandbox",
+    "vulnera-sast",
+    "vulnera-secrets",
+    "vulnera-api",
+    "vulnera-llm",
+    "vulnera-deps",
 ]
 exclude = ["vulnera-cli","advisors","adapter"]
 
@@ -29,12 +34,12 @@ default = []
 
 [dependencies]
 vulnera-contract = { path = "vulnera-contract" }
-vulnera-deps = { git = "https://github.com/Vulnera-rs/vulnera-deps.git", branch = "main" }
+vulnera-deps = { path = "vulnera-deps" }
 vulnera-orchestrator = { path = "vulnera-orchestrator" }
-vulnera-sast = { git = "https://github.com/Vulnera-rs/vulnera-sast.git", branch = "main" }
-vulnera-secrets = { git = "https://github.com/Vulnera-rs/vulnera-secrets.git", branch = "main" }
-vulnera-api = { git = "https://github.com/Vulnera-rs/vulnera-api.git", branch = "main" }
-vulnera-llm = { git = "https://github.com/Vulnera-rs/vulnera-llm.git", branch = "main" }
+vulnera-sast = { path = "vulnera-sast" }
+vulnera-secrets = { path = "vulnera-secrets" }
+vulnera-api = { path = "vulnera-api" }
+vulnera-llm = { path = "vulnera-llm" }
 vulnera-sandbox = { path = "vulnera-sandbox" }
 
 # Web framework
